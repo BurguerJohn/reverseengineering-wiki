@@ -248,16 +248,36 @@ export async function verify(s: Services, caller: Caller, args: { target: string
 // ---- articles --------------------------------------------------------------------
 
 export async function editSection(s: Services, caller: Caller, args: {
-  title: string; section: string; body: string; base_revision: number; summary: string; reason?: string; create_if_missing?: boolean;
+  title: string; section: string; body?: string; replace?: Array<{ old: string; new: string }>; base_revision: number; summary: string; reason?: string; create_if_missing?: boolean;
 }) {
   const op = requireWriter(s, caller);
   const t = title(s, args.title, [...SUBJECTS, 'notes']);
-  assertClean([...scanText(args.body, 'article'), ...scanText(`${args.summary}\n${args.reason ?? ''}`, 'summary')]);
+  if ((args.body === undefined) === (args.replace === undefined)) {
+    throw new ToolError('BAD_REQUEST', 'Give either body (the whole new section) or replace (small changes: [{old, new}]), not both.');
+  }
   const page = await currentPage(s, t);
   if (!page) throw new ToolError('NOT_FOUND', `"${t}" does not exist. Use create_page.`);
 
   let sections = parseSections(page.content);
   const target = findSection(sections, args.section);
+  if (args.replace) {
+    // Small changes on the section as read returns it (Markdown); the rest stays as it is.
+    if (!target || target.level === 0) throw new ToolError('BAD_REQUEST', `replace works on an existing section other than the summary; for "${args.section}" send body.`);
+    let markdown = wikitextToMarkdown(target.body);
+    const problems: string[] = [];
+    for (const [i, r] of args.replace.entries()) {
+      const count = r.old ? markdown.split(r.old).length - 1 : 0;
+      if (count !== 1) {
+        problems.push(`replace[${i}].old ${count ? `occurs ${count} times: include more surrounding text` : 'was not found in the section (compare with read, which shows the Markdown)'}`);
+        continue;
+      }
+      markdown = markdown.replace(r.old, () => r.new);
+    }
+    if (problems.length) throw new ToolError('REPLACE_FAILED', `Nothing was changed. ${problems.join('; ')}.`, { problems });
+    args = { ...args, body: markdown };
+  }
+  const body = args.body!;
+  assertClean([...scanText(body, 'article'), ...scanText(`${args.summary}\n${args.reason ?? ''}`, 'summary')]);
   if (page.revid !== args.base_revision) {
     const base = await s.sessions.reader.getRevision(args.base_revision);
     if (!base || normalizeTitle(base.title) !== t) throw new ToolError('BAD_REQUEST', 'base_revision does not belong to this page.');
@@ -271,7 +291,7 @@ export async function editSection(s: Services, caller: Caller, args: {
   }
   if (!target && args.create_if_missing === false) throw new ToolError('NOT_FOUND', `No section "${args.section}".`);
 
-  const newBody = markdownToWikitext(args.body, { topLevel: target && target.level > 0 ? Math.min(target.level + 1, 6) : 3 });
+  const newBody = markdownToWikitext(body, { topLevel: target && target.level > 0 ? Math.min(target.level + 1, 6) : 3 });
   const oldBody = target ? (target.level === 0 ? target.text : target.body) : '';
   if (target && oldBody.trim().length > 200 && newBody.length < oldBody.trim().length * 0.7 && !args.reason) {
     throw new ToolError('REASON_REQUIRED', 'This removes more than 30% of the section. Resend with a reason (and evidence if you are correcting information).');
@@ -290,8 +310,13 @@ export async function editSection(s: Services, caller: Caller, args: {
   const edited = findSection(sections, heading);
   const words = edited ? blockWords(sections, edited.index) : 0;
   const splittable = edited && edited.level > 0 && !STANDARD_SECTIONS.has(headingKey(edited.heading));
+  // What changed in the section, in the Markdown agents read and write.
+  const changes = createTwoFilesPatch('before', 'after', `${wikitextToMarkdown(oldBody).trimEnd()}\n`, `${wikitextToMarkdown(newBody).trimEnd()}\n`, '', '', { context: 1 })
+    .split('\n').slice(2).join('\n');
   return result(s, t, r.newrevid, {
     section: heading, words, nochange: r.nochange || undefined, ...missingGeneralPages(s, newBody),
+    diff: op.dryRun ? undefined : changes,
+    revision_note: r.newrevid && r.newrevid !== page.revid + 1 ? 'Revision ids count the edits of the whole wiki, not of this page: other pages were edited in between.' : undefined,
     hint: splittable && words > TOPIC_SPLIT_WORDS
       ? `This section now has ${words} words. Move it to a topic subpage with split_section (title="${t}", section="${heading}"), which leaves a short summary and a link here.`
       : undefined,

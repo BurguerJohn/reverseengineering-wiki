@@ -26,7 +26,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.7.2';
+export const VERSION = '0.7.3';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -181,7 +181,8 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
   const note = !opts.includeWriteTools ? READ_ONLY_NOTE : opts.serverReview && caller.operator ? oauthNote(caller.operator.username, caller.operator.mode) : '';
   const server = new McpServer(
     { name: 'rewiki', version: VERSION },
-    { instructions: SERVER_INSTRUCTIONS + note, capabilities: { logging: {} } },
+    // The account note first: clients cut long instructions off at the end.
+    { instructions: note + SERVER_INSTRUCTIONS, capabilities: { logging: {} } },
   );
   const review: ServerReview | undefined = opts.serverReview ? { server } : undefined;
 
@@ -242,7 +243,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       max_tokens: z.number().int().min(200).max(20000).optional(),
     },
     annotations: READ,
-  }, handler((a: any) => read.read(s, a)));
+  }, handler((a: any) => read.read(s, a, caller.operator)));
 
   server.registerTool('related', {
     title: 'Navigate the subject graph',
@@ -381,11 +382,13 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('edit_section', {
     title: 'Edit one section',
-    description: 'Replace the body of one section (Markdown). Pass the revision you read as base_revision. Removing >30% needs a reason. Missing sections are created. When a section grows past ~1500 words the answer suggests split_section.',
+    description: 'Change one section (Markdown): the whole new body, or small changes with replace (each old text must occur exactly once in the section as read returns it), which is safer for fixing a sentence. Pass the revision you read as base_revision (revision ids count edits of the whole wiki). Removing >30% needs a reason. Missing sections are created. The answer shows the diff of the section. Link a section as [[Page#Section]]. Unverified claims are welcome when marked as such ("Unverified:") with how to test them. When a section grows past ~1500 words the answer suggests split_section.',
     inputSchema: { dry_run: DRY_RUN,
       title: z.string(),
       section: z.string().describe('Heading, or "Summary" for the lead'),
-      body: z.string().describe('New section body in Markdown (without the heading)'),
+      body: z.string().optional().describe('New section body in Markdown (without the heading); or use replace'),
+      replace: z.array(z.object({ old: z.string().min(1), new: z.string() })).min(1).max(20).optional()
+        .describe("Small changes instead of body: each old text must occur exactly once in the section's Markdown (as read returns it)"),
       base_revision: z.number().int(),
       summary: z.string().min(3),
       reason: z.string().optional(),

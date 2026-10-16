@@ -1,7 +1,8 @@
 /** Read tools (design/04-mcp-server.md#read). Public: no account needed. */
 import { createTwoFilesPatch } from 'diff';
 import type { Services } from './context.ts';
-import { ToolError, link, trustOf, wrap } from './context.ts';
+import type { Operator } from '../db/accounts.ts';
+import { ToolError, link, sameOperator, trustOf, wrap } from './context.ts';
 import type { Evidence } from '../index/identifiers.ts';
 import {
   normalizeTitle, validateTitle, typeOfTitle, isTopicPage, subjectRoot, CONTENT_NAMESPACE_IDS, NAMESPACES, SUBJECT_TYPES, TitleError, type SubjectType,
@@ -217,7 +218,35 @@ export function symbols(s: Services, args: { build?: string; rva?: string; name?
 
 // ---- read ----------------------------------------------------------------------
 
-export async function read(s: Services, args: { title: string; section?: string; format?: 'markdown' | 'wikitext' | 'json' | 'files'; max_tokens?: number }) {
+/**
+ * Who wrote a page: distinct authors (last 50 revisions) and whether the reader is one of them,
+ * so an agent never takes its own earlier text for independent confirmation.
+ */
+async function authorship(s: Services, title: string, viewer: Operator | null | undefined, doc?: { created_by?: string; verifications?: Array<{ operator: string; result: string }> } | null) {
+  const revisions = await s.sessions.reader.history(title, 50).catch(() => []);
+  const edits = new Map<string, number>();
+  for (const r of revisions) edits.set(r.user, (edits.get(r.user) ?? 0) + 1);
+  const out: Record<string, unknown> = {
+    authors: edits.size,
+    by: [...edits].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([user, n]) => ({ user, edits: n })),
+  };
+  if (viewer) {
+    const yours = [...edits].filter(([user]) => sameOperator(s, user, viewer)).reduce((n, [, c]) => n + c, 0);
+    out.your_edits = yours;
+    if (yours && yours === revisions.length) out.note = 'Only you wrote this page: it is not independent confirmation of anything.';
+    else if (yours) out.note = 'You wrote part of this page: your own text is not independent confirmation.';
+  }
+  if (doc?.created_by !== undefined) {
+    // Distinct accounts that confirmed it, other than its creator (renames included).
+    const account = (name: string) => s.db.operatorIdByAnyUsername(name) ?? name;
+    const creator = account(doc.created_by);
+    out.independent_confirmations = new Set((doc.verifications ?? []).filter((v) => v.result === 'confirmed').map((v) => account(v.operator)).filter((a) => a !== creator)).size;
+    if (viewer) out.created_by_you = sameOperator(s, doc.created_by, viewer);
+  }
+  return out;
+}
+
+export async function read(s: Services, args: { title: string; section?: string; format?: 'markdown' | 'wikitext' | 'json' | 'files'; max_tokens?: number }, viewer?: Operator | null) {
   let title = cleanTitle(args.title, s);
   const mw = s.sessions.reader;
   let page = await mw.getPage(title);
@@ -237,10 +266,17 @@ export async function read(s: Services, args: { title: string; section?: string;
   const format = args.format ?? (isJson ? 'json' : type === 'code' ? 'files' : 'markdown');
   const maxTokens = args.max_tokens ?? 2000;
   const trust = trustOf(s, [page.user]).get(page.user);
-  const base = {
+  const base: Record<string, unknown> = {
     title, type, revision: page.revid, url: link(s, title),
     last_edit: { user: page.user, trust, date: page.timestamp, summary: page.comment },
   };
+  let parsedDoc: { created_by?: string; verifications?: Array<{ operator: string; result: string }> } | null = null;
+  if (isJson) {
+    try { parsedDoc = JSON.parse(page.content); } catch { /* shown as stored below */ }
+  } else if (type === 'code') {
+    parsedDoc = parseCodePage(page.content)?.meta ?? null;
+  }
+  base.authorship = await authorship(s, title, viewer, parsedDoc);
 
   if (isJson) {
     let doc: unknown;

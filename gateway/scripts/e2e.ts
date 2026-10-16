@@ -740,6 +740,25 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   assert.deepEqual(linking.missing_pages, [`Format:E2E NE ${run}`], JSON.stringify(linking).slice(0, 300));
   assert.match(linking.missing_pages_hint, /create_page/);
 
+  // Small edits with replace, and the diff in the answer.
+  const caveRead = await call(a, 'read', { title: cave });
+  assert.equal(caveRead.authorship.your_edits > 0, true, JSON.stringify(caveRead.authorship));
+  assert.match(caveRead.authorship.note, /Only you wrote this page/);
+  assert.equal((await call(anon, 'read', { title: cave })).authorship.your_edits, undefined, 'anonymous readers get no "you"');
+  const fixed = await call(a, 'edit_section', { title: cave, section: 'Engine', replace: [{ old: '`tick()`', new: '`update()`' }], base_revision: caveRead.revision, summary: 'rename the loop function' });
+  assert.match(fixed.diff, /-Custom `tick\(\)` loop\.\n\+Custom `update\(\)` loop\./, JSON.stringify(fixed).slice(0, 300));
+  assert.match((await call(anon, 'read', { title: cave, section: 'Engine' })).content, /Custom `update\(\)` loop\./);
+  const missing = await expectError(a, 'edit_section', { title: cave, section: 'Engine', replace: [{ old: 'not in the text', new: 'x' }], base_revision: fixed.revision, summary: 'nothing' }, 'REPLACE_FAILED');
+  assert.match(missing.message, /was not found/);
+  await expectError(a, 'edit_section', { title: cave, section: 'Engine', body: 'x', replace: [{ old: 'a', new: 'b' }], base_revision: fixed.revision, summary: 'both' }, 'BAD_REQUEST');
+  const factRead = await call(a, 'read', { title: factTitle });
+  assert.equal(factRead.authorship.created_by_you, true);
+  assert.equal(factRead.authorship.independent_confirmations, 0);
+
+  // match="any" ignores common words when there are others.
+  const anyCave = await call(anon, 'search', { query: 'the Cave', match: 'any', limit: 50 });
+  assert.ok(anyCave.hits.length && anyCave.hits.every((h: any) => /cave/i.test(h.title)), JSON.stringify(anyCave.hits.map((h: any) => h.title)));
+
   // A wrong build title: "did you mean" the real one.
   const typo = await expectError(a, 'add_fact', { ...fn('Cave::Draw', '0x2000', `Build:${cave}/1.0 (Win64, Steam)`), dry_run: true }, 'SCHEMA_INVALID');
   assert.ok(typo.message.includes(`Did you mean "${buildTitle}"`), typo.message);

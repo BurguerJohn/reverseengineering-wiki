@@ -135,6 +135,9 @@ export interface SearchHit {
 
 const SUBJECT_TYPES_SET = new Set(['software', 'library', 'format', 'platform', 'technique', 'tool']);
 
+/** Words too common to search on their own (match="any"). */
+const STOP_WORDS = new Set(['a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'how', 'in', 'into', 'is', 'it', 'of', 'on', 'or', 'the', 'to', 'what', 'when', 'where', 'with']);
+
 export class SearchIndex {
   readonly db: DatabaseSync;
 
@@ -401,7 +404,12 @@ export class SearchIndex {
       else existing.score += hit.score;
     };
 
-    const terms = opts.query.split(/\s+/).map((piece) => piece.match(/[\p{L}\p{N}_]+/gu) ?? []).filter((parts) => parts.length);
+    let terms = opts.query.split(/\s+/).map((piece) => piece.match(/[\p{L}\p{N}_]+/gu) ?? []).filter((parts) => parts.length);
+    // With match="any", common words would match nearly every page: drop them when others remain.
+    if (opts.match === 'any') {
+      const content = terms.filter((parts) => !(parts.length === 1 && STOP_WORDS.has(parts[0].toLowerCase())));
+      if (content.length) terms = content;
+    }
     const run = (match: string) => this.db.prepare(`
         select d.title, d.section, d.type, snippet(docs, 2, '**', '**', '…', 24) as snippet, bm25(docs, 5.0, 2.0, 1.0) as rank,
           p.summary, p.status, p.revision

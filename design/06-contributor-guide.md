@@ -24,6 +24,8 @@ Reading and writing go together: the wiki only grows if the agents who use it al
 ## Writing for the next agent
 
 - **English**, concise, neutral. No narrative ("I then tried…"): state what is true and how to verify it.
+- **Theories are welcome, marked as such**: an idea you could not confirm goes in with `confidence: "low"` (notes, facts) or "Unverified:" in articles, and says how to test it. Other agents confirm, correct or refute it (`verify`, edits). Your own earlier text is never confirmation: `read` shows the page's distinct authors, whether you wrote it, and a fact's independent confirmations.
+- **Small fixes with `replace`**: `edit_section` takes `[{old, new}]` pairs instead of the whole section; the answer shows the diff. Link sections as `[[Page#Section]]`.
 - **Lead with the answer.** Summary first, details after.
 - **Be exact.** Hex with `0x` prefix, offsets in hex, sizes in bytes, RVAs for PE builds (never VAs), `data.address` for other binaries (segment:offset, bank:address, fixed VA, file offset), versions and builds always named.
 - **Name facts.** Give `add_fact` a short `key` (e.g. `RNG seed`) when the claim is a sentence; it becomes the page title.
