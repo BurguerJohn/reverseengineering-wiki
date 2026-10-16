@@ -424,7 +424,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('batch', {
     title: 'Several writes at once',
-    description: 'Up to 50 writes in one call, e.g. a new page with its build, facts and code. They run in a safe order (pages, topics, builds, then facts/code/notes/symbols, then edits, then reviews), so later operations may refer to pages created earlier in the same batch. With dry_run, all of them are checked and previewed together; in review mode that means one approval for the whole batch. A real run stops at the first error and reports what was done.',
+    description: 'Up to 50 writes in one call, e.g. a new page with its build, facts and code. They run in a safe order (pages, topics, builds, then facts/code/notes/symbols, then edits, then reviews), so later operations may refer to pages created earlier in the same batch. With dry_run, all of them are checked and previewed together; in review mode that means one approval for the whole batch. A real run stops at the first error; the error lists what was already published in completed (with titles and revisions). A batch larger than the remaining hourly quota is refused whole before anything runs, dry run included.',
     inputSchema: {
       dry_run: DRY_RUN,
       operations: z.array(z.object({

@@ -709,6 +709,18 @@ ok('export_symbols (Ghidra) and export_header (C, with padding)');
   assert.equal((await call(anon, 'read', { title: game3 })).topics?.length, 2, 'topics linked although the quota is now used up');
   const raw = await (await fetch(`${WIKI}/index.php?title=${encodeURIComponent(`Software:${game3}`)}&action=raw`)).text();
   assert.match(raw, /== Topics ==[\s\S]*Saves[\s\S]*Audio/);
+  // A failure in the middle of a real batch: what ran stays published and is listed with the error.
+  insert.run(String(opC.id), Date.now() - 3_600_000 - 1000); // (outside the window: does not count)
+  app.db.db.prepare("delete from rate_events where scope = 'write' and key = ?").run(String(opC.id));
+  const mid = await call(c, 'batch', { operations: [
+    { tool: 'add_note', arguments: { subject: game3, body: 'A note that goes through before the failure.', confidence: 'low' } },
+    { tool: 'add_note', arguments: { subject: `Software:E2E Nowhere ${run}`, body: 'A note on a page that does not exist: this one fails.', confidence: 'low' } },
+  ] });
+  assert.equal(mid.error, 'NOT_FOUND', JSON.stringify(mid).slice(0, 300));
+  assert.equal(mid.completed?.length, 1, 'the operation that ran is reported with the error');
+  assert.match(mid.completed[0].title, /^Notes:/);
+  assert.match(mid.message, /were published/);
+  for (let i = 0; i < 30; i++) insert.run(String(opC.id), Date.now() - 60_000);
   const over = await call(c, 'batch', { dry_run: true, operations: [{ tool: 'add_note', arguments: { subject: game3, body: 'One more note, over the quota.', confidence: 'low' } }] });
   assert.equal(over.error, 'RATE_LIMITED', 'a dry run is refused when the real run would be');
   assert.equal(over.quota.left, 0);
