@@ -1,0 +1,614 @@
+/**
+ * Search index (design/03-architecture.md#index-design-mvp). Rebuildable from
+ * MediaWiki at any time; holds no source of truth.
+ */
+import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { isTopicPage, subjectRoot, typeOfTitle, type PageType } from '../wiki/titles.ts';
+import {
+  parseSections, splitInfobox, parseInfobox, wikiLinks, redirectTarget, wikitextToMarkdown, RELATION_FIELDS,
+} from '../wiki/wikitext.ts';
+import { parseCodePage, parseNoteHeader, type FactDoc, type BuildDoc, type SymbolsDoc } from '../wiki/pages.ts';
+import {
+  extractFromText, extractFromFactData, evidenceTokens, normalizeBytes, queryTokens, type Evidence, type Identifier,
+} from './identifiers.ts';
+
+const SCHEMA = `
+create table if not exists pages (
+  title text primary key,
+  type text not null,
+  revision integer not null,
+  touched text not null,
+  author text,
+  summary text not null default '',
+  status text,
+  subject text,
+  redirect_to text,
+  json text
+);
+create virtual table if not exists docs using fts5(
+  title, section, body, type unindexed,
+  tokenize = 'unicode61 remove_diacritics 2 tokenchars ''_'''
+);
+create table if not exists identifiers (
+  kind text not null,
+  token text not null,
+  title text not null,
+  section text not null default ''
+);
+create index if not exists identifiers_lookup on identifiers(kind, token);
+create index if not exists identifiers_title on identifiers(title);
+create table if not exists edges (
+  src text not null,
+  rel text not null,
+  dst text not null
+);
+create index if not exists edges_src on edges(src);
+create index if not exists edges_dst on edges(dst);
+create table if not exists facts (
+  title text primary key,
+  subject text not null,
+  kind text not null,
+  status text not null,
+  level text not null,
+  applies_to text not null,
+  observed_in text not null,
+  data text not null
+);
+create index if not exists facts_subject on facts(subject);
+create table if not exists builds (
+  title text primary key,
+  software text not null,
+  version text not null,
+  platform text not null,
+  distribution text not null
+);
+create table if not exists build_files (
+  sha256 text not null,
+  title text not null,
+  name text not null,
+  size integer not null,
+  pe_timestamp text
+);
+create index if not exists build_files_sha on build_files(sha256);
+create table if not exists symbols (
+  title text not null,
+  build text not null,
+  rva integer not null,
+  name text not null,
+  kind text not null,
+  confidence text not null,
+  source text not null,
+  type text,
+  signature text,
+  size integer,
+  seen integer not null default 1
+);
+create index if not exists symbols_build_rva on symbols(build, rva);
+create index if not exists symbols_name on symbols(name);
+create index if not exists symbols_title on symbols(title);
+create table if not exists state (key text primary key, value text not null);
+`;
+
+export interface IndexablePage {
+  title: string;
+  revid: number;
+  timestamp: string;
+  user: string;
+  content: string;
+}
+
+/** What symbol names may look like: C/C++ identifiers, scopes, templates, decorated names. */
+export const SYMBOL_NAME = /^[A-Za-z_~?@$][\w:~<>,.*&@$?\- ]*$/;
+
+export interface SymbolRow {
+  title: string;
+  build: string;
+  rva: number;
+  name: string;
+  kind: string;
+  confidence: string;
+  source: string;
+  type: string | null;
+  signature: string | null;
+  size: number | null;
+  seen: number;
+}
+
+export interface SearchHit {
+  title: string;
+  /** Best-matching section; `sections` lists every section of the page that matched. */
+  section: string;
+  sections?: string[];
+  type: PageType;
+  snippet: string;
+  summary: string;
+  status: string | null;
+  revision: number;
+  score: number;
+}
+
+const SUBJECT_TYPES_SET = new Set(['software', 'library', 'format', 'platform', 'technique', 'tool']);
+
+export class SearchIndex {
+  readonly db: DatabaseSync;
+
+  constructor(path: string) {
+    if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
+    this.db = new DatabaseSync(path);
+    this.db.exec('pragma journal_mode = wal;');
+    this.db.exec(SCHEMA);
+  }
+
+  getState(key: string): string | null {
+    const row = this.db.prepare('select value from state where key = ?').get(key) as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  setState(key: string, value: string): void {
+    this.db.prepare('insert or replace into state (key, value) values (?, ?)').run(key, value);
+  }
+
+  clear(): void {
+    this.db.exec('delete from pages; delete from docs; delete from identifiers; delete from edges; delete from facts; delete from builds; delete from build_files; delete from symbols; delete from state;');
+  }
+
+  removePage(title: string): void {
+    for (const table of ['pages', 'docs', 'identifiers', 'facts', 'builds', 'build_files', 'symbols']) {
+      this.db.prepare(`delete from ${table} where title = ?`).run(title);
+    }
+    this.db.prepare('delete from edges where src = ?').run(title);
+  }
+
+  page(title: string): { title: string; type: PageType; revision: number; summary: string; status: string | null; subject: string | null; redirect_to: string | null; author: string | null; json: string | null } | undefined {
+    return this.db.prepare('select * from pages where title = ?').get(title) as any;
+  }
+
+  resolveRedirect(title: string): string {
+    const page = this.page(title);
+    return page?.redirect_to ?? title;
+  }
+
+  // ---- indexing ----------------------------------------------------------------
+
+  indexPage(p: IndexablePage): void {
+    const type = typeOfTitle(p.title);
+    this.db.exec('begin');
+    try {
+      this.removePage(p.title);
+      const target = redirectTarget(p.content);
+      if (target) {
+        this.insertPage(p, type, '', null, target, target, null);
+        this.edge(p.title, 'alias_of', target);
+      } else if (SUBJECT_TYPES_SET.has(type)) {
+        this.indexArticle(p, type);
+      } else if (type === 'fact') {
+        this.indexFact(p);
+      } else if (type === 'build') {
+        this.indexBuild(p);
+      } else if (type === 'symbols') {
+        this.indexSymbols(p);
+      } else if (type === 'code') {
+        this.indexCode(p);
+      } else if (type === 'notes') {
+        this.indexNote(p);
+      } else if (type === 'project') {
+        this.insertPage(p, type, '', null, null, null, null);
+        this.doc(p.title, '', wikitextToMarkdown(p.content), type);
+      }
+      this.db.exec('commit');
+    } catch (error) {
+      this.db.exec('rollback');
+      throw error;
+    }
+  }
+
+  private insertPage(p: IndexablePage, type: PageType, summary: string, status: string | null, subject: string | null,
+    redirect: string | null, json: string | null): void {
+    this.db.prepare(`insert into pages (title, type, revision, touched, author, summary, status, subject, redirect_to, json)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(p.title, type, p.revid, p.timestamp, p.user, summary.slice(0, 600), status, subject, redirect, json);
+  }
+
+  private doc(title: string, section: string, body: string, type: string): void {
+    this.db.prepare('insert into docs (title, section, body, type) values (?, ?, ?, ?)').run(title, section, body, type);
+  }
+
+  private ids(title: string, section: string, ids: Identifier[]): void {
+    const stmt = this.db.prepare('insert into identifiers (kind, token, title, section) values (?, ?, ?, ?)');
+    for (const id of ids) stmt.run(id.kind, id.token, title, section);
+  }
+
+  private edge(src: string, rel: string, dst: string): void {
+    if (dst && dst !== src) this.db.prepare('insert into edges (src, rel, dst) values (?, ?, ?)').run(src, rel, dst);
+  }
+
+  private indexArticle(p: IndexablePage, type: PageType): void {
+    const sections = parseSections(p.content);
+    const { rest } = splitInfobox(sections[0]?.text ?? '');
+    const summary = wikitextToMarkdown(rest.split(/\n\s*\n/)[0] ?? '').slice(0, 600);
+    const infobox = parseInfobox(p.content);
+    const root = subjectRoot(p.title);
+    this.insertPage(p, type, summary, null, root, null, JSON.stringify({ infobox }));
+    if (isTopicPage(p.title)) this.edge(p.title, 'topic_of', root);
+
+    // Listing templates are rendered by MediaWiki; their source is noise in search results.
+    const strip = (text: string) => text.replace(/\{\{(?:Fact list|Code list|Topic of|Main)\|[^}]*\}\}/g, '');
+    for (const section of sections) {
+      const body = strip(section.level === 0 ? wikitextToMarkdown(rest) : wikitextToMarkdown(section.body));
+      if (!body.trim()) continue;
+      this.doc(p.title, section.heading, body, type);
+      this.ids(p.title, section.heading, extractFromText(body));
+    }
+    for (const [field, rel] of Object.entries(RELATION_FIELDS)) {
+      for (const link of wikiLinks(infobox[field] ?? '')) this.edge(p.title, rel, link);
+    }
+    if (infobox.magic) {
+      for (const part of infobox.magic.split(/[,;]/)) {
+        const bytes = normalizeBytes(part.replace(/[`"]/g, ''));
+        if (bytes) this.ids(p.title, 'Infobox', [{ kind: 'bytes', token: bytes }]);
+      }
+    }
+    for (const link of new Set(wikiLinks(p.content))) this.edge(p.title, 'links', link);
+  }
+
+  private indexFact(p: IndexablePage): void {
+    let doc: FactDoc;
+    try {
+      doc = JSON.parse(p.content);
+    } catch {
+      return;
+    }
+    this.insertPage(p, 'fact', doc.claim ?? '', doc.status ?? 'claimed', doc.subject ?? null, null, p.content);
+    this.db.prepare(`insert into facts (title, subject, kind, status, level, applies_to, observed_in, data)
+      values (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(p.title, doc.subject ?? '', doc.kind ?? '', doc.status ?? 'claimed', doc.scope?.level ?? '',
+        doc.scope?.applies_to ?? '', JSON.stringify(doc.scope?.observed_in ?? []), JSON.stringify(doc.data ?? {}));
+    const body = [doc.claim, `Scope: ${doc.scope?.level} — ${doc.scope?.applies_to}`, JSON.stringify(doc.data, null, 1),
+      ...(doc.evidence ?? []).map((e) => `${e.type}: ${e.detail}`)].join('\n');
+    this.doc(p.title, '', body, 'fact');
+    this.ids(p.title, '', [...extractFromFactData(doc.data ?? {}), ...extractFromText(doc.claim ?? '')]);
+    this.edge(p.title, 'fact_of', doc.subject);
+    if (doc.scope?.applies_to?.startsWith('Build:')) this.edge(p.title, 'applies_to', doc.scope.applies_to);
+    for (const b of doc.scope?.observed_in ?? []) this.edge(p.title, 'observed_in', b);
+    for (const r of doc.related ?? []) this.edge(p.title, 'related', r);
+  }
+
+  private indexBuild(p: IndexablePage): void {
+    let doc: BuildDoc;
+    try {
+      doc = JSON.parse(p.content);
+    } catch {
+      return;
+    }
+    const summary = `${doc.software} ${doc.version} (${doc.distribution}, ${doc.platform})`;
+    this.insertPage(p, 'build', summary, null, doc.software, null, p.content);
+    this.db.prepare('insert into builds (title, software, version, platform, distribution) values (?, ?, ?, ?, ?)')
+      .run(p.title, doc.software, doc.version, doc.platform, doc.distribution);
+    for (const f of doc.files ?? []) {
+      this.db.prepare('insert into build_files (sha256, title, name, size, pe_timestamp) values (?, ?, ?, ?, ?)')
+        .run(f.sha256.toLowerCase(), p.title, f.name, f.size, f.pe_timestamp ?? null);
+      this.ids(p.title, '', [{ kind: 'sha256', token: f.sha256.toLowerCase() }, { kind: 'file', token: f.name.toLowerCase() }]);
+    }
+    this.doc(p.title, '', `${summary}\n${(doc.files ?? []).map((f) => f.name).join(' ')}\n${doc.notes ?? ''}`, 'build');
+    this.edge(p.title, 'build_of', doc.software);
+  }
+
+  private indexSymbols(p: IndexablePage): void {
+    let doc: SymbolsDoc;
+    try {
+      doc = JSON.parse(p.content);
+    } catch {
+      return;
+    }
+    const symbols = Array.isArray(doc.symbols) ? doc.symbols : [];
+    this.insertPage(p, 'symbols', `${symbols.length} symbols, ${doc.range?.start}–${doc.range?.end}`, null, doc.build, null, null);
+    const stmt = this.db.prepare(`insert into symbols (title, build, rva, name, kind, confidence, source, type, signature, size, seen)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    for (const x of symbols) {
+      const rva = parseInt(String(x.rva), 16);
+      if (!Number.isFinite(rva) || typeof x.name !== 'string') continue;
+      stmt.run(p.title, doc.build, rva, x.name, x.kind ?? 'function', x.confidence ?? 'low', x.source ?? 'other',
+        x.type ?? null, x.signature ?? null, x.size ?? null, 1 + (x.seen_by?.length ?? 0));
+    }
+    this.edge(p.title, 'symbols_of', doc.build);
+  }
+
+  private indexCode(p: IndexablePage): void {
+    const doc = parseCodePage(p.content);
+    if (!doc) return;
+    const subject = doc.meta.subjects[0] ?? null;
+    this.insertPage(p, 'code', doc.meta.summary, doc.meta.status, subject, null, JSON.stringify(doc.meta));
+    const files = doc.files.map((f) => `--- ${f.name}\n${f.content}`).join('\n').slice(0, 40_000);
+    this.doc(p.title, '', `${doc.meta.summary}\n${doc.meta.usage}\nTested on: ${doc.meta.tested_on}\n${files}`, 'code');
+    this.ids(p.title, '', extractFromText(files));
+    for (const s of doc.meta.subjects) this.edge(p.title, 'code_for', s);
+  }
+
+  private indexNote(p: IndexablePage): void {
+    const header = parseNoteHeader(p.content);
+    const body = wikitextToMarkdown(p.content.replace(/\{\{Note header[^}]*\}\}/, ''));
+    this.insertPage(p, 'notes', body.slice(0, 300), header?.status ?? 'open', header?.subject ?? null, null, null);
+    this.doc(p.title, '', body, 'notes');
+    this.ids(p.title, '', extractFromText(body));
+    if (header?.subject) this.edge(p.title, 'note_of', header.subject);
+  }
+
+  // ---- search --------------------------------------------------------------------
+
+  search(opts: { query: string; types?: string[]; subject?: string; build?: string; status?: string; limit?: number; offset?: number; match?: 'all' | 'any' }): { hits: SearchHit[]; total: number } {
+    const limit = Math.min(opts.limit ?? 10, 50);
+    const offset = Math.max(0, opts.offset ?? 0);
+    const scores = new Map<string, SearchHit>();
+    const consider = (hit: SearchHit) => {
+      const key = `${hit.title}#${hit.section}`;
+      const existing = scores.get(key);
+      if (!existing) scores.set(key, hit);
+      else existing.score += hit.score;
+    };
+
+    const terms = opts.query.split(/\s+/).map((piece) => piece.match(/[\p{L}\p{N}_]+/gu) ?? []).filter((parts) => parts.length);
+    const run = (match: string) => this.db.prepare(`
+        select d.title, d.section, d.type, snippet(docs, 2, '**', '**', '…', 24) as snippet, bm25(docs, 5.0, 2.0, 1.0) as rank,
+          p.summary, p.status, p.revision
+        from docs d join pages p on p.title = d.title
+        where docs match ? order by rank limit 200`).all(match) as any[];
+    if (terms.length) {
+      const quoted = terms.map((parts) => `"${parts.join(' ').replace(/"/g, '')}"`);
+      let rows = run(quoted.join(' AND '));
+      // Every term must match: "nothing found" beats noise. match="any" is the explicit opt-in.
+      if (opts.match === 'any' && terms.length > 1) rows = run(quoted.join(' OR '));
+      for (const r of rows) {
+        consider({ title: r.title, section: r.section, type: r.type, snippet: r.snippet, summary: r.summary,
+          status: r.status, revision: r.revision, score: Math.max(0.1, -r.rank) });
+      }
+    }
+
+    for (const id of queryTokens(opts.query)) {
+      const rows = this.db.prepare(`select i.title, i.section, p.type, p.summary, p.status, p.revision
+        from identifiers i join pages p on p.title = i.title where i.kind = ? and i.token = ? limit 50`).all(id.kind, id.token) as any[];
+      for (const r of rows) {
+        consider({ title: r.title, section: r.section, type: r.type, snippet: `exact match: ${id.kind} ${id.token}`,
+          summary: r.summary, status: r.status, revision: r.revision, score: 8 });
+      }
+    }
+
+    // Symbol map entries are matched by exact name only (there can be millions).
+    const symbolName = opts.query.trim();
+    if (SYMBOL_NAME.test(symbolName) && symbolName.length <= 200) {
+      const rows = this.db.prepare(`select s.title, s.build, s.rva, s.name, s.kind, s.confidence, p.revision from symbols s
+        join pages p on p.title = s.title where s.name = ? limit 20`).all(symbolName) as any[];
+      for (const r of rows) {
+        consider({ title: r.title, section: '', type: 'symbols', snippet: `symbol ${r.name} (${r.kind}) at 0x${r.rva.toString(16).toUpperCase()} in ${r.build}`,
+          summary: `Symbol map of ${r.build}`, status: r.confidence, revision: r.revision, score: 10 });
+      }
+    }
+
+    const q = opts.query.trim().toLowerCase();
+    if (q) {
+      const rows = this.db.prepare(`select title, type, summary, status, revision, redirect_to from pages
+        where lower(title) = ? or lower(substr(title, instr(title, ':') + 1)) = ?`).all(q, q) as any[];
+      for (const r of rows) {
+        const title = r.redirect_to ?? r.title;
+        const target = this.page(title);
+        consider({ title, section: '', type: (target?.type ?? r.type) as PageType, snippet: 'title match',
+          summary: target?.summary ?? r.summary, status: target?.status ?? r.status, revision: target?.revision ?? r.revision, score: 20 });
+      }
+    }
+
+    let hits = [...scores.values()].filter((h) => h.type !== ('other' as PageType));
+    if (opts.types?.length) hits = hits.filter((h) => opts.types!.includes(h.type));
+    if (opts.status) hits = hits.filter((h) => h.status === opts.status);
+    if (opts.subject) {
+      const related = this.subjectFamily(opts.subject);
+      hits = hits.filter((h) => related.has(h.title));
+    }
+    if (opts.build) {
+      const buildTitles = new Set(this.factsForBuild(opts.build).map((f) => f.title));
+      buildTitles.add(opts.build);
+      hits = hits.filter((h) => buildTitles.has(h.title) || h.title.startsWith(`${opts.build}/`) || (h.type !== 'fact' && h.type !== 'symbols'));
+    }
+    // One result per page: the best section leads, the others are listed with it.
+    const byPage = new Map<string, SearchHit>();
+    for (const h of hits.sort((a, b) => b.score - a.score)) {
+      const page = byPage.get(h.title);
+      if (!page) {
+        byPage.set(h.title, { ...h, sections: h.section ? [h.section] : [] });
+        continue;
+      }
+      page.score += h.score * 0.1;
+      if (h.section && !page.sections!.includes(h.section)) page.sections!.push(h.section);
+    }
+    const pages = [...byPage.values()].sort((a, b) => b.score - a.score)
+      .map((h) => ({ ...h, sections: h.sections!.length > 1 ? h.sections!.slice(0, 8) : undefined }));
+    return { hits: pages.slice(offset, offset + limit), total: pages.length };
+  }
+
+  /** A subject page plus everything attached to it (facts, code, notes, builds, aliases). */
+  subjectFamily(subject: string): Set<string> {
+    const set = new Set([subject]);
+    const rows = this.db.prepare(`select src from edges where dst = ? and rel in ('fact_of', 'code_for', 'note_of', 'build_of', 'alias_of', 'topic_of')`)
+      .all(subject) as Array<{ src: string }>;
+    for (const r of rows) set.add(r.src);
+    return set;
+  }
+
+  // ---- identify ------------------------------------------------------------------
+
+  identify(evidence: Evidence, limit = 5) {
+    const tokens = evidenceTokens(evidence);
+    // input → subject → titles that matched
+    const perInput = new Map<string, Map<string, Set<string>>>();
+    const weights = new Map<string, number>();
+    for (const t of tokens) {
+      let rows: Array<{ title: string; subject: string | null }>;
+      if (t.kind === 'bytes' && t.prefix) {
+        rows = this.db.prepare(`select i.title, p.subject from identifiers i join pages p on p.title = i.title
+          where i.kind = 'bytes' and (i.token like ? or ? like i.token || '%') limit 100`).all(`${t.token}%`, t.token) as any[];
+      } else if (t.kind === 'string') {
+        rows = this.db.prepare(`select i.title, p.subject from identifiers i join pages p on p.title = i.title
+          where i.kind = 'string' and (i.token = ? or (length(i.token) >= 6 and instr(?, i.token) > 0)) limit 100`)
+          .all(t.token, t.token) as any[];
+      } else {
+        rows = this.db.prepare(`select i.title, p.subject from identifiers i join pages p on p.title = i.title
+          where i.kind = ? and i.token = ? limit 100`).all(t.kind, t.token) as any[];
+      }
+      if (!rows.length) continue;
+      const bySubject = perInput.get(t.input) ?? new Map<string, Set<string>>();
+      for (const r of rows) {
+        const subject = r.subject ?? r.title;
+        const titles = bySubject.get(subject) ?? new Set<string>();
+        titles.add(r.title);
+        bySubject.set(subject, titles);
+      }
+      perInput.set(t.input, bySubject);
+      weights.set(t.input, Math.max(weights.get(t.input) ?? 0, t.weight));
+    }
+
+    const candidates = new Map<string, { subject: string; score: number; matched: Array<{ input: string; pages: string[] }> }>();
+    for (const [input, bySubject] of perInput) {
+      const specificity = 1 / Math.sqrt(bySubject.size); // an input matching many subjects says little
+      for (const [subject, titles] of bySubject) {
+        const c = candidates.get(subject) ?? { subject, score: 0, matched: [] };
+        c.score += (weights.get(input) ?? 1) * specificity;
+        c.matched.push({ input, pages: [...titles].slice(0, 5) });
+        candidates.set(subject, c);
+      }
+    }
+    return [...candidates.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map((c) => {
+        const page = this.page(c.subject);
+        return {
+          subject: c.subject,
+          type: page?.type ?? typeOfTitle(c.subject),
+          summary: page?.summary ?? '',
+          score: Math.round(c.score * 100) / 100,
+          confidence: c.matched.length >= 3 && c.score >= 6 ? 'high' : c.score >= 3 ? 'medium' : 'low',
+          matched: c.matched,
+        };
+      });
+  }
+
+  // ---- binaries, facts, graph ------------------------------------------------------
+
+  buildBySha(sha256: string): string | null {
+    const row = this.db.prepare('select title from build_files where sha256 = ?').get(sha256.toLowerCase()) as { title: string } | undefined;
+    return row?.title ?? null;
+  }
+
+  buildByFile(name: string, size?: number, peTimestamp?: string): string | null {
+    const rows = this.db.prepare('select title, size, pe_timestamp from build_files where lower(name) = lower(?)').all(name) as any[];
+    const exact = rows.find((r) => (size === undefined || r.size === size) && (!peTimestamp || r.pe_timestamp?.toLowerCase() === peTimestamp.toLowerCase()));
+    return exact?.title ?? null;
+  }
+
+  buildsOf(software: string): Array<{ title: string; version: string; platform: string; distribution: string }> {
+    return this.db.prepare('select title, version, platform, distribution from builds where software = ? order by version').all(software) as any[];
+  }
+
+  factsForBuild(build: string): Array<{ title: string; kind: string; status: string; data: string; subject: string }> {
+    return this.db.prepare(`select title, kind, status, data, subject from facts
+      where applies_to = ? or observed_in like ?`).all(build, `%${JSON.stringify(build).slice(1, -1)}%`) as any[];
+  }
+
+  factsForSubject(subject: string, kinds?: string[]): Array<{ title: string; kind: string; status: string; level: string; applies_to: string; data: string }> {
+    const rows = this.db.prepare('select title, kind, status, level, applies_to, data from facts where subject = ?').all(subject) as any[];
+    return kinds?.length ? rows.filter((r) => kinds.includes(r.kind)) : rows;
+  }
+
+  sectionText(title: string, heading: string): string | null {
+    const row = this.db.prepare('select body from docs where title = ? and lower(section) = lower(?)').get(title, heading) as { body: string } | undefined;
+    return row?.body ?? null;
+  }
+
+  static readonly REVERSE_RELATIONS: Record<string, string> = {
+    used_by: 'uses', has_facts: 'fact_of', has_code: 'code_for', has_notes: 'note_of', has_builds: 'build_of',
+    has_topics: 'topic_of', has_symbols: 'symbols_of',
+  };
+
+  /** Every edge around a page (up to depth 3), optionally one relation; facts can be filtered by kind and status. */
+  related(title: string, opts: { relation?: string; depth?: number; kind?: string; status?: string } = {}): Array<{ src: string; rel: string; dst: string }> {
+    const reverse = SearchIndex.REVERSE_RELATIONS;
+    const { relation } = opts;
+    const out: Array<{ src: string; rel: string; dst: string }> = [];
+    const seen = new Set([title]);
+    let frontier = [title];
+    for (let d = 0; d < Math.min(opts.depth ?? 1, 3) && frontier.length; d++) {
+      const next: string[] = [];
+      for (const node of frontier) {
+        const outgoing = this.db.prepare('select src, rel, dst from edges where src = ?').all(node) as any[];
+        const incoming = this.db.prepare('select src, rel, dst from edges where dst = ?').all(node) as any[];
+        for (const e of [...outgoing, ...incoming]) {
+          if (e.rel === 'links' && relation !== 'links') continue;
+          if (relation) {
+            const wanted = reverse[relation] ?? relation;
+            if (e.rel !== wanted) continue;
+            if (reverse[relation] && e.dst !== node) continue;
+          }
+          out.push(e);
+          for (const n of [e.src, e.dst]) if (!seen.has(n)) { seen.add(n); next.push(n); }
+        }
+      }
+      frontier = next;
+    }
+    if (!opts.kind && !opts.status) return out;
+    const facts = new Map((this.db.prepare('select title, kind, status from facts').all() as any[]).map((f) => [f.title, f]));
+    return out.filter((e) => {
+      const fact = facts.get(e.src) ?? facts.get(e.dst);
+      return !!fact && (!opts.kind || fact.kind === opts.kind) && (!opts.status || fact.status === opts.status);
+    });
+  }
+
+  /** Topic subpages of a subject, in title order. */
+  topicsOf(root: string): Array<{ title: string; summary: string }> {
+    return this.db.prepare(`select p.title, p.summary from edges e join pages p on p.title = e.src
+      where e.dst = ? and e.rel = 'topic_of' order by p.title`).all(root) as any[];
+  }
+
+  // ---- symbol maps -------------------------------------------------------------------
+
+  symbolCount(build: string): { symbols: number; pages: number } {
+    const row = this.db.prepare('select count(*) as n, count(distinct title) as p from symbols where build = ?').get(build) as { n: number; p: number };
+    return { symbols: row.n, pages: row.p };
+  }
+
+  /** The symbol at an RVA, or the closest one below it (with the offset into it). */
+  symbolAt(build: string, rva: number): (SymbolRow & { offset: number }) | null {
+    const row = this.db.prepare('select * from symbols where build = ? and rva <= ? order by rva desc limit 1').get(build, rva) as SymbolRow | undefined;
+    return row ? { ...row, offset: rva - row.rva } : null;
+  }
+
+  symbolsRange(build: string, from: number, to: number, limit: number): SymbolRow[] {
+    return this.db.prepare('select * from symbols where build = ? and rva >= ? and rva <= ? order by rva limit ?').all(build, from, to, limit) as any[];
+  }
+
+  /** Exact name, or a prefix when the name ends with "*"; optionally across all builds. */
+  symbolsByName(name: string, build: string | null, limit: number, offset: number): SymbolRow[] {
+    const prefix = name.endsWith('*');
+    const value = prefix ? `${name.slice(0, -1).replace(/[!%_]/g, (c) => `!${c}`)}%` : name;
+    const where = `${prefix ? "name like ? escape '!'" : 'name = ?'}${build ? ' and build = ?' : ''}`;
+    return this.db.prepare(`select * from symbols where ${where} order by build, rva limit ? offset ?`)
+      .all(...(build ? [value, build] : [value]), limit, offset) as any[];
+  }
+
+  symbolsForBuild(build: string): SymbolRow[] {
+    return this.db.prepare('select * from symbols where build = ? order by rva').all(build) as any[];
+  }
+
+  allSymbols(): Iterable<SymbolRow> {
+    return this.db.prepare('select * from symbols order by build, rva').iterate() as Iterable<SymbolRow>;
+  }
+
+  stats(): Record<string, number> {
+    // Aliases (redirects) are not pages of their own.
+    const rows = this.db.prepare('select type, count(*) as n from pages where redirect_to is null group by type').all() as Array<{ type: string; n: number }>;
+    return Object.fromEntries(rows.map((r) => [r.type, r.n]));
+  }
+
+  allFacts(): Array<{ title: string; json: string }> {
+    return this.db.prepare("select title, json from pages where type = 'fact' order by title").all() as any[];
+  }
+}

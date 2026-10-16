@@ -1,0 +1,1 @@
+<includeonly>'''[{{{url}}} {{{url}}}]''' @ <code>{{{commit}}}</code> · license: {{{license|unknown}}}<br />{{{description|}}}<br /><small>Tested on: {{{tested_on|}}} · {{{checked|}}}</small></includeonly><noinclude>An external repository pinned to a commit. Added with the <code>link_repo</code> MCP tool.</noinclude>

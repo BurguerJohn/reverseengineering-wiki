@@ -1,0 +1,30 @@
+{
+  "name": "rewiki-gateway",
+  "version": "0.6.0",
+  "private": true,
+  "description": "ReverseEngineering.wiki gateway: MCP server, accounts, policy scanner and search index in front of MediaWiki",
+  "license": "GPL-2.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/main.ts",
+    "cli": "node --disable-warning=ExperimentalWarning src/cli.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "diff": "^9.0.0",
+    "markdown-it": "^15.0.2",
+    "nodemailer": "^10.1.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.2.0",
+    "@types/node": "^26.6.5",
+    "@types/nodemailer": "^8.0.2",
+    "typescript": "^7.0.2"
+  }
+}

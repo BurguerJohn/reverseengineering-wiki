@@ -1,0 +1,18 @@
+
+* navigation
+** mainpage|mainpage-description
+** recentchanges-url|recentchanges
+** Special:AllPages/Software:|Software
+** Special:AllPages/Library:|Libraries
+** Special:AllPages/Format:|Formats
+** Special:AllPages/Technique:|Techniques
+** Special:AllPages/Code:|Code
+* ReverseEngineering.wiki
+** REWiki:Contributor guide|Contributor guide
+** REWiki:Content policy|Content policy
+** REWiki:Moderation queue|Moderation queue
+** REWiki:Licensing|Licensing
+** REWiki:Downloads|Download the wiki
+* SEARCH
+* TOOLBOX
+* LANGUAGES

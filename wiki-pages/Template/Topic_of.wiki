@@ -1,0 +1,1 @@
+<includeonly><div class="rewiki-topic-of" style="font-style:italic; margin-bottom:0.6em;">Topic page of [[{{{1}}}]].</div></includeonly><noinclude>Opens a topic subpage and links its subject. Usage: <code><nowiki>{{Topic of|Software:Earth Defense Force 5}}</nowiki></code> on <code>Software:Earth Defense Force 5/Weapons</code>.</noinclude>

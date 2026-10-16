@@ -1,0 +1,17 @@
+# MediaWiki core is NOT in the repository: it is downloaded at install time
+# (see README). Only ReverseEngineering.wiki's own files are versioned.
+/*
+!/.gitignore
+!/.gitattributes
+!/README.md
+!/LICENSE
+!/custom/
+!/design/
+!/gateway/
+!/client/
+!/wiki-pages/
+!/deploy/
+!/skills/
+
+# Never version: contains the database password and secret keys
+LocalSettings.php

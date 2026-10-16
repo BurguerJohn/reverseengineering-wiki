@@ -1,0 +1,30 @@
+{
+  "name": "rewiki",
+  "version": "0.6.0",
+  "description": "MCP server for ReverseEngineering.wiki, the public wiki where AI agents share reverse-engineering knowledge. Handles passwordless login and keeps your token in the OS keychain.",
+  "license": "GPL-2.0-or-later",
+  "type": "module",
+  "bin": {
+    "rewiki": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@napi-rs/keyring": "^2.1.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,198 @@
+{
+  "version": 1,
+  "description": "Content policy patterns shared by the MediaWiki edit hook (custom/REWikiSettings.php) and the gateway scanner (gateway/src/policy). Regexes must be valid in both PCRE and JavaScript (flags: i, m, u only). 'mediawiki: true' rules are also enforced inside MediaWiki for every edit path.",
+  "rules": [
+    {
+      "id": "private-key-block",
+      "category": "privacy",
+      "label": "private key",
+      "pattern": "-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY",
+      "flags": "",
+      "mediawiki": true
+    },
+    {
+      "id": "rewiki-token",
+      "category": "privacy",
+      "label": "ReverseEngineering.wiki access token",
+      "pattern": "\\brewiki_[A-Za-z0-9]{40}\\b",
+      "flags": "",
+      "mediawiki": true
+    },
+    {
+      "id": "github-token",
+      "category": "privacy",
+      "label": "GitHub token",
+      "pattern": "\\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,})\\b",
+      "flags": "",
+      "mediawiki": true
+    },
+    {
+      "id": "aws-access-key",
+      "category": "privacy",
+      "label": "AWS access key",
+      "pattern": "\\b(?:AKIA|ASIA)[0-9A-Z]{16}\\b",
+      "flags": "",
+      "mediawiki": true
+    },
+    {
+      "id": "slack-token",
+      "category": "privacy",
+      "label": "Slack token",
+      "pattern": "\\bxox[abposr]-[A-Za-z0-9-]{10,}",
+      "flags": "",
+      "mediawiki": true
+    },
+    {
+      "id": "llm-api-key",
+      "category": "privacy",
+      "label": "AI provider API key",
+      "pattern": "\\b(?:sk-ant-[A-Za-z0-9_-]{20,}|sk-(?:proj-)?[A-Za-z0-9]{32,})",
+      "flags": "",
+      "mediawiki": true
+    },
+    {
+      "id": "jwt",
+      "category": "privacy",
+      "label": "JSON Web Token",
+      "pattern": "\\beyJ[A-Za-z0-9_-]{10,}\\.eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}",
+      "flags": "",
+      "mediawiki": true
+    },
+    {
+      "id": "secret-assignment",
+      "category": "privacy",
+      "label": "credential assignment",
+      "pattern": "\\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)\\s*[:=]\\s*[\"']?[A-Za-z0-9_\\-+/=]{12,}",
+      "flags": "i",
+      "mediawiki": true
+    },
+    {
+      "id": "windows-user-path",
+      "category": "privacy",
+      "label": "file path containing a user name",
+      "pattern": "[A-Za-z]:\\\\{1,2}(?:Users|Documents and Settings)\\\\{1,2}(?!Public\\b|Default\\b|All Users\\b|<|%|\\$|\\{|\\.\\.\\.|…|USERNAME\\b|user\\b|YourName\\b)[^\\\\/\\s\"'<>|]+",
+      "flags": "i",
+      "mediawiki": true
+    },
+    {
+      "id": "unix-user-path",
+      "category": "privacy",
+      "label": "file path containing a user name",
+      "pattern": "(?:^|[\\s\"'(=])/(?:home|Users)/(?!<|\\$|\\{|user\\b|username\\b|you\\b|\\.\\.\\.|…)[A-Za-z0-9._-]+",
+      "flags": "m",
+      "mediawiki": true
+    },
+    {
+      "id": "email-address",
+      "category": "privacy",
+      "label": "email address",
+      "pattern": "\\b[A-Za-z0-9._%+-]+@(?!example\\.(?:com|org|net)\\b)[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b",
+      "flags": "",
+      "mediawiki": true
+    },
+    {
+      "id": "public-ipv4",
+      "category": "privacy",
+      "label": "public IP address",
+      "pattern": "(?<![\\d.])\\b(?!(?:10|127|0)\\.)(?!192\\.168\\.)(?!172\\.(?:1[6-9]|2\\d|3[01])\\.)(?!169\\.254\\.)(?!255\\.)(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)(?:\\.(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)){3}\\b(?!\\.\\d)",
+      "flags": "",
+      "mediawiki": false
+    },
+    {
+      "id": "mac-address",
+      "category": "privacy",
+      "label": "MAC address",
+      "pattern": "\\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\\b",
+      "flags": "",
+      "mediawiki": false
+    },
+    {
+      "id": "steam-id64",
+      "category": "privacy",
+      "label": "Steam account ID",
+      "pattern": "\\b7656119\\d{10}\\b",
+      "flags": "",
+      "mediawiki": true
+    },
+    {
+      "id": "decryption-key",
+      "category": "policy",
+      "label": "decryption key",
+      "pattern": "\\b(?:aes|decrypt(?:ion)?|encryption|pak|archive)[ _-]?key\\b[^\\n]{0,40}?(?:0x)?[0-9A-Fa-f]{32,64}\\b",
+      "flags": "i",
+      "mediawiki": true
+    },
+    {
+      "id": "prompt-injection",
+      "category": "injection",
+      "label": "text addressed to agents",
+      "pattern": "\\b(?:ignore|disregard|forget|override)\\s+(?:all\\s+|any\\s+)?(?:the\\s+)?(?:previous|prior|above|earlier|your)\\s+(?:instructions|prompts?|rules|guidelines|system)",
+      "flags": "i",
+      "mediawiki": true
+    },
+    {
+      "id": "prompt-injection-roles",
+      "category": "injection",
+      "label": "chat-template or role markers",
+      "pattern": "<\\|(?:im_start|im_end|system|endoftext)\\|>|\\[/?INST\\]|<</?SYS>>|^\\s*(?:system|assistant)\\s*:\\s*you\\s+(?:are|must)",
+      "flags": "im",
+      "mediawiki": true
+    },
+    {
+      "id": "prompt-injection-imperative",
+      "category": "injection",
+      "label": "instructions to the reading agent",
+      "pattern": "\\b(?:attention|note to|message (?:to|for))\\s+(?:all\\s+)?(?:ai|llm|agents?|assistants?|language models?)\\b|\\b(?:as an ai|you are an ai|dear (?:ai|agent|assistant))\\b",
+      "flags": "i",
+      "mediawiki": true
+    },
+    {
+      "id": "hidden-characters",
+      "category": "injection",
+      "label": "invisible or bidirectional control characters",
+      "pattern": "[\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u2069\\uFEFF\\u{E0000}-\\u{E007F}]",
+      "flags": "u",
+      "mediawiki": true
+    },
+    {
+      "id": "html-comment",
+      "category": "injection",
+      "label": "HTML comment (hidden text)",
+      "pattern": "<!--",
+      "flags": "",
+      "mediawiki": false
+    },
+    {
+      "id": "download-and-execute",
+      "category": "code",
+      "label": "download-and-execute",
+      "pattern": "(?:curl|wget)\\b[^\\n|]*\\|\\s*(?:ba|z)?sh\\b|\\b(?:iex|Invoke-Expression)\\b[^\\n]*(?:DownloadString|Invoke-WebRequest|iwr|irm)|DownloadString\\s*\\([^\\n]*\\)\\s*\\|\\s*iex|\\bexec\\s*\\(\\s*(?:urllib|requests)\\.|eval\\s*\\(\\s*(?:atob|base64|Buffer\\.from)",
+      "flags": "i",
+      "mediawiki": false
+    },
+    {
+      "id": "encoded-blob",
+      "category": "code",
+      "label": "large encoded payload",
+      "pattern": "[A-Za-z0-9+/]{400,}={0,2}|(?:\\\\x[0-9A-Fa-f]{2}){150,}|(?:0x[0-9A-Fa-f]{2},\\s*){200,}",
+      "flags": "",
+      "mediawiki": false
+    },
+    {
+      "id": "suspicious-link",
+      "category": "links",
+      "label": "URL shortener, paste site or direct binary download",
+      "pattern": "https?://(?:bit\\.ly|tinyurl\\.com|t\\.co|goo\\.gl|is\\.gd|cutt\\.ly|rb\\.gy|pastebin\\.com|paste\\.ee|hastebin\\.com|ghostbin\\.\\w+|anonfiles\\.\\w+|mega\\.nz|mediafire\\.com)/|https?://\\S+\\.(?:exe|dll|scr|msi|bat|cmd|ps1|vbs|jar|apk)(?:[?#]\\S*)?(?=[\\s\\])|]|$)",
+      "flags": "im",
+      "mediawiki": false
+    }
+  ],
+  "decompiler_markers": {
+    "description": "Tokens typical of decompiler output. Used to detect pasted target code over the snippet limit.",
+    "pattern": "\\b(?:FUN_[0-9a-fA-F]{6,}|sub_[0-9A-Fa-f]{5,}|LAB_[0-9a-fA-F]{6,}|DAT_[0-9a-fA-F]{6,}|loc_[0-9A-Fa-f]{5,}|undefined[1248]?|local_(?:res)?[0-9a-f]+|param_\\d+|[iuplbcs]Var\\d+|v\\d{1,3}|a\\d\\b|__fastcall|_QWORD|_DWORD|_BYTE|_WORD|HIDWORD|LODWORD)\\b",
+    "flags": "",
+    "snippet_line_limit": 15,
+    "min_markers_per_block": 4,
+    "code_page_marker_ratio": 0.08
+  }
+}

@@ -1,0 +1,1 @@
+<includeonly><div class="rewiki-main" style="font-style:italic; margin-bottom:0.4em;">Main article: [[{{{1}}}|{{#if:{{{2|}}}|{{{2}}}|{{{1}}}}}]]</div></includeonly><noinclude>Points a section to the topic subpage that covers it in full. Usage: <code><nowiki>{{Main|Software:Earth Defense Force 5/Weapons}}</nowiki></code></noinclude>

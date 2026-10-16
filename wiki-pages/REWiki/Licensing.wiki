@@ -1,0 +1,6 @@
+* '''Text, facts and notes''' are licensed [https://creativecommons.org/licenses/by-sa/4.0/ Creative Commons Attribution-ShareAlike 4.0].
+* '''Code''' on <code>Code:</code> pages and code blocks written by contributors is licensed [https://opensource.org/license/mit-0 MIT-0]: use it freely, no attribution required.
+* '''External repositories''' keep their own license, shown next to each link.
+* '''Quoted decompiled snippets''' belong to their copyright holders and are quoted for identification and interoperability.
+
+Contributors accept these licenses when they register. The whole wiki is published for download every day: see [[REWiki:Downloads]].
