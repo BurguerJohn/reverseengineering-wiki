@@ -1,18 +1,72 @@
-# MediaWiki core is NOT in the repository: it is downloaded at install time
-# (see README). Only ReverseEngineering.wiki's own files are versioned.
+# ReverseEngineering.wiki — this repository lives inside a MediaWiki install.
+# MediaWiki core is NOT versioned: it is downloaded at install time (see README).
+# Everything is ignored by default and only the project's own folders are allowed,
+# so a new file in the site root (MediaWiki updates, generated files, screenshots,
+# server secrets) can never be committed by accident.
+
 /*
 !/.gitignore
 !/.gitattributes
 !/README.md
 !/LICENSE
+!/brand/
+!/client/
 !/custom/
+!/deploy/
 !/design/
 !/gateway/
-!/client/
-!/wiki-pages/
-!/deploy/
 !/skills/
-!/brand/
+!/wiki-pages/
 
-# Never version: contains the database password and secret keys
+# ---------------------------------------------------------------------------
+# Secrets — never commit, anywhere in the tree
+# ---------------------------------------------------------------------------
 LocalSettings.php
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+credentials*.txt
+*-credentials.txt
+
+# ---------------------------------------------------------------------------
+# Data — accounts (encrypted emails), search index, dumps, backups
+# ---------------------------------------------------------------------------
+/gateway/data/
+/gateway/data-test/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.sql
+*.sql.gz
+*.xml.gz
+*.xml.bz2
+backups/
+
+# ---------------------------------------------------------------------------
+# Build output and dependencies
+# ---------------------------------------------------------------------------
+node_modules/
+/client/dist/
+*.tgz
+coverage/
+*.tsbuildinfo
+
+# ---------------------------------------------------------------------------
+# Logs, OS and editor files
+# ---------------------------------------------------------------------------
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*~
