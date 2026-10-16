@@ -733,6 +733,13 @@ ok('export_symbols (Ghidra) and export_header (C, with padding)');
   const factTitle = published.results.find((r: any) => r.tool === 'add_fact').title;
   assert.ok(JSON.stringify(await call(anon, 'read', { title: factTitle })).includes(buildTitle), 'applies_to resolved from the SHA-256 to the Build: title');
 
+  // A page linking to a general page that does not exist yet: the answer says to create it.
+  const linking = await call(a, 'create_page', { type: 'software', title: `E2E Glacier ${run}`, summary: 'A fictional Win16 game that links to general pages.', body: `## Engine
+
+An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_run: true });
+  assert.deepEqual(linking.missing_pages, [`Format:E2E NE ${run}`], JSON.stringify(linking).slice(0, 300));
+  assert.match(linking.missing_pages_hint, /create_page/);
+
   // A wrong build title: "did you mean" the real one.
   const typo = await expectError(a, 'add_fact', { ...fn('Cave::Draw', '0x2000', `Build:${cave}/1.0 (Win64, Steam)`), dry_run: true }, 'SCHEMA_INVALID');
   assert.ok(typo.message.includes(`Did you mean "${buildTitle}"`), typo.message);

@@ -87,6 +87,31 @@ async function mustExist(s: Services, t: string, hint: string): Promise<void> {
   throw new ToolError('NOT_FOUND', `${t} does not exist yet. ${hint} In a batch, put that operation first.`);
 }
 
+/**
+ * General pages (formats, platforms, libraries, techniques, tools) a text links to that do not
+ * exist yet: the writer is told to create them, so general knowledge gets its own page instead
+ * of staying on one game's page.
+ */
+function missingGeneralPages(s: Services, wikitext: string): { missing_pages?: string[]; missing_pages_hint?: string } {
+  const created = batchContext.getStore()?.created;
+  const missing = new Set<string>();
+  for (const m of wikitext.matchAll(/\[\[\s*((?:Format|Platform|Library|Technique|Tool)\s*:[^\]|#\n]+)/gi)) {
+    let t: string;
+    try {
+      t = normalizeTitle(m[1]);
+    } catch {
+      continue;
+    }
+    if (!s.index.page(t) && !created?.has(t)) missing.add(t);
+  }
+  if (!missing.size) return {};
+  const list = [...missing].slice(0, 10);
+  return {
+    missing_pages: list,
+    missing_pages_hint: `${list.join(', ')} ${list.length > 1 ? 'do' : 'does'} not exist yet. If you know something general about ${list.length > 1 ? 'them' : 'it'} (true beyond this subject), create ${list.length > 1 ? 'them' : 'it'} with create_page: a short page with a summary and what you found is enough, and other agents add to it. Search first in case it exists under another name.`,
+  };
+}
+
 function result(s: Services, t: string, revision: number | undefined, extra: Record<string, unknown> = {}) {
   return { title: t, revision, url: link(s, t), ...extra };
 }
@@ -266,7 +291,7 @@ export async function editSection(s: Services, caller: Caller, args: {
   const words = edited ? blockWords(sections, edited.index) : 0;
   const splittable = edited && edited.level > 0 && !STANDARD_SECTIONS.has(headingKey(edited.heading));
   return result(s, t, r.newrevid, {
-    section: heading, words, nochange: r.nochange || undefined,
+    section: heading, words, nochange: r.nochange || undefined, ...missingGeneralPages(s, newBody),
     hint: splittable && words > TOPIC_SPLIT_WORDS
       ? `This section now has ${words} words. Move it to a topic subpage with split_section (title="${t}", section="${heading}"), which leaves a short summary and a link here.`
       : undefined,
@@ -366,7 +391,7 @@ export async function createPage(s: Services, caller: Caller, args: {
     }
   }
   await afterWrite(s, op, created);
-  return result(s, t, r.newrevid, { aliases: created.slice(1), aliases_skipped: skipped.length ? skipped : undefined });
+  return result(s, t, r.newrevid, { aliases: created.slice(1), aliases_skipped: skipped.length ? skipped : undefined, ...missingGeneralPages(s, text) });
 }
 
 // ---- topic subpages --------------------------------------------------------------
@@ -395,7 +420,7 @@ async function createTopic(s: Services, op: Writer, t: string, args: { summary: 
   if (pending) pending.set(root, [...(pending.get(root) ?? []), line]);
   else await linkTopics(s, op, root, [line]).catch(() => {});
   await afterWrite(s, op, pending ? [t] : [t, root]);
-  return result(s, t, r.newrevid, { parent: root });
+  return result(s, t, r.newrevid, { parent: root, ...missingGeneralPages(s, text) });
 }
 
 async function linkTopics(s: Services, op: Writer, root: string, lines: string[]): Promise<void> {
