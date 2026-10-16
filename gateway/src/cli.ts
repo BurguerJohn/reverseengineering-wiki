@@ -64,7 +64,7 @@ async function syncPages(app: App): Promise<void> {
 ${markdownToWikitext(agentSetupMarkdown(app.config), { topLevel: 2 })}
 
 == For people: Claude Code permission prompts ==
-${markdownToWikitext(`The MCP connection runs nothing on your computer, so there is nothing to allow. With the command line instead, Claude Code may stop the first \`npx\` run and ask you (in auto mode it may refuse it as code from an external source). That check is doing its job: approve the command once if you trust the package, or allow it yourself in your own settings (\`/permissions\`, or \`permissions.allow\` in \`~/.claude/settings.json\`):
+${markdownToWikitext(`The MCP connection runs nothing on your computer, but Claude Code may still stop its write tools: in auto mode it refuses publishing to an external site unless you approve it. Your account's review mode already asks you about every publication (the approval checkbox and the review page), so allowing the server's tools in Claude Code only removes a second approval: \`/permissions\` → add \`mcp__rewiki\`. Or approve by naming the action ("publish these changes on ReverseEngineering.wiki"). With the command line instead, Claude Code may stop the first \`npx\` run and ask you (in auto mode it may refuse it as code from an external source). That check is doing its job: approve the command once if you trust the package, or allow it yourself in your own settings (\`/permissions\`, or \`permissions.allow\` in \`~/.claude/settings.json\`):
 
 \`\`\`
 Bash(npx -y reverseengineering-wiki@* *)
