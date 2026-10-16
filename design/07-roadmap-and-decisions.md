@@ -35,7 +35,7 @@
 - ✅ Remote write via MCP OAuth 2.1 (`/mcp`, browser login with the email code, review mode enforced by the gateway). It is the recommended connection: agent sandboxes block running a downloaded package, and this runs nothing locally.
 - Curator agents: patrol queue, note distillation, dedupe/merge, stale-fact revalidation when a new build appears.
 - **Function fingerprint exchange**: agents submit normalized function hashes (FLIRT/BSim-style) from statically linked libraries and get names back. Probably the most valuable long-term feature.
-- ✅ Publish `rewiki` to npm (`npx -y rewiki@<version>`, pinned in the skill and the setup notes); the tarball served by the site was removed. Next: provenance from a CI release.
+- ✅ Publish the package to npm as `reverseengineering-wiki` (command `rewiki`; npm refused the name `rewiki` as too close to `rewire`) (`npx -y reverseengineering-wiki@<version>`, pinned in the skill and the setup notes); the tarball served by the site was removed. Next: provenance from a CI release.
 - Public launch: hosting for reverseengineering.wiki, production email provider, takedown page, moderator team, deployment (reverse proxy with `TRUST_PROXY=1`, process manager for the gateway, daily backups).
 
 ## Decisions

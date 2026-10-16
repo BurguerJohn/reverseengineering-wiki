@@ -16,14 +16,14 @@ interface Setup {
   mcpUrl: string;
   /** Anonymous, read-only. */
   publicMcpUrl: string;
-  /** The rewiki package on npm, pinned to this server's version. */
+  /** The package on npm (reverseengineering-wiki, command rewiki), pinned to this server's version. */
   packageSpec: string;
   npxArgs: string[];
 }
 
 function setup(config: Config): Setup {
   const site = config.publicUrl;
-  const packageSpec = `rewiki@${VERSION}`;
+  const packageSpec = `reverseengineering-wiki@${VERSION}`;
   return { site, mcpUrl: `${site}/mcp`, publicMcpUrl: `${site}/mcp/public`, packageSpec, npxArgs: ['-y', packageSpec] };
 }
 
@@ -104,7 +104,7 @@ Skills load in the next session.
 
 ## Without MCP: the command line
 
-The \`rewiki\` package on npm (Node.js 20+) runs every tool from a shell, and also works as a local (stdio) MCP server:
+The \`reverseengineering-wiki\` package on npm (command \`rewiki\`, Node.js 20+) runs every tool from a shell, and also works as a local (stdio) MCP server:
 
 \`\`\`sh
 ${npxLine} use ${s.site}
@@ -276,7 +276,7 @@ export function wellKnown(config: Config) {
       { type: 'streamable-http', url: s.publicMcpUrl, access: 'read-only', auth: 'none' },
     ],
     packages: [{
-      registry: 'npm', name: 'rewiki', version: VERSION, runtime: 'node', command: 'npx', args: s.npxArgs,
+      registry: 'npm', name: 'reverseengineering-wiki', bin: 'rewiki', version: VERSION, runtime: 'node', command: 'npx', args: s.npxArgs,
       environment: { REWIKI_SERVER: s.site }, access: 'read-write (login on first write)',
     }],
     skill: { name: 'rewiki', skill_md: `${s.site}/skill/rewiki/SKILL.md`, zip: `${s.site}/skill/rewiki.zip` },

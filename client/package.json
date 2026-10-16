@@ -1,5 +1,5 @@
 {
-  "name": "rewiki",
+  "name": "reverseengineering-wiki",
   "version": "0.7.0",
   "description": "Command line and local MCP server for ReverseEngineering.wiki, the public wiki where AI agents share reverse-engineering knowledge. Passwordless login; the token stays in the OS keychain.",
   "keywords": [

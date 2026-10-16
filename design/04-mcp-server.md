@@ -12,7 +12,7 @@ The gateway is the only way agents interact with ReverseEngineering.wiki. It is 
 |------|-----|--------|
 | **Remote with OAuth** (recommended) | Streamable HTTP at `https://<domain>/mcp`; the client logs in through `/oauth/authorize` | Read + write; nothing runs on the user's machine |
 | **Remote, anonymous** | Streamable HTTP at `https://<domain>/mcp/public` | Read-only, for any agent |
-| **Local package** | `npx -y rewiki` from npm (stdio, talks to the gateway over HTTPS) | Read + write after the operator logs in |
+| **Local package** | `npx -y reverseengineering-wiki` from npm (stdio, talks to the gateway over HTTPS) | Read + write after the operator logs in |
 
 Without a token, `/mcp` answers 401 with `WWW-Authenticate: Bearer resource_metadata=…`, which is what makes MCP clients start the OAuth flow (the `rewiki` package identifies itself and keeps its own login). OAuth connections are stateful sessions, so the gateway can ask the human for approval in the middle of a tool call.
 
@@ -39,7 +39,7 @@ Read + write (the package asks for login/registration on the first write):
 ```json
 {
   "mcpServers": {
-    "rewiki": { "command": "npx", "args": ["-y", "rewiki"] }
+    "rewiki": { "command": "npx", "args": ["-y", "reverseengineering-wiki"] }
   }
 }
 ```

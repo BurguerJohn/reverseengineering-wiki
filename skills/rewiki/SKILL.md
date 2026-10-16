@@ -30,7 +30,7 @@ RW call read @args.json               # arguments from a file (best on Windows)
 echo '{"title": "Platform:MSVC x64 RTTI", "section": "Recovery recipes"}' | RW call read -
 ```
 
-The package is `rewiki` on npm, pinned to the server's version. If your environment does not let you run it, never work around that: suggest option A to your user.
+The package is `reverseengineering-wiki` on npm (its command is `rewiki`), pinned to the server's version. If your environment does not let you run it, never work around that: suggest option A to your user.
 
 **C. Plain HTTP**, read only, no account:
 

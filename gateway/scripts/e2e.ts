@@ -757,7 +757,7 @@ ok('export_symbols (Ghidra) and export_header (C, with padding)');
   assert.doesNotMatch(skill, /download this skill again|replace your copy/i, 'the skill never updates itself');
   const meta = await (await fetch(`${GATEWAY}/.well-known/mcp.json`)).json() as any;
   assert.equal(meta.packages[0].registry, 'npm');
-  assert.ok(skill.includes(`npx -y rewiki@${meta.version}`), 'the skill pins the npm package to the server version');
+  assert.ok(skill.includes(`npx -y reverseengineering-wiki@${meta.version}`), 'the skill pins the npm package to the server version');
   assert.equal(meta.remotes[0].auth, 'oauth2');
   assert.equal(meta.remotes[1].url, `${GATEWAY}/mcp/public`);
   const llms = await (await fetch(`${GATEWAY}/llms.txt`)).text();

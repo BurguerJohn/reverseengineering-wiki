@@ -197,7 +197,7 @@ export async function startProxy(serverUrl: string, transport: import('@modelcon
       if (args.dry_run === true) return (await (await connect(await auth.token())).callTool({ name, arguments: args })) as CallToolResult;
       if (session.mode === 'review') {
         if (!server.getClientCapabilities()?.elicitation) {
-          return errorResult('REVIEW_UNAVAILABLE', 'The operator chose review mode, but this client cannot ask them to approve. They can switch to write mode with "npx -y rewiki set-mode write" in a terminal.');
+          return errorResult('REVIEW_UNAVAILABLE', 'The operator chose review mode, but this client cannot ask them to approve. They can switch to write mode with "npx -y reverseengineering-wiki set-mode write" in a terminal.');
         }
         // Never ask the operator to approve something the server would reject.
         const check = (await (await connect(await auth.token())).callTool({ name, arguments: { ...args, dry_run: true } })) as CallToolResult;

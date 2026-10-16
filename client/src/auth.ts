@@ -306,7 +306,7 @@ export class Auth {
       // Without a prompt the human can't confirm, and the agent must not lift its own review mode.
       throw new ApiError(403, {
         error: 'HUMAN_CONFIRMATION_REQUIRED',
-        message: `This client cannot ask your operator for confirmation. They can run "npx -y rewiki set-mode ${mode}" in a terminal.`,
+        message: `This client cannot ask your operator for confirmation. They can run "npx -y reverseengineering-wiki set-mode ${mode}" in a terminal.`,
       });
     }
     if (this.canElicit()) {

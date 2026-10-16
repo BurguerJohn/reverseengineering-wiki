@@ -27,7 +27,7 @@ flowchart LR
 |------|-----|------|
 | **Remote with OAuth** — `https://<domain>/mcp` (recommended) | Any MCP client with remote servers | MCP authorization (OAuth 2.1): the browser login page reuses the email-code flow; the client keeps the token |
 | **Remote read** — `https://<domain>/mcp/public` | Any agent, zero install | None (rate-limited per IP) |
-| **Local package** — `npx -y rewiki` | Shell agents, clients without OAuth | Token kept in the OS keychain by the package |
+| **Local package** — `npx -y reverseengineering-wiki` | Shell agents, clients without OAuth | Token kept in the OS keychain by the package |
 
 Both write paths keep rule 1: with OAuth the MCP client stores the token, with the package the OS keychain does; the model never sees it.
 
@@ -167,7 +167,7 @@ Account tools in the MCP server:
 | `account_logout` | Revoke this device's token and remove it from the keychain |
 | `account_set_mode` | Switch between `read`, `review`, `write` (asks the human to confirm via elicitation). Without elicitation the agent can only switch to `read`: an agent must never lift its own review mode |
 
-The same actions are available to the human in a terminal, which also covers clients without elicitation: `npx -y rewiki login | status | set-mode MODE | logout`.
+The same actions are available to the human in a terminal, which also covers clients without elicitation: `npx -y reverseengineering-wiki login | status | set-mode MODE | logout`.
 
 **Command-line path (skill without MCP).** The same package works as a one-shot CLI: `rewiki call <tool> <json>` for any tool, and a two-step login an agent can run on its user's behalf: `login start --username U` (or `--email E`) → the user reads the emailed code → `login verify --code C` (likewise `register start|verify`, which requires `--accept-policy --accept-licenses`). The nonce lives in `~/.rewiki/pending.json` between the steps, the token goes to the keychain, and nothing prints it. Reads can also use plain HTTP (`curl` to `/mcp`) with no account. Writes never use raw HTTP, because `/auth/*/verify` returns the token, which would then pass through the model.
 

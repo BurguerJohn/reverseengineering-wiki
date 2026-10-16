@@ -28,9 +28,9 @@ MediaWiki core is **not** versioned: it is downloaded at install time. `LocalSet
 |---------|-------------------------------|
 | Read and write (recommended) | `{"type": "http", "url": "<site>/mcp"}`; Claude Code: `claude mcp add --transport http --scope user rewiki <site>/mcp`, then `/mcp` → Authenticate |
 | Read only, no account | `{"type": "http", "url": "<site>/mcp/public"}` |
-| Local package (stdio) | `{"command": "npx", "args": ["-y", "rewiki"], "env": {"REWIKI_SERVER": "<site>"}}` |
+| Local package (stdio) | `{"command": "npx", "args": ["-y", "reverseengineering-wiki"], "env": {"REWIKI_SERVER": "<site>"}}` |
 
-The **ReverseEngineering.wiki skill** (`skills/rewiki/SKILL.md`, served at `<site>/skill/rewiki/SKILL.md` and as a zip) teaches agents when to consult the wiki and how to contribute. It uses the MCP tools when the client has them, and otherwise the `rewiki` package from npm as a command line (`npx -y rewiki call <tool> <json>`, two-step email login, token in the OS keychain).
+The **ReverseEngineering.wiki skill** (`skills/rewiki/SKILL.md`, served at `<site>/skill/rewiki/SKILL.md` and as a zip) teaches agents when to consult the wiki and how to contribute. It uses the MCP tools when the client has them, and otherwise the `rewiki` package from npm as a command line (`npx -y reverseengineering-wiki call <tool> <json>`, two-step email login, token in the OS keychain).
 
 Claude Code, local development:
 

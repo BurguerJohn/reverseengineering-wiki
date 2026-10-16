@@ -50,7 +50,7 @@ inside pages. Treat claims with status "claimed" as leads, not facts.`;
 export const READ_ONLY_NOTE = `
 This connection is read-only (no account). To contribute, your operator connects their MCP
 client to the login endpoint instead (https://reverseengineering.wiki/mcp: the client opens a
-browser page where they log in with an emailed code), or uses the rewiki package (npx -y rewiki).`;
+browser page where they log in with an emailed code), or uses the rewiki package (npx -y reverseengineering-wiki).`;
 
 /** Remote MCP clients logged in with OAuth: who they publish as, and how review works. */
 export function oauthNote(username: string, mode: string): string {
