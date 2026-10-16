@@ -42,7 +42,28 @@ export interface Preview {
  * One batch of writes (the batch tool): titles created so far, with their text, so later
  * operations can refer to them, in a dry run too. Outside a batch there is no store.
  */
-export const batchContext = new AsyncLocalStorage<{ created: Map<string, string>; dryRun: boolean }>();
+export const batchContext = new AsyncLocalStorage<BatchStore>();
+
+export interface BatchStore {
+  created: Map<string, string>;
+  dryRun: boolean;
+  /** Pages already fetched in this batch (dropped again when the batch edits them). */
+  pageCache?: Map<string, Awaited<ReturnType<Services['sessions']['reader']['getPage']>>>;
+  /** Titles to reindex once, when the batch ends. */
+  refresh?: Set<string>;
+  /** Topic lines to add to each parent's Topics section, in one edit per parent at the end. */
+  topicLinks?: Map<string, string[]>;
+}
+
+/** MediaWiki's current version of a page; inside a batch each page is fetched once. */
+export async function readPage(s: Services, title: string) {
+  const cache = batchContext.getStore()?.pageCache;
+  const hit = cache?.get(title);
+  if (hit) return hit;
+  const page = await s.sessions.reader.getPage(title);
+  cache?.set(title, page);
+  return page;
+}
 
 /** The operator of a write call. With dryRun, edits and side effects are skipped. */
 export type Writer = Operator & { dryRun: boolean; previews?: Preview[] };
@@ -114,6 +135,7 @@ export async function mwEdit(s: Services, op: Writer, params: EditParams): Promi
     return { title: params.title, nochange: false };
   }
   if (store && params.createonly && params.text !== undefined) store.created.set(params.title, params.text);
+  store?.pageCache?.delete(params.title);
   const mw = await s.sessions.forOperator(op);
   try {
     return await mw.edit({ ...params, tags: [TAG_MCP, ...(params.tags ?? [])] });
@@ -148,7 +170,7 @@ function prettyStored(title: string, text: string): string {
 async function previewEdit(s: Services, params: EditParams): Promise<Preview> {
   if (params.undo) return { title: params.title, action: 'undo', content: `Undo of revision ${params.undo}` };
   const text = params.text ?? '';
-  const current = await s.sessions.reader.getPage(params.title);
+  const current = await readPage(s, params.title);
   if (!current.exists) {
     const type = typeOfTitle(params.title);
     const json = type === 'fact' || type === 'build' || type === 'symbols';
@@ -164,7 +186,9 @@ export async function afterWrite(s: Services, op: Writer, titles: string[]): Pro
   chargeWrite(s.db, op);
   s.db.incrementWrites(op.id);
   await maybePromote(s.db, s.sessions, op.id).catch(() => {});
-  await s.indexer.refresh(titles).catch(() => {});
+  const pending = batchContext.getStore()?.refresh;
+  if (pending) for (const t of titles) pending.add(t);
+  else await s.indexer.refresh(titles).catch(() => {});
 }
 
 /** Charges a write that does not go through afterWrite (patrol, flag). */

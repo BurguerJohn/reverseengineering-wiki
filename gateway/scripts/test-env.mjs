@@ -54,7 +54,9 @@ async function waitFor(url, label, ms = 60_000) {
 }
 
 function startWiki() {
-  return spawn(php, ['-S', `127.0.0.1:${WIKI_PORT}`, '-t', REPO_DIR], { cwd: REPO_DIR, env: wikiEnv, stdio: 'ignore' });
+  // OPcache only for this process: the machine's php.ini is not touched.
+  return spawn(php, ['-d', 'zend_extension=opcache', '-d', 'opcache.enable_cli=1', '-d', 'opcache.memory_consumption=256', '-d', 'opcache.max_accelerated_files=20000',
+    '-S', `127.0.0.1:${WIKI_PORT}`, '-t', REPO_DIR], { cwd: REPO_DIR, env: wikiEnv, stdio: 'ignore' });
 }
 
 function startGateway() {

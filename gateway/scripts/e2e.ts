@@ -659,14 +659,21 @@ ok('export_symbols (Ghidra) and export_header (C, with padding)');
     { tool: 'add_fact', arguments: { ...orphan, subject: chrono, claim: 'The ROM header carries the internal name at 0x7FC0.', data: { bytes: '43 48', offset: '0x7FC0', meaning: 'internal name' } } },
     { tool: 'register_build', arguments: { software: chrono, version: 'USA', platform: 'SNES', distribution: 'cartridge', files: [{ name: `chrono${run}.sfc`, sha256: createHash('sha256').update(`chrono-${run}`).digest('hex'), size: 4194304 }] } },
     { tool: 'create_page', arguments: { type: 'software', title: chrono, summary: 'A fictional SNES game created by a batch.', body: '## Graphics\n\nMode 1.' } },
+    { tool: 'create_page', arguments: { type: 'software', title: `${chrono}/Battle system`, summary: 'How the active time battle works in the test game.', body: '## ATB\n\nGauges.' } },
+    { tool: 'create_page', arguments: { type: 'software', title: `${chrono}/Sound`, summary: 'Sound driver of the fictional test game, in short.', body: '## Driver\n\nSPC700.' } },
   ];
   const planned = await call(a, 'batch', { operations: ops, dry_run: true });
   assert.equal(planned.dry_run, true, JSON.stringify(planned).slice(0, 400));
-  assert.deepEqual(planned.order, [3, 2, 1], 'page first, then build, then fact');
-  assert.equal(planned.preview.length, 3, 'one preview for the whole batch');
+  assert.deepEqual(planned.order, [3, 4, 5, 2, 1], 'page first, then its topics, then build, then fact');
+  assert.equal(planned.preview.length, 6, 'one preview for the whole batch: 5 pages and one Topics edit');
   await expectError(anon, 'read', { title: `Software:${chrono}` }, 'NOT_FOUND');
+  const started = Date.now();
   const published = await call(a, 'batch', { operations: ops });
-  assert.equal(published.operations, 3, JSON.stringify(published).slice(0, 400));
+  console.log(`    (batch of 5 published in ${Date.now() - started} ms)`);
+  assert.equal(published.operations, 5, JSON.stringify(published).slice(0, 400));
+  const parentHistory = await call(anon, 'history', { title: `Software:${chrono}` });
+  assert.equal(parentHistory.revisions.filter((r: any) => /Topics/.test(r.summary)).length, 1, 'both topics linked in one edit of the parent');
+  assert.equal((await call(anon, 'read', { title: chrono })).topics?.length, 2);
   assert.ok((await call(anon, 'read', { title: chrono })).title === `Software:${chrono}`, 'read accepts the bare name too');
   const broken = await call(a, 'batch', { operations: [{ tool: 'add_note', arguments: { subject: chrono, body: 'ok note in a batch', confidence: 'low' } }, { tool: 'add_note', arguments: { subject: 'Software:Nope', confidence: 'low' } }] });
   assert.equal(broken.error, 'SCHEMA_INVALID', 'every operation is validated before anything runs');

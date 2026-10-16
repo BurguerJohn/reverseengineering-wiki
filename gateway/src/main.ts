@@ -1,4 +1,5 @@
 /** Gateway server: HTTP (MCP + accounts), index polling, mail retries, daily dumps. */
+import { spawn } from 'node:child_process';
 import { createApp, ensureWikiSetup } from './app.ts';
 import { createHttpServer } from './http/server.ts';
 import { createDumps, dumpDue } from './dumps.ts';
@@ -33,6 +34,26 @@ try {
 }
 
 app.indexer.start(app.config.indexPollSeconds, (error) => log(`index poll failed: ${(error as Error).message}`));
+
+// MediaWiki's job queue ($wgJobRunRate = 0 in custom/REWikiSettings.php): drained here, a few
+// seconds after edits, instead of inside every API request.
+let jobsRunning = false;
+const runJobs = () => {
+  if (jobsRunning) return;
+  jobsRunning = true;
+  const child = spawn(app.config.mw.phpBin, ['maintenance/run.php', 'runJobs', '--maxtime=20', '--quiet'], {
+    cwd: app.config.mw.dir, env: app.config.mw.env, stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  let stderr = '';
+  child.stderr.on('data', (d) => { stderr += d; });
+  child.on('error', (error) => { jobsRunning = false; log(`runJobs failed: ${error.message}`); });
+  child.on('close', (code) => {
+    jobsRunning = false;
+    if (code) log(`runJobs exited ${code}: ${stderr.slice(0, 300)}`);
+  });
+};
+setTimeout(runJobs, 5_000);
+setInterval(runJobs, 15_000);
 app.mailer.startWorker();
 setInterval(() => app.db.pruneRateEvents(), 3_600_000);
 

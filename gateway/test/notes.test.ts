@@ -78,3 +78,11 @@ test('renamed builds: facts citing any older title still find them', () => {
   assert.deepEqual(index.namesOf('Build:Game/1.0 (snes, cartridge)').sort(), ['Build:Game/1.0 (snes, cartridge)', 'Build:Game/USA (snes)', 'Build:Game/USA Cartridge SNES']);
   assert.equal(index.factsForBuild('Build:Game/1.0 (snes, cartridge)').length, 1);
 });
+
+test('search stems words: "import thunk" finds a page about imports and thunks', () => {
+  const index = new SearchIndex(':memory:');
+  index.indexPage({ title: 'Format:PE/Imports and the IAT', revid: 1, timestamp: 't', user: 'u', content: 'Lead about imports.\n== Thunks ==\nThe IAT holds import thunks that the loader patches.' });
+  assert.equal(index.search({ query: 'IAT import thunk' }).total, 1);
+  assert.equal(index.search({ query: 'imports thunks' }).total, 1);
+  assert.equal(index.search({ query: 'IAT relocation' }).total, 0, 'all terms must still match');
+});

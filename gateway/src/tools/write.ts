@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { createTwoFilesPatch } from 'diff';
 import type { Operator } from '../db/accounts.ts';
 import {
-  ToolError, afterWrite, assertClean, batchContext, charge, link, mwEdit, now, requireWriter, type Caller, type Services, type Writer,
+  ToolError, afterWrite, assertClean, batchContext, charge, link, mwEdit, now, readPage, requireWriter, type Caller, type Services, type Writer,
 } from './context.ts';
 import { scanText, scanValue } from '../policy/scanner.ts';
 import { atLeast } from '../auth/trust.ts';
@@ -44,7 +44,7 @@ function shortSummary(text: string, max = 200): string {
 }
 
 async function currentPage(s: Services, t: string) {
-  const page = await s.sessions.reader.getPage(t);
+  const page = await readPage(s, t);
   if (page.exists) return page;
   // In a dry-run batch, a page "created" by an earlier operation exists with that text.
   const store = batchContext.getStore();
@@ -344,17 +344,41 @@ async function createTopic(s: Services, op: Writer, t: string, args: { summary: 
   const text = topicPage(root, escapeText(args.summary.trim()), markdownToWikitext(args.body, { topLevel: 2 }));
   const r = await mwEdit(s, op, { title: t, text, createonly: true, tags: ['rewiki-topic'], summary: `New topic page of [[${root}]]` });
 
-  // List it in the parent's Topics section so readers of the wiki find it too.
-  let sections = parseSections(parent.content);
+  // List it in the parent's Topics section so readers of the wiki find it too. In a batch,
+  // every topic of one parent is linked in a single edit when the batch ends (finishBatch).
   const line = `* [[${t}|${t.slice(root.length + 1)}]] — ${escapeText(shortSummary(args.summary, 160))}`;
+  const pending = batchContext.getStore()?.topicLinks;
+  if (pending) pending.set(root, [...(pending.get(root) ?? []), line]);
+  else await linkTopics(s, op, root, [line]).catch(() => {});
+  await afterWrite(s, op, pending ? [t] : [t, root]);
+  return result(s, t, r.newrevid, { parent: root });
+}
+
+async function linkTopics(s: Services, op: Writer, root: string, lines: string[]): Promise<void> {
+  batchContext.getStore()?.pageCache?.delete(root);
+  const parent = await currentPage(s, root);
+  if (!parent) return;
+  let sections = parseSections(parent.content);
   const topics = findSection(sections, 'Topics');
   sections = topics
-    ? replaceSectionBody(sections, 'Topics', [...topics.body.split('\n').filter((l) => l.trim()), line].join('\n'))
-    : insertSection(sections, 'Topics', line, TRAILING_SECTIONS);
-  await mwEdit(s, op, { title: root, text: joinSections(sections), baserevid: parent.revid, nocreate: true, tags: ['rewiki-topic'], summary: `/* Topics */ Link [[${t}]]` })
-    .catch(() => {});
-  await afterWrite(s, op, [t, root]);
-  return result(s, t, r.newrevid, { parent: root });
+    ? replaceSectionBody(sections, 'Topics', [...topics.body.split('\n').filter((l) => l.trim()), ...lines].join('\n'))
+    : insertSection(sections, 'Topics', lines.join('\n'), TRAILING_SECTIONS);
+  await mwEdit(s, op, {
+    title: root, text: joinSections(sections), baserevid: parent.revid || undefined, nocreate: !op.dryRun || !!parent.revid, tags: ['rewiki-topic'],
+    summary: `/* Topics */ Link ${lines.length === 1 ? 'a new topic page' : `${lines.length} new topic pages`}`,
+  });
+}
+
+/** End of a batch: one Topics edit per parent, then one index refresh for everything. */
+export async function finishBatch(s: Services, caller: Caller): Promise<void> {
+  const store = batchContext.getStore();
+  if (!store) return;
+  const op = requireWriter(s, caller);
+  for (const [root, lines] of store.topicLinks ?? []) {
+    await linkTopics(s, op, root, lines).catch(() => {});
+    store.refresh?.add(root);
+  }
+  if (!store.dryRun && store.refresh?.size) await s.indexer.refresh([...store.refresh]).catch(() => {});
 }
 
 export async function splitSection(s: Services, caller: Caller, args: { title: string; section: string; base_revision: number; summary: string; topic?: string }) {

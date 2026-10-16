@@ -29,7 +29,7 @@ create table if not exists pages (
 );
 create virtual table if not exists docs using fts5(
   title, section, body, type unindexed,
-  tokenize = 'unicode61 remove_diacritics 2 tokenchars ''_'''
+  tokenize = 'porter unicode61 remove_diacritics 2 tokenchars ''_'''
 );
 create table if not exists identifiers (
   kind text not null,
@@ -142,6 +142,13 @@ export class SearchIndex {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec('pragma journal_mode = wal;');
+    // An index from before stemming: drop its text table and the poll cursor, so the
+    // indexer rebuilds everything on its next pass.
+    const docs = this.db.prepare("select sql from sqlite_master where name = 'docs'").get() as { sql: string } | undefined;
+    if (docs && !docs.sql.includes('porter')) {
+      this.db.exec('drop table docs');
+      this.db.exec("create table if not exists state (key text primary key, value text not null); delete from state where key = 'rc_cursor';");
+    }
     this.db.exec(SCHEMA);
   }
 

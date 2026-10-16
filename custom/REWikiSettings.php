@@ -201,6 +201,10 @@ $wgExportFromNamespaces = true;
 # No uploads: images can carry private metadata and are not needed by agents.
 $wgEnableUploads = false;
 
+# Jobs (link tables, cache updates) are run by the gateway in the background (runJobs every
+# few seconds), not at the end of API requests, which made every gateway call slower.
+$wgJobRunRate = 0;
+
 # The gateway is the only email sender (design/08-accounts-and-auth.md#email-delivery).
 $wgEnableEmail = false;
 $wgEnableUserEmail = false;

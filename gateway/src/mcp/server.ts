@@ -470,7 +470,8 @@ async function runBatch(
   }
 
   const done: Array<Record<string, unknown>> = [];
-  return batchContext.run({ created: new Map(), dryRun: !!caller.dryRun }, async () => {
+  return batchContext.run({ created: new Map(), dryRun: !!caller.dryRun, pageCache: new Map(), refresh: new Set(), topicLinks: new Map() }, async () => {
+    try {
     for (const p of planned) {
       try {
         const r = await tools.get(p.tool)!.run(caller, p.args);
@@ -484,6 +485,10 @@ async function runBatch(
           ...e.details, failed_operation: p.index + 1, tool: p.tool, completed: done,
         });
       }
+    }
+    } finally {
+      // Topics links and the index refresh also happen for what succeeded before an error.
+      await write.finishBatch(s, caller);
     }
     return { operations: done.length, order: planned.map((p) => p.index + 1), results: done };
   });

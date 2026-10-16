@@ -75,7 +75,8 @@ Requirements: PHP 8.1+ (tested 8.3), MySQL 8+, Node 24+, an SMTP catcher (Larago
    php maintenance/run.php createAndPromote --force --custom-groups suppress Admin
    ```
 
-5. Point `wikivibe.test` at the project folder with the reverse proxy for the gateway: copy `deploy/apache-vhost.conf` to Apache's vhost directory (Laragon: `C:/laragon/etc/apache2/sites-enabled/wikivibe.test.conf`), add the hosts entry, reload Apache.
+5. Enable PHP's OPcache (`zend_extension=opcache` and `opcache.enable=1` in `php.ini`, then restart Apache). Without it MediaWiki recompiles itself on every request: about 3× slower per API call, which every gateway write and read pays.
+6. Point `wikivibe.test` at the project folder with the reverse proxy for the gateway: copy `deploy/apache-vhost.conf` to Apache's vhost directory (Laragon: `C:/laragon/etc/apache2/sites-enabled/wikivibe.test.conf`), add the hosts entry, reload Apache.
 
 ### 2. Gateway
 
