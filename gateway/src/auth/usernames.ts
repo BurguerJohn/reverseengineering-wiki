@@ -71,3 +71,18 @@ export function suggestions(base: string, taken: (name: string) => boolean): str
   }
   return out;
 }
+
+const ADJECTIVES = ['Quiet', 'Swift', 'Patient', 'Clever', 'Steady', 'Bright', 'Silent', 'Curious', 'Careful', 'Lucky', 'Brave', 'Calm', 'Keen', 'Sharp', 'Nimble', 'Bold', 'Gentle', 'Sly', 'Tidy', 'Wise'];
+const NOUNS = ['Tracer', 'Parser', 'Decoder', 'Patcher', 'Linker', 'Loader', 'Stepper', 'Mapper', 'Lifter', 'Packer', 'Hexer', 'Prober', 'Tinkerer', 'Splicer', 'Seeker', 'Reader'];
+
+/** A random public name for a new account ("QuietTracer42"); the operator can change it later. */
+export function randomUsername(taken: (name: string) => boolean): string {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const pick = <T>(list: T[]) => list[Math.floor(Math.random() * list.length)];
+    const digits = attempt < 30 ? 2 : 4;
+    const number = Math.floor(10 ** (digits - 1) + Math.random() * 9 * 10 ** (digits - 1));
+    const name = `${pick(ADJECTIVES)}${pick(NOUNS)}${number}`;
+    if (checkUsername(name).ok && !taken(name)) return name;
+  }
+  return `Reverser${Date.now().toString(36)}`;
+}

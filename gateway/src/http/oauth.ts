@@ -5,8 +5,8 @@
  * server: metadata (RFC 9728, RFC 8414), dynamic client registration (RFC 7591), the
  * authorization code flow with PKCE (S256 only) and token revocation (RFC 7009).
  *
- * The authorization page is where the human logs in or creates an account with an emailed
- * code, then lets the agent's client connect. Nothing runs on the user's machine, and the
+ * The authorization page is where the human signs in with an emailed code (an email without an
+ * account gets one, with a random username they can change), then lets the agent's client connect. Nothing runs on the user's machine, and the
  * access token goes to the MCP client, never to the model.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -144,11 +144,15 @@ interface Flow {
   cookie: string;
   created: number;
   request: AuthRequest;
-  step: 'start' | 'code' | 'consent';
-  kind?: 'login' | 'register';
+  /** consent: an existing account allows the client; create: a new account (after its email code) does. */
+  step: 'start' | 'code' | 'consent' | 'create';
+  kind?: 'login' | 'signup';
   challengeId?: string;
   nonce?: string;
   operatorId?: number;
+  /** The proven email of a new account, kept only until the account is created. */
+  email?: string;
+  suggested?: string;
   notice?: string;
 }
 
@@ -392,22 +396,13 @@ export class OAuthServer {
     const notice = flow.notice ? `<p class="notice">${esc(flow.notice)}</p>` : '';
     const wiki = this.s.config.mw.publicUrl;
     if (flow.step === 'start') {
-      const policy = pageUrl(wiki, 'REWiki:Content policy');
-      const openRegister = values.action === 'register' ? ' open' : '';
       return page('Connect an AI agent', `<h1>Connect an AI agent</h1>
 <p>This app wants to use ReverseEngineering.wiki for you: read, and publish to the public wiki under your account.</p>
 ${this.clientBox(flow.request)}${err}
-<form method="post" action="/oauth/authorize">${hidden}<input type="hidden" name="action" value="login">
-<label for="email">Your email</label><input id="email" name="email" type="email" autocomplete="email" required value="${esc(values.email)}">
-<p class="muted">We send a 6-digit code to the email of your account. No password.</p>
-<button type="submit">Send code</button></form>
-<details${openRegister}><summary>No account? Create one</summary>
-<form method="post" action="/oauth/authorize">${hidden}<input type="hidden" name="action" value="register">
-<label for="username">Username (public, not your real name)</label><input id="username" name="username" type="text" autocomplete="username" required maxlength="40" value="${esc(values.username)}">
-<label for="remail">Email (never shown)</label><input id="remail" name="email" type="email" autocomplete="email" required value="${esc(values.action === 'register' ? values.email : '')}">
-<label class="check"><input type="checkbox" name="accept_policy" value="1" required> <span>I accept the <a href="${esc(policy)}" target="_blank" rel="noopener">content policy</a>: no private data, no keys, no piracy.</span></label>
-<label class="check"><input type="checkbox" name="accept_licenses" value="1" required> <span>What my agent publishes is licensed CC BY-SA 4.0 (text) and MIT-0 (code).</span></label>
-<button type="submit">Create account</button></form></details>`);
+<form method="post" action="/oauth/authorize">${hidden}<input type="hidden" name="action" value="email">
+<label for="email">Your email</label><input id="email" name="email" type="email" autocomplete="email" required autofocus value="${esc(values.email)}">
+<p class="muted">We send you a 6-digit code. No password. No account yet? The code creates one.</p>
+<button type="submit">Send code</button></form>`);
     }
     if (flow.step === 'code') {
       return page('Enter the code', `<h1>Check your email</h1>${notice}${err}
@@ -417,16 +412,32 @@ ${this.clientBox(flow.request)}${err}
 <form method="post" action="/oauth/authorize">${hidden}<input type="hidden" name="action" value="restart"><button class="secondary" type="submit">Use another email</button></form>
 <p class="muted">The code expires in 10 minutes. Nothing arrived? Check the spam folder.</p>`);
     }
+    const modes = (current: Mode) => {
+      const checked = (m: Mode) => (current === m || (current === 'read' && m === 'review') ? ' checked' : '');
+      return `<label class="check"><input type="radio" name="mode" value="review"${checked('review')}> <span><b>Ask me before each publication</b> (recommended): the app shows you exactly what will be published and waits for your OK.</span></label>
+<label class="check"><input type="radio" name="mode" value="write"${checked('write')}> <span><b>Publish directly</b>: the agent publishes without asking. Your account, your responsibility.</span></label>`;
+    };
+    const buttons = (allow: string) => `<div class="row"><button class="secondary" type="submit" name="action" value="deny">Deny</button><button type="submit" name="action" value="${allow}">Allow</button></div>`;
+    if (flow.step === 'create') {
+      const policy = pageUrl(wiki, 'REWiki:Content policy');
+      return page('Create your account', `<h1>Create your account</h1>${err}
+<p>There is no account with this email yet. This one is created when you allow the app.</p>${this.clientBox(flow.request)}
+<form method="post" action="/oauth/authorize">${hidden}
+<label for="username">Public username</label><input id="username" name="username" type="text" autocomplete="username" required maxlength="32" value="${esc(values.username ?? flow.suggested)}">
+<p class="muted">Shown on every edit. Picked at random: keep it, change it now, or later with your agent (account_rename). Not your real name. Your email is never shown.</p>
+<label class="check"><input type="checkbox" name="accept_policy" value="1" required> <span>I accept the <a href="${esc(policy)}" target="_blank" rel="noopener">content policy</a>: no private data, no keys, no piracy.</span></label>
+<label class="check"><input type="checkbox" name="accept_licenses" value="1" required> <span>What my agent publishes is licensed CC BY-SA 4.0 (text) and MIT-0 (code).</span></label>
+${modes('review')}
+${buttons('create')}</form>`);
+    }
     const op = this.s.db.operatorById(flow.operatorId!)!;
-    const checked = (m: Mode) => (op.mode === m || (op.mode === 'read' && m === 'review') ? ' checked' : '');
     return page('Allow access', `<h1>Allow this app?</h1>${err}
 <p>Signed in as <b>${esc(op.username)}</b>.</p>${this.clientBox(flow.request)}
 <p>It will be able to search and read the wiki and publish under <b>${esc(op.username)}</b>. Everything it publishes is public.</p>
 <form method="post" action="/oauth/authorize">${hidden}
-<label class="check"><input type="radio" name="mode" value="review"${checked('review')}> <span><b>Ask me before each publication</b> (recommended): the app shows you exactly what will be published and waits for your OK.</span></label>
-<label class="check"><input type="radio" name="mode" value="write"${checked('write')}> <span><b>Publish directly</b>: the agent publishes without asking. Your account, your responsibility.</span></label>
+${modes(op.mode)}
 <p class="muted">This setting is for your account, in every app. You can disconnect the app at any time in its settings.</p>
-<div class="row"><button class="secondary" type="submit" name="action" value="deny">Deny</button><button type="submit" name="action" value="allow">Allow</button></div></form>`);
+${buttons('allow')}</form>`);
   }
 
   private async authorizeStep(req: IncomingMessage, res: ServerResponse, ip: string): Promise<void> {
@@ -440,36 +451,42 @@ ${this.clientBox(flow.request)}${err}
     const label = `${flow.request.clientName} (remote MCP)`;
     try {
       switch (form.action) {
-        case 'login': {
+        case 'email': {
           if (flow.step !== 'start') break;
           const nonce = randomBytes(24).toString('base64url');
-          const started = await this.auth.loginStart({ email: form.email, client_nonce_hash: createHash('sha256').update(nonce).digest('hex'), client_label: label }, ip);
-          Object.assign(flow, { step: 'code', kind: 'login', challengeId: started.challenge_id, nonce, notice: `${started.message} Didn't get one? Create an account on the previous page.` });
-          break;
-        }
-        case 'register': {
-          if (flow.step !== 'start') break;
-          const nonce = randomBytes(24).toString('base64url');
-          const started = await this.auth.registerStart({
-            username: form.username, email: form.email, client_label: label,
-            client_nonce_hash: createHash('sha256').update(nonce).digest('hex'),
-            consent: { policy: form.accept_policy === '1', licenses: form.accept_licenses === '1' },
-          }, ip);
-          Object.assign(flow, { step: 'code', kind: 'register', challengeId: started.challenge_id, nonce, notice: `We sent a code to ${started.sent_to}.` });
+          const started = await this.auth.emailCodeStart({ email: form.email, client_nonce_hash: createHash('sha256').update(nonce).digest('hex'), client_label: label }, ip);
+          // The same page either way: the inbox owner learns whether an account exists, nobody else.
+          Object.assign(flow, { step: 'code', kind: started.kind, challengeId: started.challenge_id, nonce, notice: `We sent a 6-digit code to ${started.sent_to}.` });
           break;
         }
         case 'verify': {
           if (flow.step !== 'code') break;
           const body = { challenge_id: flow.challengeId, code: String(form.code ?? '').replace(/\s/g, ''), client_nonce: flow.nonce };
-          flow.operatorId = flow.kind === 'register' ? (await this.auth.registerOperator(body)).operatorId : this.auth.loginOperator(body).op.id;
-          Object.assign(flow, { step: 'consent', challengeId: undefined, nonce: undefined, notice: undefined });
+          if (flow.kind === 'signup') {
+            const { email } = this.auth.signupVerify(body);
+            Object.assign(flow, { step: 'create', email, suggested: this.auth.suggestUsername(), challengeId: undefined, nonce: undefined, notice: undefined });
+          } else {
+            flow.operatorId = this.auth.loginOperator(body).op.id;
+            Object.assign(flow, { step: 'consent', challengeId: undefined, nonce: undefined, notice: undefined });
+          }
           break;
+        }
+        case 'create': {
+          if (flow.step !== 'create' || !flow.email) break;
+          if (form.accept_policy !== '1' || form.accept_licenses !== '1') {
+            throw new AuthError('CONSENT_REQUIRED', 'Accept the content policy and the licenses to create the account.');
+          }
+          flow.operatorId = await this.auth.createOperator({
+            username: form.username, email: flow.email, mode: form.mode === 'write' ? 'write' : 'review',
+          });
+          flow.email = undefined;
+          return this.grant(res, flow);
         }
         case 'restart':
           Object.assign(flow, { step: 'start', kind: undefined, challengeId: undefined, nonce: undefined, notice: undefined });
           break;
         case 'deny':
-          if (flow.step !== 'consent') break;
+          if (flow.step !== 'consent' && flow.step !== 'create') break;
           this.flows.delete(flow.id);
           return this.redirect(res, this.redirectWith(flow.request, { error: 'access_denied', error_description: 'The user denied access' }));
         case 'allow': {
@@ -478,13 +495,7 @@ ${this.clientBox(flow.request)}${err}
           if (!op || op.blocked_at) throw new AuthError('BLOCKED', 'This account is blocked.');
           // The human is here and logged in: the right place to choose the contribution mode.
           if (form.mode === 'review' || form.mode === 'write') this.auth.setMode(op, form.mode);
-          const code = randomBytes(32).toString('base64url');
-          this.s.db.insertOAuthCode({
-            code_hash: hashCode(code), client_id: flow.request.clientId, operator_id: op.id, redirect_uri: flow.request.redirectUri,
-            code_challenge: flow.request.codeChallenge, created_at: Date.now(), expires_at: Date.now() + CODE_TTL_MS,
-          });
-          this.flows.delete(flow.id);
-          return this.redirect(res, this.redirectWith(flow.request, { code }));
+          return this.grant(res, flow);
         }
       }
       this.html(res, 200, this.render(flow));
@@ -493,6 +504,17 @@ ${this.clientBox(flow.request)}${err}
       // A wrong or expired code: stay on the code step (the challenge counts attempts).
       this.html(res, error.status === 429 ? 429 : 400, this.render(flow, error.message, form));
     }
+  }
+
+  /** Issues the authorization code and sends the browser back to the client. */
+  private grant(res: ServerResponse, flow: Flow): void {
+    const code = randomBytes(32).toString('base64url');
+    this.s.db.insertOAuthCode({
+      code_hash: hashCode(code), client_id: flow.request.clientId, operator_id: flow.operatorId!, redirect_uri: flow.request.redirectUri,
+      code_challenge: flow.request.codeChallenge, created_at: Date.now(), expires_at: Date.now() + CODE_TTL_MS,
+    });
+    this.flows.delete(flow.id);
+    this.redirect(res, this.redirectWith(flow.request, { code }));
   }
 
   // ---- token & revocation ---------------------------------------------------------------------

@@ -56,7 +56,8 @@ export interface OAuthCode {
 
 export interface Challenge {
   id: string;
-  kind: 'login' | 'register';
+  /** signup: the browser login page's code for an email without an account (account created after it). */
+  kind: 'login' | 'register' | 'signup';
   username: string;
   username_key: string;
   email_enc: string | null;
@@ -117,6 +118,18 @@ create table if not exists tokens (
   expires_at text not null,
   revoked_at text
 );
+
+-- Earlier names of renamed accounts: kept reserved, and used to tell who wrote a fact or code page
+-- whose created_by still holds the old name.
+create table if not exists username_history (
+  operator_id integer not null references operators(id),
+  username text not null,
+  username_key text not null,
+  skeleton text not null,
+  renamed_at text not null
+);
+create index if not exists username_history_key on username_history(username_key);
+create index if not exists username_history_skeleton on username_history(skeleton);
 
 create table if not exists oauth_clients (
   client_id text primary key,
@@ -250,6 +263,40 @@ export class AccountsDb {
       .run(op.username, op.username_key, op.skeleton, op.email_enc, op.email_hash, op.mw_password_enc,
         op.trust, op.mode, op.terms_version, op.terms_accepted_at, op.created_at);
     return Number(result.lastInsertRowid);
+  }
+
+/** Renames an account: the old name goes to the history (reserved), flags against it follow the account. */
+  renameOperator(id: number, next: { username: string; username_key: string; skeleton: string }): void {
+    const op = this.operatorById(id);
+    if (!op) throw new Error(`No operator ${id}`);
+    this.db.exec('begin');
+    try {
+      this.db.prepare('insert into username_history (operator_id, username, username_key, skeleton, renamed_at) values (?, ?, ?, ?, ?)')
+        .run(id, op.username, op.username_key, op.skeleton, new Date().toISOString());
+      this.db.prepare('update operators set username = ?, username_key = ?, skeleton = ? where id = ?')
+        .run(next.username, next.username_key, next.skeleton, id);
+      this.db.prepare('update flags set author = ? where author = ?').run(next.username, op.username);
+      this.db.exec('commit');
+    } catch (error) {
+      this.db.exec('rollback');
+      throw error;
+    }
+  }
+
+  /** The account that uses or used this name (names are never reused), if any. */
+  operatorIdByAnyUsername(name: string): number | undefined {
+    const key = name.trim().toLowerCase().replace(/_/g, ' ');
+    const current = this.db.prepare('select id from operators where username_key = ?').get(key) as { id: number } | undefined;
+    if (current) return current.id;
+    const old = this.db.prepare('select operator_id from username_history where username_key = ? order by renamed_at desc limit 1').get(key) as { operator_id: number } | undefined;
+    return old?.operator_id;
+  }
+
+  /** Whether a former name of another account blocks this one (same name or look-alike). */
+  usernameRetired(key: string, skeleton: string, exceptOperatorId?: number): boolean {
+    const row = this.db.prepare('select operator_id from username_history where (username_key = ? or skeleton = ?) and operator_id != ? limit 1')
+      .get(key, skeleton, exceptOperatorId ?? -1);
+    return !!row;
   }
 
   setTrust(id: number, trust: TrustLevel): void {

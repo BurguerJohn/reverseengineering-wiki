@@ -149,7 +149,7 @@ export function createHttpServer(s: Services, auth: AuthService, mailer: Mailer)
           send(res, 400, { jsonrpc: '2.0', error: { code: -32000, message: 'Mcp-Session-Id header required' }, id: null });
           return;
         }
-        const server = createMcpServer(s, { operator: session.operator }, { includeWriteTools: true, serverReview: true });
+        const server = createMcpServer(s, { operator: session.operator }, { includeWriteTools: true, serverReview: true, accounts: auth });
         const operatorId = session.operator.id;
         const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),

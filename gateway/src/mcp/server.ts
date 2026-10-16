@@ -20,6 +20,7 @@ import { FACT_KINDS, CODE_KINDS, SYMBOL_KINDS, SYMBOL_SOURCES, MAX_SYMBOLS_PER_C
 import { SUBJECT_TYPES } from '../wiki/titles.ts';
 import { DUMP_KINDS } from '../dumps.ts';
 import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.ts';
+import type { Operator } from '../db/accounts.ts';
 
 export const VERSION = '0.7.0';
 
@@ -154,7 +155,12 @@ async function dryRunOf(s: Services, caller: Caller, fn: (caller: Caller, args: 
  * serverReview: a remote MCP client logged in with OAuth. The gateway enforces review mode
  * itself (the rewiki package does it on its side), and the account tools live here.
  */
-export function createMcpServer(s: Services, caller: Caller, opts: { includeWriteTools: boolean; serverReview?: boolean }): McpServer {
+/** Account operations the remote MCP account tools need (the AuthService). */
+export interface AccountOps {
+  rename(op: Operator, username: unknown): Promise<{ username: string; previous: string }>;
+}
+
+export function createMcpServer(s: Services, caller: Caller, opts: { includeWriteTools: boolean; serverReview?: boolean; accounts?: AccountOps }): McpServer {
   const note = !opts.includeWriteTools ? READ_ONLY_NOTE : opts.serverReview && caller.operator ? oauthNote(caller.operator.username, caller.operator.mode) : '';
   const server = new McpServer(
     { name: 'rewiki', version: VERSION },
@@ -305,7 +311,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     server.registerTool(name, { ...config, inputSchema } as any, writeHandler(s, caller, name, run, review) as any);
   };
 
-  if (review) registerAccountTools(s, server, caller);
+  if (review) registerAccountTools(s, server, caller, opts.accounts);
 
   // ---- write tools ----------------------------------------------------------------
 
@@ -585,7 +591,7 @@ async function runBatch(
 }
 
 /** account_status / account_set_mode for remote MCP clients (the rewiki package has its own). */
-function registerAccountTools(s: Services, server: McpServer, caller: Caller) {
+function registerAccountTools(s: Services, server: McpServer, caller: Caller, accounts?: AccountOps) {
   const current = () => {
     const op = caller.operator ? s.db.operatorById(caller.operator.id) : undefined;
     if (!op || op.blocked_at) throw new ToolError('AUTH_REQUIRED', 'This account is blocked.');
@@ -625,6 +631,32 @@ function registerAccountTools(s: Services, server: McpServer, caller: Caller) {
     }
     s.db.setMode(op.id, a.mode);
     return { mode: a.mode };
+  }));
+  if (!accounts) return;
+  server.registerTool('account_rename', {
+    title: 'Change the public username',
+    description: 'Change the username shown on every edit. New accounts get a random one. Use only a name your operator chose; never invent one. Past edits stay with the account; the old name stays reserved for it. At most 3 renames in 30 days.',
+    inputSchema: { username: z.string().min(3).max(32).describe('The new username your operator chose: 3-32 letters, digits, "-" or "_"; not their real name') },
+  }, handler(async (a: any, extra: Extra) => {
+    const op = current();
+    if (server.server.getClientCapabilities()?.elicitation) {
+      const answer = await extra.sendRequest({
+        method: 'elicitation/create',
+        params: {
+          message: `ReverseEngineering.wiki: change your public username from "${op.username}" to "${a.username}"? It is shown on every edit, past ones included.`,
+          requestedSchema: { type: 'object', properties: { confirm: { type: 'boolean', title: 'Rename' } }, required: ['confirm'] },
+        },
+      } as ElicitRequest, ElicitResultSchema, { timeout: APPROVAL_TIMEOUT_MS });
+      if (answer.action !== 'accept' || answer.content?.confirm !== true) throw new ToolError('REVIEW_DECLINED', 'Your operator kept the current username.');
+    }
+    try {
+      const renamed = await accounts.rename(op, a.username);
+      return { ...renamed, note: `Edits are now shown as ${renamed.username}, past ones included.` };
+    } catch (error) {
+      const e = error as { code?: string; message?: string; extra?: Record<string, unknown> };
+      if (e.code) throw new ToolError(e.code, e.message ?? 'Rename failed', e.extra ?? {});
+      throw error;
+    }
   }));
 }
 

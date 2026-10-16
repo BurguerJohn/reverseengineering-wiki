@@ -3,6 +3,8 @@
  * are bound to the requesting client (nonce), and tokens are only ever
  * returned to the client package — never to the model.
  */
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { Config } from '../config.ts';
 import type { AccountsDb, Mode, Operator, TokenRow } from '../db/accounts.ts';
 import type { Mailer } from '../mail/index.ts';
@@ -11,12 +13,14 @@ import type { SessionPool } from '../mw/sessions.ts';
 import {
   newAccessToken, newOneTimeCode, normalizeEmail, randomBase62, safeEqualHex, sha256, type Secrets,
 } from '../util/crypto.ts';
-import { checkUsername, suggestions, usernameKey } from './usernames.ts';
+import { checkUsername, randomUsername, suggestions, usernameKey } from './usernames.ts';
 import { quota } from './trust.ts';
 
 export const CODE_TTL_MINUTES = 10;
 export const MAX_ATTEMPTS = 5;
 export const TOKEN_IDLE_DAYS = 90;
+/** Renames per account in 30 days. */
+export const MAX_RENAMES = 3;
 
 /** What every login start says, whether or not the account exists (no enumeration). */
 export const LOGIN_SENT_EMAIL = 'If an account uses this email address, a 6-digit code was sent to it.';
@@ -64,18 +68,24 @@ export class AuthService {
 
   private takenLocally(name: string): boolean {
     const check = checkUsername(name);
-    return !!this.db.operatorByUsernameKey(check.key) || this.db.operatorsBySkeleton(check.skeleton).length > 0;
+    return !!this.db.operatorByUsernameKey(check.key) || this.db.operatorsBySkeleton(check.skeleton).length > 0
+      || this.db.usernameRetired(check.key, check.skeleton);
   }
 
-  async usernameAvailable(raw: string): Promise<{ available: boolean; username: string; reason?: string; suggestions: string[] }> {
+  /** exceptOperatorId: the account being renamed (its own former names stay available to it). */
+  async usernameAvailable(raw: string, exceptOperatorId?: number): Promise<{ available: boolean; username: string; reason?: string; suggestions: string[] }> {
     const check = checkUsername(String(raw ?? ''));
     const suggest = () => suggestions(check.username, (n) => this.takenLocally(n));
     if (!check.ok) return { available: false, username: check.username, reason: `Username ${check.reason}.`, suggestions: suggest() };
-    if (this.db.operatorByUsernameKey(check.key)) {
+    const owner = this.db.operatorByUsernameKey(check.key);
+    if (owner && owner.id !== exceptOperatorId) {
       return { available: false, username: check.username, reason: 'Username is already taken.', suggestions: suggest() };
     }
-    if (this.db.operatorsBySkeleton(check.skeleton).length) {
+    if (this.db.operatorsBySkeleton(check.skeleton).some((o) => o.id !== exceptOperatorId)) {
       return { available: false, username: check.username, reason: 'Username is too similar to an existing one.', suggestions: suggest() };
+    }
+    if (this.db.usernameRetired(check.key, check.skeleton, exceptOperatorId)) {
+      return { available: false, username: check.username, reason: 'Username was used by another account and stays reserved.', suggestions: suggest() };
     }
     const mw = await this.sessions.gateway();
     const exists = await mw.usersExist([check.username]);
@@ -92,7 +102,7 @@ export class AuthService {
   }
 
   private newChallenge(fields: {
-    kind: 'login' | 'register'; username: string; email?: string; operatorId?: number; nonceHash: string;
+    kind: 'login' | 'register' | 'signup'; username: string; email?: string; operatorId?: number; nonceHash: string;
     ip: string; clientLabel: string; consent?: unknown; valid: boolean;
   }): { id: string; code: string } {
     const id = randomBase62(24);
@@ -125,7 +135,7 @@ export class AuthService {
     return nonceHash;
   }
 
-  private verifyChallenge(id: unknown, code: unknown, nonce: unknown, kind: 'login' | 'register') {
+  private verifyChallenge(id: unknown, code: unknown, nonce: unknown, kind: 'login' | 'register' | 'signup') {
     const generic = new AuthError('INVALID_CODE', 'The code is invalid or expired. Request a new one if needed.', 401);
     if (typeof id !== 'string' || typeof code !== 'string' || typeof nonce !== 'string') throw generic;
     const challenge = this.db.challenge(id);
@@ -183,36 +193,106 @@ export class AuthService {
   /** Checks a registration code and creates the account (MediaWiki user included). */
   async registerOperator(body: any): Promise<{ operatorId: number; label: string }> {
     const challenge = this.verifyChallenge(body?.challenge_id, body?.code, body?.client_nonce, 'register');
+    const consent = JSON.parse(challenge.consent_json ?? '{}');
+    const operatorId = await this.createOperator({
+      username: challenge.username, email: this.secrets.decrypt(challenge.email_enc!),
+      termsVersion: consent.terms_version, termsAcceptedAt: consent.at,
+    });
+    return { operatorId, label: challenge.client_label };
+  }
+
+  /** Creates the account and its MediaWiki user. The email must already be proven (a checked code). */
+  async createOperator(fields: { username: string; email: string; termsVersion?: string; termsAcceptedAt?: string; mode?: Mode }): Promise<number> {
     // Re-check: someone may have taken the name since the availability check.
-    const availability = await this.usernameAvailable(challenge.username);
+    const availability = await this.usernameAvailable(fields.username);
     if (!availability.available) {
-      throw new AuthError('USERNAME_UNAVAILABLE', `${availability.reason} Choose another username and start again.`, 409, { suggestions: availability.suggestions });
+      throw new AuthError('USERNAME_UNAVAILABLE', `${availability.reason} Choose another username.`, 409, { suggestions: availability.suggestions });
     }
-    const email = this.secrets.decrypt(challenge.email_enc!);
+    const username = availability.username;
     const mwPassword = randomBase62(32);
     const mw = await this.sessions.gateway();
-    await mw.createAccount(challenge.username, mwPassword);
-    await mw.userRights(challenge.username, ['agent'], [], 'ReverseEngineering.wiki operator account');
-    const consent = JSON.parse(challenge.consent_json ?? '{}');
-    let operatorId: number;
+    await mw.createAccount(username, mwPassword);
+    await mw.userRights(username, ['agent'], [], 'ReverseEngineering.wiki operator account');
     try {
-      operatorId = this.db.insertOperator({
-        username: challenge.username,
-        username_key: challenge.username_key,
-        skeleton: checkUsername(challenge.username).skeleton,
-        email_enc: this.secrets.encrypt(email),
-        email_hash: this.secrets.hmac(email),
+      return this.db.insertOperator({
+        username,
+        username_key: usernameKey(username),
+        skeleton: checkUsername(username).skeleton,
+        email_enc: this.secrets.encrypt(fields.email),
+        email_hash: this.secrets.hmac(fields.email),
         mw_password_enc: this.secrets.encrypt(mwPassword),
         trust: 'new',
-        mode: 'review',
-        terms_version: consent.terms_version ?? this.config.termsVersion,
-        terms_accepted_at: consent.at ?? new Date().toISOString(),
+        mode: fields.mode ?? 'review',
+        terms_version: fields.termsVersion ?? this.config.termsVersion,
+        terms_accepted_at: fields.termsAcceptedAt ?? new Date().toISOString(),
         created_at: new Date().toISOString(),
       });
     } catch {
       throw new AuthError('USERNAME_UNAVAILABLE', 'That username or email was registered a moment ago. Start again.', 409);
     }
-    return { operatorId, label: challenge.client_label };
+  }
+
+  // ---- email-first sign-in (the browser login page) ------------------------------------
+
+  /**
+   * One entry point for the browser: an email with an account gets a login code; an email
+   * without one gets a code that creates the account once checked. The page says the same
+   * thing in both cases; only the inbox owner learns which it was.
+   */
+  async emailCodeStart(body: any, ip: string): Promise<{ challenge_id: string; kind: 'login' | 'signup'; sent_to: string }> {
+    const nonceHash = this.checkNonceHash(body?.client_nonce_hash);
+    const email = normalizeEmail(String(body?.email ?? ''));
+    if (!EMAIL.test(email)) throw new AuthError('INVALID_EMAIL', 'That does not look like a valid email address.');
+    const label = String(body?.client_label ?? '');
+    const emailHash = this.secrets.hmac(email);
+    if (this.db.operatorByEmailHash(emailHash)) {
+      const started = await this.loginStart({ email, client_nonce_hash: nonceHash, client_label: label }, ip);
+      return { challenge_id: started.challenge_id, kind: 'login', sent_to: maskEmail(email) };
+    }
+    if (!takeIdentifierAllowance(this.db, ip, emailHash)) throw new AuthError('RATE_LIMITED', TOO_MANY_ACCOUNTS, 429);
+    if (!takeSendAllowance(this.db, { emailHash, ip })) {
+      throw new AuthError('RATE_LIMITED', 'Too many codes requested. Wait a few minutes and try again.', 429);
+    }
+    const { id, code } = this.newChallenge({ kind: 'signup', username: '', email, nonceHash, ip, clientLabel: label, valid: true });
+    await this.mailer.sendMail({ to: email, template: 'signup-code', idempotencyKey: id, data: { code, client_label: label, expires_minutes: String(CODE_TTL_MINUTES) } });
+    return { challenge_id: id, kind: 'signup', sent_to: maskEmail(email) };
+  }
+
+  /** Checks a signup code; returns the proven email (the account is created after the human accepts the terms). */
+  signupVerify(body: any): { email: string } {
+    const challenge = this.verifyChallenge(body?.challenge_id, body?.code, body?.client_nonce, 'signup');
+    return { email: this.secrets.decrypt(challenge.email_enc!) };
+  }
+
+  /** A free random name for a new account. */
+  suggestUsername(): string {
+    return randomUsername((name) => this.takenLocally(name));
+  }
+
+  // ---- renaming ------------------------------------------------------------------------
+
+  /**
+   * Changes the public username. Edits stay attributed to the same account (MediaWiki keeps
+   * them by user ID); the old name stays reserved for this account.
+   */
+  async rename(op: Operator, raw: unknown): Promise<{ username: string; previous: string }> {
+    const availability = await this.usernameAvailable(String(raw ?? ''), op.id);
+    if (!availability.available) {
+      throw new AuthError('USERNAME_UNAVAILABLE', availability.reason ?? 'Username unavailable.', 409, { suggestions: availability.suggestions });
+    }
+    const next = availability.username;
+    if (next === op.username) return { username: next, previous: op.username };
+    if (!this.db.takeRate([{ scope: 'rename', key: String(op.id), max: MAX_RENAMES, windowSeconds: 30 * 86400 }])) {
+      throw new AuthError('RATE_LIMITED', `At most ${MAX_RENAMES} renames in 30 days.`, 429);
+    }
+    const mw = this.config.mw;
+    await promisify(execFile)(mw.phpBin, [
+      'maintenance/run.php', 'renameUser', op.username, next,
+      '--performer', mw.gatewayUser, '--reason', 'Renamed by the account owner',
+    ], { cwd: mw.dir, env: mw.env, timeout: 120_000 });
+    this.db.renameOperator(op.id, { username: next, username_key: usernameKey(next), skeleton: checkUsername(next).skeleton });
+    this.sessions.forget(op.id);
+    return { username: next, previous: op.username };
   }
 
   // ---- login -------------------------------------------------------------------

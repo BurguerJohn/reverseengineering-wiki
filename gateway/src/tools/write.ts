@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { createTwoFilesPatch } from 'diff';
 import type { Operator } from '../db/accounts.ts';
 import {
-  ToolError, afterWrite, assertClean, batchContext, charge, currentWriter, link, mwEdit, now, readPage, requireWriter, type Caller, type Services, type Writer,
+  ToolError, afterWrite, assertClean, batchContext, charge, currentWriter, link, mwEdit, now, readPage, requireWriter, type Caller, type Services, type Writer, sameOperator,
 } from './context.ts';
 import { scanText, scanValue } from '../policy/scanner.ts';
 import { atLeast } from '../auth/trust.ts';
@@ -140,7 +140,8 @@ export async function verify(s: Services, caller: Caller, args: { target: string
     const res = map[args.result];
     if (!res) throw new ToolError('BAD_REQUEST', 'For facts, result must be confirmed, refuted or partial.');
     const doc = JSON.parse(page.content) as FactDoc;
-    const independent = doc.created_by !== op.username && !(doc.verifications ?? []).some((v) => v.operator === op.username && v.result === res);
+    // By account, not by name: a renamed operator stays the same operator.
+    const independent = !sameOperator(s, doc.created_by, op) && !(doc.verifications ?? []).some((v) => sameOperator(s, v.operator, op) && v.result === res);
     doc.verifications = [...(doc.verifications ?? []), { operator: op.username, date, result: res, method: args.method, ...(build ? { build } : {}), ...(args.notes ? { notes: args.notes } : {}) }];
     const before = doc.status;
     if (res === 'confirmed' && independent && doc.status === 'claimed') doc.status = 'verified';
@@ -163,7 +164,7 @@ export async function verify(s: Services, caller: Caller, args: { target: string
   if (!res) throw new ToolError('BAD_REQUEST', 'For code, result must be ran, broken or partial.');
   const doc = parseCodePage(page.content);
   if (!doc) throw new ToolError('SCHEMA_INVALID', 'This Code page is malformed.');
-  const independent = doc.meta.created_by !== op.username;
+  const independent = !sameOperator(s, doc.meta.created_by, op);
   doc.meta.verifications = [...(doc.meta.verifications ?? []), { operator: op.username, date, result: res, method: args.method, ...(build ? { build } : {}), ...(args.notes ? { notes: args.notes } : {}) }];
   if (independent && res === 'ran') doc.meta.status = 'verified';
   if (res === 'broken') doc.meta.status = 'broken';

@@ -60,5 +60,6 @@ export function oauthNote(username: string, mode: string): string {
 You are logged in as ${username} (contribution mode: ${mode}). Writes are published as ${username};
 never ask your operator for an account or a token. In review mode the server shows your operator
 exactly what will be published and waits for their OK before publishing: describe what you want
-to publish, then call the tool. account_status shows the mode and the hourly quota.`;
+to publish, then call the tool. account_status shows the mode and the hourly quota. New accounts
+get a random username; if your operator wants another one, account_rename with the name they choose.`;
 }

@@ -18,6 +18,7 @@ if (process.env.REWIKI_ENV_FILE !== '.env.test') {
 }
 const GATEWAY = process.env.GATEWAY_URL ?? 'http://127.0.0.1:8789';
 const MAILPIT = process.env.MAILPIT_URL ?? 'http://localhost:8025';
+const WIKI = process.env.WIKI_URL ?? 'http://127.0.0.1:8788';
 const run = randomBytes(3).toString('hex');
 process.on('exit', () => {
   if (process.env.E2E_KEEP === '1') return;
@@ -133,17 +134,25 @@ let html = await browser.open(authUrl);
 assert.match(html, /E2E MCP client/);
 assert.match(html, /not verified; it will return to <code>127\.0\.0\.1:33418<\/code>/);
 {
-  const foreign = await browser.post({ action: 'login', email }, 'rewiki_oauth=someone-else');
+  const foreign = await browser.post({ action: 'email', email }, 'rewiki_oauth=someone-else');
   assert.equal(foreign.status, 400, 'a form posted without this browser\'s cookie is refused');
 }
-let step1 = await browser.post({ action: 'register', username, email, accept_policy: '1', accept_licenses: '1' });
+// An email without an account: the same page as a login, and the code creates the account.
+let step1 = await browser.post({ action: 'email', email });
 assert.match(step1.html, /Check your email/);
+assert.match(step1.html, /We sent a 6-digit code to/);
 const wrong = await browser.post({ action: 'verify', code: '000000' });
 assert.match(wrong.html, /invalid or expired/);
 step1 = await browser.post({ action: 'verify', code: await codeFor(email) });
-assert.match(step1.html, new RegExp(`Signed in as <b>${username}</b>`));
+assert.match(step1.html, /Create your account/);
+const suggested = /name="username"[^>]*value="([^"]+)"/.exec(step1.html)?.[1] ?? '';
+assert.match(suggested, /^[A-Z][a-z]+[A-Z][a-z]+\d{2,4}$/, `a random username is suggested (${suggested})`);
 assert.match(step1.html, /value="review" checked/, 'new accounts start in review mode');
-const allowed = await browser.post({ action: 'allow', mode: 'review' });
+const noConsent = await browser.post({ action: 'create', username, mode: 'review' });
+assert.match(noConsent.html, /Accept the content policy/);
+const taken = await browser.post({ action: 'create', username: 'Admin', mode: 'review', accept_policy: '1', accept_licenses: '1' });
+assert.match(taken.html, /reserved/);
+const allowed = await browser.post({ action: 'create', username, mode: 'review', accept_policy: '1', accept_licenses: '1' });
 assert.equal(allowed.status, 302);
 const back = new URL(allowed.location!);
 assert.equal(`${back.origin}${back.pathname}`, REDIRECT);
@@ -152,7 +161,7 @@ assert.equal(back.searchParams.get('iss'), GATEWAY);
 const code = back.searchParams.get('code')!;
 await new StreamableHTTPClientTransport(new URL(`${GATEWAY}/mcp`), { authProvider: provider }).finishAuth(code);
 assert.match(provider.saved?.access_token ?? '', /^rewiki_[A-Za-z0-9]{40}$/);
-ok('SDK client: 401 → discovery → dynamic registration → PKCE; the human creates an account with an emailed code (wrong code and foreign cookie refused) and allows; code → token');
+ok('SDK client: 401 → discovery → dynamic registration → PKCE; an email without an account gets a code that creates one (random name suggested, editable; terms required; wrong code and foreign cookie refused); code → token');
 
 // ---- review mode, enforced by the server -------------------------------------------------
 const prompts: string[] = [];
@@ -211,8 +220,27 @@ const promptsNow = prompts.length;
 const direct = parse(await client.callTool({ name: 'add_note', arguments: { subject, body: 'Published directly in write mode.', confidence: 'low' } }));
 assert.ok(direct.title, JSON.stringify(direct));
 assert.equal(prompts.length, promptsNow, 'no prompt in write mode');
-await client.close();
 ok('write mode after the operator confirms in the client: publishes without prompts');
+
+// ---- renaming: same account, new public name ---------------------------------------------
+const renamedTo = `OAuthRenamed-${run}`;
+answer = { confirm: true };
+const renamed = parse(await client.callTool({ name: 'account_rename', arguments: { username: renamedTo } }));
+assert.equal(renamed.username, renamedTo, JSON.stringify(renamed));
+assert.equal(renamed.previous, username);
+assert.match(prompts.at(-1)!, new RegExp(`from "${username}" to "${renamedTo}"`), 'the operator confirms the new name');
+const users = await (await fetch(`${WIKI}/api.php?action=query&list=users&ususers=${encodeURIComponent(`${renamedTo}|${username}`)}&format=json`)).json() as any;
+assert.ok(users.query.users.some((u: any) => u.name === renamedTo && u.userid), 'the MediaWiki user was renamed');
+assert.ok(users.query.users.some((u: any) => u.name === username && 'missing' in u), 'the old MediaWiki name is free in the wiki');
+const oldName = await (await fetch(`${GATEWAY}/auth/username-available`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) })).json() as any;
+assert.equal(oldName.available, false, 'the old name stays reserved for this account');
+assert.equal(parse(await client.callTool({ name: 'account_status', arguments: {} })).username, renamedTo);
+const afterRename = parse(await client.callTool({ name: 'add_note', arguments: { subject, body: 'Published after renaming the account.', confidence: 'low' } }));
+assert.ok(afterRename.title, JSON.stringify(afterRename));
+const history = await (await fetch(`${WIKI}/api.php?action=query&prop=revisions&titles=${encodeURIComponent(subject)}&rvlimit=1&rvdir=newer&rvprop=user&format=json`)).json() as any;
+assert.equal((Object.values(history.query.pages)[0] as any).revisions[0].user, renamedTo, 'past edits now show the new name');
+await client.close();
+ok('account_rename: confirmed by the operator; MediaWiki user renamed with its past edits; old name reserved; publishing keeps working');
 
 // ---- second app: log in with the email; code and token rules --------------------------------
 {
@@ -230,9 +258,10 @@ ok('write mode after the operator confirms in the client: publishes without prom
   const second = new Browser();
   html = await second.open(authorize());
   assert.match(html, /Second app/, 'loopback redirect on any port (RFC 8252)');
-  const sent = await second.post({ action: 'login', email });
-  assert.match(sent.html, /If an account uses this email address, a 6-digit code was sent/);
-  await second.post({ action: 'verify', code: await codeFor(email) });
+  const sent = await second.post({ action: 'email', email });
+  assert.match(sent.html, /We sent a 6-digit code to/, 'the same answer as for an email without an account');
+  const signedIn = await second.post({ action: 'verify', code: await codeFor(email) });
+  assert.match(signedIn.html, new RegExp(`Signed in as <b>${renamedTo}</b>`), 'an email with an account logs in to it');
   const allow = await second.post({ action: 'allow', mode: 'review' });
   const secondCode = new URL(allow.location!).searchParams.get('code')!;
   const exchange = (v: string) => fetch(`${GATEWAY}/oauth/token`, {
@@ -248,7 +277,7 @@ ok('write mode after the operator confirms in the client: publishes without prom
   // A fresh code, then revocation ends the token.
   const third = new Browser();
   await third.open(authorize({ state: 's2' }));
-  await third.post({ action: 'login', email });
+  await third.post({ action: 'email', email });
   await third.post({ action: 'verify', code: await codeFor(email) });
   const allow3 = await third.post({ action: 'allow', mode: 'review' });
   const code3 = new URL(allow3.location!).searchParams.get('code')!;

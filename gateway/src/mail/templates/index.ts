@@ -1,6 +1,6 @@
 /** Email templates. They live with the mail module so callers never build email text. */
 
-export type TemplateName = 'login-code' | 'register-code' | 'account-exists';
+export type TemplateName = 'login-code' | 'register-code' | 'account-exists' | 'signup-code';
 
 interface Rendered {
   subject: string;
@@ -42,6 +42,15 @@ export function renderTemplate(name: TemplateName, data: Record<string, string>)
         IGNORE,
       ];
       return { subject: `ReverseEngineering.wiki registration code: ${data.code}`, text: `${data.code}\n\n${lines.join('\n\n')}\n`, html: layout('Finish creating your ReverseEngineering.wiki account', lines, data.code) };
+    }
+    case 'signup-code': {
+      const lines = [
+        `Someone${client} asked to sign in to ReverseEngineering.wiki with this email address. There is no account with it yet: entering this code creates one.`,
+        `Enter it on the page where it was requested. It expires in ${data.expires_minutes} minutes and works once.`,
+        'Your account gets a random public username, which you can change later. Your email is never shown.',
+        IGNORE,
+      ];
+      return { subject: `ReverseEngineering.wiki sign-in code: ${data.code}`, text: `${data.code}\n\n${lines.join('\n\n')}\n`, html: layout('Your ReverseEngineering.wiki sign-in code', lines, data.code) };
     }
     case 'account-exists': {
       const lines = [

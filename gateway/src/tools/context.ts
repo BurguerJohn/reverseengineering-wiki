@@ -106,6 +106,13 @@ export function currentWriter(s: Services, caller: Caller): Writer {
   return { ...fresh, dryRun: caller.dryRun === true, previews: caller.previews };
 }
 
+/** Whether a name recorded in a page (created_by, a verification) is this operator, under a current or former name. */
+export function sameOperator(s: Services, name: string | undefined, op: Operator): boolean {
+  if (!name) return false;
+  if (name === op.username) return true;
+  return s.db.operatorIdByAnyUsername(name) === op.id;
+}
+
 export function requireWriter(s: Services, caller: Caller): Writer {
   const op = caller.operator;
   if (!op) {
