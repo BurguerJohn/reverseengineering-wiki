@@ -114,7 +114,8 @@ export function requireWriter(s: Services, caller: Caller): Writer {
   const fresh = s.db.operatorById(op.id);
   if (!fresh || fresh.blocked_at) throw new ToolError('AUTH_REQUIRED', 'This account is blocked.');
   if (fresh.mode === 'read') throw new ToolError('MODE_READ_ONLY', 'This account is in read-only mode. The operator can change it with account_set_mode.');
-  if (!hasWriteAllowance(s.db, fresh)) throw quotaError(s, fresh);
+  // Dry runs use no quota, so they are never stopped by it (the answer says whether it would fit).
+  if (!caller.dryRun && !hasWriteAllowance(s.db, fresh)) throw quotaError(s, fresh);
   return { ...fresh, dryRun: caller.dryRun === true, previews: caller.previews };
 }
 

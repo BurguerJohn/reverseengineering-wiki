@@ -113,6 +113,23 @@ assert.equal(dry.dry_run, true, JSON.stringify(dry));
 assert.equal(prompts.length, promptsBefore, 'no approval prompt for an invalid write or a dry run');
 ok('review mode: the server checks first (invalid → error, operator not asked); dry_run needs no approval');
 
+{
+  // Over the hourly quota: valid, but it would not go through, so the operator is not asked.
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(new URL('../../gateway/data-test/gateway.sqlite', import.meta.url));
+  const id = db.prepare('select id from operators where username = ?').get(username).id;
+  const insert = db.prepare("insert into rate_events (scope, key, at) values ('write', ?, ?)");
+  for (let i = 0; i < 30; i++) insert.run(String(id), Date.now() - 60_000);
+  const before = prompts.length;
+  const full = parse(await client.callTool({ name: 'add_note', arguments: { subject, body: 'Valid, but the hourly quota is used up.', confidence: 'low' } }));
+  assert.equal(full.error, 'RATE_LIMITED', JSON.stringify(full));
+  assert.equal(full.quota?.fits_now, 0);
+  assert.equal(prompts.length, before, 'no approval prompt for something the quota would stop');
+  db.prepare("delete from rate_events where scope = 'write' and key = ?").run(String(id));
+  db.close();
+  ok('review mode over the quota: the operator is not asked; the agent gets the quota numbers');
+}
+
 const toWrite = parse(await client.callTool({ name: 'account_set_mode', arguments: { mode: 'write' } }));
 assert.equal(toWrite.mode, 'write');
 const approvals = prompts.length;

@@ -160,6 +160,13 @@ async function call(name: string, raw: string | undefined, confirm: boolean, dry
         console.error('\nThe server rejected this; nothing was published and your user was not asked. Fix it and run the command again.');
         return;
       }
+      const checked = (check.structuredContent ?? {}) as Record<string, any>;
+      if (checked.would_publish === false) {
+        print(check);
+        console.error('\nValid, but over this hour\'s write quota (see quota above): your user was not asked. Send fewer operations now and the rest later.');
+        process.exitCode = 1;
+        return;
+      }
       const preview = formatPreview(check);
       console.log(`REVIEW_REQUIRED: this account is in review mode. ${describeCheck(check)} Show your user the text below (exactly what will be stored), get their explicit approval in the conversation, then repeat the same command with --confirm. No separate --dry-run is needed: this was the check.\n\n${preview || summarize(name, args)}`);
       process.exitCode = 2;

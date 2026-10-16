@@ -18,7 +18,7 @@ import { SUBJECT_TYPES } from '../wiki/titles.ts';
 import { DUMP_KINDS } from '../dumps.ts';
 import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE } from './instructions.ts';
 
-export const VERSION = '0.6.1';
+export const VERSION = '0.6.2';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -60,16 +60,23 @@ const evidenceItem = z.object({
 const DRY_RUN = z.boolean().optional().describe('Check everything (titles, schema, duplicates, policy, conflicts) and report what would happen, without publishing or using quota');
 
 /** Wraps a write tool so that dry_run=true runs the same code with edits and side effects skipped. */
-function writeHandler(caller: Caller, fn: (caller: Caller, args: any) => Promise<Record<string, unknown>> | Record<string, unknown>) {
+function writeHandler(s: Services, caller: Caller, fn: (caller: Caller, args: any) => Promise<Record<string, unknown>> | Record<string, unknown>) {
   return handler(async (args: any) => {
     const { dry_run: dryRun, ...rest } = args ?? {};
     if (!dryRun) return fn(caller, rest);
     const previews: Preview[] = [];
     const out = await fn({ ...caller, dryRun: true, previews }, rest);
+    // A dry run validates whatever the quota: it uses none. It only says whether publishing would fit now.
+    const needed = typeof out.operations === 'number' ? out.operations : 1;
+    const q = caller.operator ? quota(s.db, caller.operator) : null;
+    const fits = !q || q.left >= needed;
     return {
-      dry_run: true, would_publish: true,
-      note: 'Checked by the server: valid. Nothing was published and no quota was used. preview shows exactly what would be stored. Repeat without dry_run to publish.',
+      dry_run: true, would_publish: fits,
+      note: fits
+        ? 'Checked by the server: valid. Nothing was published and no quota was used. preview shows exactly what would be stored. Repeat without dry_run to publish.'
+        : `Valid, but publishing it needs ${needed} writes and only ${q!.left} of ${q!.limit} are left this hour${q!.frees_in_minutes ? ` (the next frees up in ${q!.frees_in_minutes} min)` : ''}. Publish at most ${q!.left} operations now and the rest later, or wait. Do not ask your operator to approve the whole batch now: it would be refused.`,
       ...out, preview: previews,
+      quota: fits ? undefined : { ...q, needed, fits_now: q!.left },
     };
   });
 }
@@ -219,7 +226,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
   const registerWrite = (name: string, config: { inputSchema: Record<string, z.ZodTypeAny> } & Record<string, unknown>, run: Run) => {
     const { dry_run: _unused, ...shape } = config.inputSchema;
     writeTools.set(name, { schema: z.object(shape), run });
-    server.registerTool(name, config as any, writeHandler(caller, run));
+    server.registerTool(name, config as any, writeHandler(s, caller, run));
   };
 
   // ---- write tools ----------------------------------------------------------------
@@ -433,7 +440,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       })).min(1).max(MAX_BATCH),
     },
     annotations: WRITE,
-  }, writeHandler(caller, (c, a) => runBatch(s, c, a.operations, writeTools)));
+  }, writeHandler(s, caller, (c, a) => runBatch(s, c, a.operations, writeTools)));
 
   return withResources(server);
 }
@@ -464,8 +471,9 @@ async function runBatch(
     else p.args = parsed.data as Record<string, unknown>;
   }
   if (problems.length) throw new ToolError('SCHEMA_INVALID', `Invalid operations: ${problems.slice(0, 10).join(' | ')}`, { problems });
-  // Checked in the dry run too: an operator is never asked to approve a batch the quota would stop.
-  if (planned.length > remainingWrites(s.db, op)) throw quotaError(s, op, planned.length);
+  // A real batch either fits the hourly quota whole or does not start. A dry run is not stopped
+  // here: it validates everything and reports would_publish=false (see writeHandler).
+  if (!caller.dryRun && planned.length > remainingWrites(s.db, op)) throw quotaError(s, op, planned.length);
 
   const done: Array<Record<string, unknown>> = [];
   let followUp: string[] = [];

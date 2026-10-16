@@ -722,13 +722,18 @@ ok('export_symbols (Ghidra) and export_header (C, with padding)');
   assert.match(mid.message, /were published/);
   for (let i = 0; i < 30; i++) insert.run(String(opC.id), Date.now() - 60_000);
   const over = await call(c, 'batch', { dry_run: true, operations: [{ tool: 'add_note', arguments: { subject: game3, body: 'One more note, over the quota.', confidence: 'low' } }] });
-  assert.equal(over.error, 'RATE_LIMITED', 'a dry run is refused when the real run would be');
-  assert.equal(over.quota.left, 0);
+  assert.equal(over.dry_run, true, 'a dry run still validates over the quota');
+  assert.equal(over.would_publish, false, JSON.stringify(over).slice(0, 300));
+  assert.equal(over.quota.fits_now, 0);
   assert.ok(over.quota.frees_in_minutes >= 1 && over.quota.frees_in_minutes <= 60);
+  assert.equal(over.preview.length, 1, 'with the full preview');
+  const invalidOver = await call(c, 'add_note', { subject: 'NoNamespace', body: 'Invalid and over the quota at once.', confidence: 'low', dry_run: true });
+  assert.equal(invalidOver.error, 'BAD_TITLE', 'over the quota, validation errors still come first');
+  await expectError(c, 'batch', { operations: [{ tool: 'add_note', arguments: { subject: game3, body: 'One more note, over the quota.', confidence: 'low' } }] }, 'RATE_LIMITED');
   const status = await (await fetch(`${GATEWAY}/auth/status`, { headers: { Authorization: `Bearer ${tokenC}` } })).json() as any;
   assert.equal(status.writes_this_hour.left, 0);
   await c.close();
-  ok('quota: a batch using the last writes reports results and links topics; over-quota dry runs are refused with the numbers');
+  ok('quota: a batch using the last writes reports results; mid-batch errors list what ran; over-quota dry runs still validate (would_publish=false), real runs are refused');
 }
 
 // ---- public schemas and skill safety ------------------------------------------------------------

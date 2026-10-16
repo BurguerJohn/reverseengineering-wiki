@@ -14,7 +14,7 @@ import { ApiError, GatewayApi } from './api.ts';
 import { Auth, AuthDeclined, AuthRequired } from './auth.ts';
 import { rememberedAccount } from './store.ts';
 
-export const VERSION = '0.6.1';
+export const VERSION = '0.6.2';
 
 const ACCOUNT_TOOLS: Tool[] = [
   {
@@ -202,6 +202,10 @@ export async function startProxy(serverUrl: string, transport: import('@modelcon
         // Never ask the operator to approve something the server would reject.
         const check = (await (await connect(await auth.token())).callTool({ name, arguments: { ...args, dry_run: true } })) as CallToolResult;
         if (check.isError) return check;
+        const checked = (check.structuredContent ?? {}) as Record<string, any>;
+        if (checked.would_publish === false) {
+          return errorResult('RATE_LIMITED', `${checked.note} The operator was not asked.`, { quota: checked.quota });
+        }
         const approval = await server.elicitInput({
           message: `ReverseEngineering.wiki (review mode): your agent wants to publish this publicly. ${describeCheck(check)}\n\n${formatPreview(check) || summarize(name, args)}`,
           requestedSchema: { type: 'object', properties: { approve: { type: 'boolean', title: 'Publish it' } }, required: ['approve'] },
