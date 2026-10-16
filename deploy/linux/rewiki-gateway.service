@@ -1,0 +1,28 @@
+# ReverseEngineering.wiki gateway (MCP server, accounts, search index, dumps, MediaWiki jobs).
+# Install: cp deploy/linux/rewiki-gateway.service /etc/systemd/system/ && systemctl daemon-reload
+#          systemctl enable --now rewiki-gateway
+# Logs: journalctl -u rewiki-gateway -f
+
+[Unit]
+Description=ReverseEngineering.wiki gateway
+After=network-online.target mysql.service apache2.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rewiki
+Group=rewiki
+WorkingDirectory=/srv/rewiki/gateway
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning src/main.ts
+Restart=always
+RestartSec=3
+# Hardening: the gateway only writes its data directory and the site's static discovery files.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/rewiki
+
+[Install]
+WantedBy=multi-user.target
