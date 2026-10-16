@@ -12,6 +12,7 @@
 !/wiki-pages/
 !/deploy/
 !/skills/
+!/brand/
 
 # Never version: contains the database password and secret keys
 LocalSettings.php

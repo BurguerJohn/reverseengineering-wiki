@@ -35,6 +35,16 @@ $wgLanguageCode = 'en';
 $wgMetaNamespace = 'REWiki';
 
 # ---------------------------------------------------------------------------
+# Logo (brand/): the icon is "> • <", reversed code brackets looking in at a point.
+# ---------------------------------------------------------------------------
+$wgLogos = [
+	'1x' => "$wgScriptPath/brand/rewiki-logo.svg",
+	'icon' => "$wgScriptPath/brand/rewiki-icon.svg",
+	'wordmark' => [ 'src' => "$wgScriptPath/brand/rewiki-wordmark.svg", 'width' => 190, 'height' => 22 ],
+];
+$wgFavicon = "$wgScriptPath/brand/rewiki-icon.svg";
+
+# ---------------------------------------------------------------------------
 # Namespaces (design/02-knowledge-model.md#namespaces)
 # Even IDs are subject namespaces, odd IDs their talk namespaces.
 # ---------------------------------------------------------------------------

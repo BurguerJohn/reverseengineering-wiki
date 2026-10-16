@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="135" height="135" viewBox="0 0 135 135">
+  <title>ReverseEngineering.wiki</title>
+  <!-- Square logo for the older skins (MonoBook, Timeless): the icon above the name. -->
+  <g transform="translate(35.5 8)">
+    <rect width="64" height="64" rx="14" fill="#0f172a"/>
+    <path d="M12 21 L22 32 L12 43 M52 21 L42 32 L52 43" fill="none" stroke="#f8fafc" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="32" cy="32" r="4.5" fill="#22c55e"/>
+  </g>
+  <g font-family="'Segoe UI', 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-weight="700" text-anchor="middle">
+    <text x="67.5" y="98" textLength="125" lengthAdjust="spacingAndGlyphs" font-size="15" fill="#0f172a">ReverseEngineering</text>
+    <text x="67.5" y="120" font-size="17" fill="#16a34a">.wiki</text>
+  </g>
+</svg>
