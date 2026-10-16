@@ -24,8 +24,9 @@ import { SUBJECT_TYPES } from '../wiki/titles.ts';
 import { DUMP_KINDS } from '../dumps.ts';
 import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.ts';
 import type { Operator } from '../db/accounts.ts';
+import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.7.1';
+export const VERSION = '0.7.2';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -69,13 +70,11 @@ const evidenceItem = z.object({
 
 const DRY_RUN = z.boolean().optional().describe('Check everything (titles, schema, duplicates, policy, conflicts) and report what would happen, without publishing or using quota');
 
-const OPERATOR_APPROVED = z.boolean().optional().describe('Review mode in a client without approval prompts only: true after your user explicitly approved, in the conversation, the preview this server returned for exactly these arguments');
+const REVIEW_ID = z.string().optional().describe('Review mode, when the server answered REVIEW_REQUIRED: the review_id it gave, repeated with the same arguments after your user approved at review_url')
 
 /** Review mode enforced by the gateway (remote MCP clients logged in with OAuth). */
 interface ServerReview {
   server: McpServer;
-  /** Previews already shown to the agent for approval in the conversation (clients without elicitation). */
-  shown: Set<string>;
 }
 
 const APPROVAL_TIMEOUT_MS = 15 * 60_000;
@@ -91,31 +90,46 @@ function previewText(name: string, check: Record<string, unknown>): string {
  * Asks the operator to approve a publication. The dry run comes first: the operator is never
  * asked about something the server would reject or the quota would stop.
  */
-async function approve(s: Services, review: ServerReview, name: string, args: Record<string, unknown>, check: Record<string, unknown>, approvedInChat: boolean, extra: Extra) {
+async function approve(s: Services, review: ServerReview, operatorId: number, name: string, args: Record<string, unknown>, check: Record<string, unknown>, reviewId: string | undefined, extra: Extra) {
   if (check.would_publish === false) throw new ToolError('RATE_LIMITED', `${check.note} Your operator was not asked.`, { quota: check.quota });
+  const key = createHash('sha256').update(`${name}
+${JSON.stringify(args)}`).digest('hex');
+  if (reviewId) {
+    // The repeat after the operator approved in the browser: same account, same arguments.
+    const row = s.db.review(reviewId);
+    if (!row || row.operator_id !== operatorId || row.args_hash !== key || row.expires_at < Date.now()) {
+      throw new ToolError('REVIEW_MISMATCH', 'This review_id is unknown, expired, or belongs to different arguments. Nothing was published. Call again without review_id for a new review link.');
+    }
+    if (row.status === 'approved' && s.db.setReviewStatus(row.id, 'approved', 'used')) return;
+    if (row.status === 'declined') throw new ToolError('REVIEW_DECLINED', 'Your operator declined this publication. Nothing was published. Do not retry it unchanged.');
+    if (row.status === 'used') throw new ToolError('REVIEW_USED', 'This approval was already used for a publication. Call again without review_id to publish it once more.');
+    throw new ToolError('REVIEW_PENDING', `Not approved yet. Your user approves it at ${reviewUrl(s, row.id)}; repeat this call when they say they did.`, { review_url: reviewUrl(s, row.id), review_id: row.id });
+  }
   const text = previewText(name, check);
+  const id = createReview(s, operatorId, name, key, text);
+  const url = reviewUrl(s, id);
   if (review.server.server.getClientCapabilities()?.elicitation) {
+    // Some clients show only the form, not the message: the link sits next to the checkbox too.
     const answer = await extra.sendRequest({
       method: 'elicitation/create',
       params: {
-        message: `ReverseEngineering.wiki (review mode): your agent wants to publish this on the public wiki.\n\n${text}`,
-        requestedSchema: { type: 'object', properties: { approve: { type: 'boolean', title: 'Publish it' } }, required: ['approve'] },
+        message: `ReverseEngineering.wiki (review mode): your agent wants to publish on the public wiki. See exactly what will be published: ${url}
+
+${text}`,
+        requestedSchema: { type: 'object', properties: { approve: { type: 'boolean', title: 'Publish it', description: `See exactly what will be published first: ${url}` } }, required: ['approve'] },
       },
     } as ElicitRequest, ElicitResultSchema, { timeout: APPROVAL_TIMEOUT_MS });
-    if (answer.action !== 'accept' || answer.content?.approve !== true) {
-      throw new ToolError('REVIEW_DECLINED', 'Your operator did not approve this publication. Nothing was published. Do not retry it unchanged.');
+    if (answer.action === 'accept' && answer.content?.approve === true) {
+      s.db.setReviewStatus(id, 'pending', 'used');
+      return;
     }
-    return;
+    // Approved on the page instead of in the client's prompt: that counts too.
+    if (s.db.setReviewStatus(id, 'approved', 'used')) return;
+    s.db.setReviewStatus(id, 'pending', 'declined');
+    throw new ToolError('REVIEW_DECLINED', 'Your operator did not approve this publication. Nothing was published. Do not retry it unchanged.');
   }
-  // No approval prompts in this client: the agent shows the preview and asks in the conversation.
-  const key = createHash('sha256').update(`${name}\n${JSON.stringify(args)}`).digest('hex');
-  if (approvedInChat && review.shown.has(key)) {
-    review.shown.delete(key);
-    return;
-  }
-  review.shown.add(key);
-  throw new ToolError('REVIEW_REQUIRED', 'This account is in review mode and this client cannot show approval prompts. Nothing was published. Show your user the preview below exactly as it is, ask for their explicit approval in the conversation, and only after a clear yes repeat the same call with the same arguments plus operator_approved: true.', {
-    preview: text,
+  throw new ToolError('REVIEW_REQUIRED', 'This account is in review mode: nothing was published yet. Give your user review_url: it shows exactly what will be published and lets them approve it in their own browser. When they say they approved, repeat the same call with the same arguments plus review_id. Do not open the link yourself.', {
+    review_url: url, review_id: id, expires_in_minutes: 60,
   });
 }
 
@@ -125,10 +139,10 @@ async function approve(s: Services, review: ServerReview, name: string, args: Re
  */
 function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Caller, args: any) => Promise<Record<string, unknown>> | Record<string, unknown>, review?: ServerReview) {
   return handler(async (args: any, extra: Extra) => {
-    const { dry_run: dryRun, operator_approved: approvedInChat, ...rest } = args ?? {};
+    const { dry_run: dryRun, review_id: reviewId, ...rest } = args ?? {};
     if (!dryRun) {
       const mode = caller.operator ? s.db.operatorById(caller.operator.id)?.mode : undefined;
-      if (review && mode === 'review') await approve(s, review, name, rest, await dryRunOf(s, caller, fn, rest), approvedInChat === true, extra);
+      if (review && mode === 'review') await approve(s, review, caller.operator!.id, name, rest, await dryRunOf(s, caller, fn, rest), typeof reviewId === 'string' ? reviewId : undefined, extra);
       return fn(caller, rest);
     }
     return dryRunOf(s, caller, fn, rest);
@@ -169,7 +183,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     { name: 'rewiki', version: VERSION },
     { instructions: SERVER_INSTRUCTIONS + note, capabilities: { logging: {} } },
   );
-  const review: ServerReview | undefined = opts.serverReview ? { server, shown: new Set() } : undefined;
+  const review: ServerReview | undefined = opts.serverReview ? { server } : undefined;
 
   // ---- read tools -----------------------------------------------------------------
 
@@ -310,7 +324,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
   const registerWrite = (name: string, config: { inputSchema: Record<string, z.ZodTypeAny> } & Record<string, unknown>, run: Run) => {
     const { dry_run: _unused, ...shape } = config.inputSchema;
     writeTools.set(name, { schema: z.object(shape), run });
-    const inputSchema = review ? { ...config.inputSchema, operator_approved: OPERATOR_APPROVED } : config.inputSchema;
+    const inputSchema = review ? { ...config.inputSchema, review_id: REVIEW_ID } : config.inputSchema;
     server.registerTool(name, { ...config, inputSchema } as any, writeHandler(s, caller, name, run, review) as any);
   };
 
@@ -524,7 +538,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     description: 'Up to 50 writes in one call, e.g. a new page with its build, facts and code. They run in a safe order (pages, topics, builds, then facts/code/notes/symbols, then edits, then reviews), so later operations may refer to pages created earlier in the same batch (builds also by a file\'s SHA-256). With dry_run, all of them are checked and previewed together and every failing operation is reported at once; in review mode that means one approval for the whole batch. A real run stops at the first error; the error lists what was already published in completed (with titles and revisions). A real batch larger than the remaining hourly quota is refused whole before anything runs.',
     inputSchema: {
       dry_run: DRY_RUN,
-      ...(review ? { operator_approved: OPERATOR_APPROVED } : {}),
+      ...(review ? { review_id: REVIEW_ID } : {}),
       operations: z.array(z.object({
         tool: z.enum([...writeTools.keys()] as [string, ...string[]]),
         arguments: z.record(z.string(), z.unknown()).describe('The same arguments as that tool, without dry_run'),
@@ -550,7 +564,7 @@ async function runBatch(
 ) {
   const op = requireWriter(s, caller);
   const planned = operations.map((o, index) => {
-    const { dry_run: _ignored, operator_approved: _approval, ...args } = o.arguments ?? {};
+    const { dry_run: _ignored, review_id: _review, ...args } = o.arguments ?? {};
     const topic = o.tool === 'create_page' && typeof args.title === 'string' && args.title.includes('/');
     return { index, tool: o.tool, args, rank: (BATCH_ORDER[o.tool] ?? 5) + (topic ? 1 : 0) };
   }).sort((a, b) => a.rank - b.rank || a.index - b.index);

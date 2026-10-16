@@ -15,6 +15,7 @@ import type { Services } from '../tools/context.ts';
 import { AuthError, TOKEN_IDLE_DAYS, type AuthService } from '../auth/service.ts';
 import type { Mode, OAuthClient } from '../db/accounts.ts';
 import { pageUrl } from '../wiki/titles.ts';
+import { esc, page, newWebSession } from './web.ts';
 
 export const SCOPE = 'wiki';
 const CODE_TTL_MS = 5 * 60_000;
@@ -154,33 +155,6 @@ interface Flow {
   email?: string;
   suggested?: string;
   notice?: string;
-}
-
-const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-
-const ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#0f172a"/><path d="M12 21 L22 32 L12 43 M52 21 L42 32 L52 43" fill="none" stroke="#f8fafc" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="32" cy="32" r="4.5" fill="#22c55e"/></svg>';
-
-const STYLE = `
-:root{--ink:#0f172a;--muted:#475569;--line:#cbd5e1;--bg:#f8fafc;--card:#fff;--accent:#16a34a;--warn:#b45309;--err:#b91c1c}
-@media (prefers-color-scheme:dark){:root{--ink:#e2e8f0;--muted:#94a3b8;--line:#334155;--bg:#0b1120;--card:#111827;--accent:#22c55e;--warn:#f59e0b;--err:#f87171}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-main{max-width:460px;margin:40px auto;padding:0 16px}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:24px}
-header{display:flex;align-items:center;gap:12px;margin-bottom:20px}header b{font-size:18px}header span{color:var(--accent);font-weight:700}
-h1{font-size:20px;margin:0 0 8px}p{margin:8px 0}.muted{color:var(--muted);font-size:14px}
-label{display:block;margin:14px 0 4px;font-weight:600;font-size:14px}input[type=email],input[type=text]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-size:16px}
-.check{display:flex;gap:8px;align-items:flex-start;font-weight:400;margin:10px 0}.check input{margin-top:4px}
-button{margin-top:18px;width:100%;padding:11px;border:0;border-radius:8px;background:var(--ink);color:var(--bg);font-size:16px;font-weight:600;cursor:pointer}
-button.secondary{background:transparent;color:var(--ink);border:1px solid var(--line)}
-.row{display:flex;gap:10px}.row button{flex:1}
-details{margin-top:20px;border-top:1px solid var(--line);padding-top:14px}summary{cursor:pointer;font-weight:600}
-.notice{border-left:3px solid var(--warn);padding:6px 10px;margin:12px 0;font-size:14px}.error{border-left-color:var(--err)}
-.client{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:12px 0;font-size:14px}
-code{font-size:13px}a{color:var(--accent)}`;
-
-function page(title: string, body: string): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} · ReverseEngineering.wiki</title><meta name="robots" content="noindex"><style>${STYLE}</style></head>
-<body><main><header>${ICON}<b>ReverseEngineering<span>.wiki</span></b></header><div class="card">${body}</div></main></body></html>`;
 }
 
 export class OAuthServer {
@@ -514,7 +488,9 @@ ${buttons('allow')}</form>`);
       code_challenge: flow.request.codeChallenge, created_at: Date.now(), expires_at: Date.now() + CODE_TTL_MS,
     });
     this.flows.delete(flow.id);
-    this.redirect(res, this.redirectWith(flow.request, { code }));
+    // The browser that authorized the client can approve its publications later (review pages).
+    res.writeHead(302, { Location: this.redirectWith(flow.request, { code }), 'Cache-Control': 'no-store', 'Set-Cookie': newWebSession(this.s.db, this.issuer, flow.operatorId!) });
+    res.end();
   }
 
   // ---- token & revocation ---------------------------------------------------------------------

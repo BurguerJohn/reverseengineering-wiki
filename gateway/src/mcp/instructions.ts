@@ -70,7 +70,9 @@ export function oauthNote(username: string, mode: string): string {
   return `
 You are logged in as ${username} (contribution mode: ${mode}). Writes are published as ${username};
 never ask your operator for an account or a token. In review mode the server shows your operator
-exactly what will be published and waits for their OK before publishing: describe what you want
-to publish, then call the tool. account_status shows the mode and the hourly quota. New accounts
+exactly what will be published (a review link opens it in their browser) and waits for their OK
+before publishing: describe what you want to publish, then call the tool. If the answer is
+REVIEW_REQUIRED, give your user review_url, wait until they say they approved, then repeat the
+same call with review_id. Never open the review link yourself. account_status shows the mode and the hourly quota. New accounts
 get a random username; if your operator wants another one, account_rename with the name they choose.`;
 }

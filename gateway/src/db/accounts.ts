@@ -35,6 +35,18 @@ export interface TokenRow {
   oauth_client_id: string | null;
 }
 
+/** A publication waiting for the operator's approval in the browser (review mode). */
+export interface ReviewRow {
+  id: string;
+  operator_id: number;
+  tool: string;
+  args_hash: string;
+  preview: string;
+  created_at: number;
+  expires_at: number;
+  status: 'pending' | 'approved' | 'declined' | 'used';
+}
+
 export interface OAuthClient {
   client_id: string;
   name: string;
@@ -130,6 +142,26 @@ create table if not exists username_history (
 );
 create index if not exists username_history_key on username_history(username_key);
 create index if not exists username_history_skeleton on username_history(skeleton);
+
+-- Browser sessions on the gateway's own pages (review approvals). Set when the human logs in
+-- there or authorizes an MCP client; agents never see them.
+create table if not exists web_sessions (
+  token_hash text primary key,
+  operator_id integer not null references operators(id),
+  created_at integer not null,
+  expires_at integer not null
+);
+
+create table if not exists reviews (
+  id text primary key,
+  operator_id integer not null references operators(id),
+  tool text not null,
+  args_hash text not null,
+  preview text not null,
+  created_at integer not null,
+  expires_at integer not null,
+  status text not null default 'pending'
+);
 
 create table if not exists oauth_clients (
   client_id text primary key,
@@ -349,6 +381,36 @@ export class AccountsDb {
   revokeAllTokens(operatorId: number): void {
     this.db.prepare('update tokens set revoked_at = ? where operator_id = ? and revoked_at is null')
       .run(new Date().toISOString(), operatorId);
+  }
+
+  // ---- browser sessions and reviews ----------------------------------------
+
+  insertWebSession(tokenHash: string, operatorId: number, expiresAt: number): void {
+    this.db.prepare('insert into web_sessions (token_hash, operator_id, created_at, expires_at) values (?, ?, ?, ?)').run(tokenHash, operatorId, Date.now(), expiresAt);
+  }
+
+  webSessionOperator(tokenHash: string): number | undefined {
+    const row = this.db.prepare('select operator_id, expires_at from web_sessions where token_hash = ?').get(tokenHash) as { operator_id: number; expires_at: number } | undefined;
+    return row && row.expires_at > Date.now() ? row.operator_id : undefined;
+  }
+
+  insertReview(review: Omit<ReviewRow, 'status'>): void {
+    this.db.prepare('insert into reviews (id, operator_id, tool, args_hash, preview, created_at, expires_at) values (?, ?, ?, ?, ?, ?, ?)')
+      .run(review.id, review.operator_id, review.tool, review.args_hash, review.preview, review.created_at, review.expires_at);
+  }
+
+  review(id: string): ReviewRow | undefined {
+    return this.db.prepare('select * from reviews where id = ?').get(id) as ReviewRow | undefined;
+  }
+
+  /** Moves a review from one status to another; false if it was not in the expected status. */
+  setReviewStatus(id: string, from: ReviewRow['status'], to: ReviewRow['status']): boolean {
+    return this.db.prepare('update reviews set status = ? where id = ? and status = ?').run(to, id, from).changes === 1;
+  }
+
+  pruneReviews(): void {
+    this.db.prepare('delete from reviews where expires_at < ?').run(Date.now() - 86_400_000);
+    this.db.prepare('delete from web_sessions where expires_at < ?').run(Date.now());
   }
 
   // ---- OAuth (remote MCP clients) -------------------------------------------

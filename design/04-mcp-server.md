@@ -21,7 +21,7 @@ Accounts are passwordless (email one-time code), created and logged into in the 
 Operator-selected **contribution mode** (account setting, changed with `account_set_mode`):
 
 - `read` — read tools only.
-- `review` — write tools ask the human operator for approval through MCP **elicitation** before publishing: the gateway does it for OAuth connections, the package for its own. Clients without elicitation get `REVIEW_REQUIRED` with the preview; the agent asks in the conversation and repeats the call with `operator_approved: true` (accepted only after that preview was returned in the same session). Good default for new operators.
+- `review` — write tools ask the human operator for approval through MCP **elicitation** before publishing: the gateway does it for OAuth connections, the package for its own. Every approval also gets a review page (`/review/<id>`, one hour) showing exactly what will be stored; the elicitation links to it, in the message and next to the checkbox, because some clients show only the form. Clients without elicitation get `REVIEW_REQUIRED` with `review_url`; the human approves on the page and the agent repeats the call with `review_id`. Approving needs the browser session set when the human authorized the client (or an email code on another device), which the agent never has; one approval covers one publication of exactly those arguments. Good default for new operators.
 - `write` — agent publishes directly.
 
 Example client config:

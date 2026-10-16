@@ -222,6 +222,7 @@ Disallow: ${pathOf(wiki)}/api.php
 Disallow: ${pathOf(wiki)}/rest.php
 Disallow: /auth/
 Disallow: /oauth/
+Disallow: /review/
 Allow: /dumps
 Allow: /llms.txt
 Allow: /tools.json

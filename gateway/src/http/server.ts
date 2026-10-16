@@ -15,6 +15,7 @@ import { createMcpServer, VERSION } from '../mcp/server.ts';
 import { llmsTxt, renderSkill, toolSchemas, wellKnown } from './discovery.ts';
 import { DUMP_KINDS, latestDump, listDumps } from '../dumps.ts';
 import { OAuthServer, challengeHeader } from './oauth.ts';
+import { ReviewPages } from './review.ts';
 
 const MAX_BODY = 2 * 1024 * 1024;
 const SESSION_IDLE_MS = 60 * 60_000;
@@ -71,6 +72,7 @@ export function createHttpServer(s: Services, auth: AuthService, mailer: Mailer)
   };
 
   const oauth = new OAuthServer(s, auth);
+  const reviews = new ReviewPages(s, auth);
 
   // Remote MCP clients (OAuth) get a session each: the server may ask the human to approve a
   // publication in the middle of a tool call (elicitation), which needs the session's stream.
@@ -155,6 +157,9 @@ export function createHttpServer(s: Services, auth: AuthService, mailer: Mailer)
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
             sessions.set(id, { transport, operatorId, seen: Date.now() });
+            // Which clients connect, and whether they can show approval prompts (no personal data).
+            const info = server.server.getClientVersion();
+            console.log(`[${new Date().toISOString()}] MCP session: ${info?.name ?? '?'} ${info?.version ?? ''}, elicitation: ${server.server.getClientCapabilities()?.elicitation ? 'yes' : 'no'}`);
           },
         });
         transport.onclose = () => {
@@ -166,8 +171,9 @@ export function createHttpServer(s: Services, auth: AuthService, mailer: Mailer)
         return;
       }
 
-      // ---- OAuth (remote MCP clients) ------------------------------------------------
+      // ---- OAuth (remote MCP clients) and review approvals -----------------------------
       if (await oauth.handle(req, res, path, clientIp(req))) return;
+      if (path.startsWith('/review/') && await reviews.handle(req, res, path, clientIp(req))) return;
 
       // ---- accounts ------------------------------------------------------------------
       if (path.startsWith('/auth/')) {

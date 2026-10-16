@@ -47,23 +47,36 @@ async function codeFor(email: string): Promise<string> {
 
 /** The human's browser on the authorization page: keeps the flow cookie, posts the forms. */
 class Browser {
-  cookie = '';
+  /** Cookies by name, as a browser keeps them (paths ignored: one site). */
+  jar = new Map<string, string>();
   flow = '';
+  get cookie(): string {
+    return [...this.jar].map(([k, v]) => `${k}=${v}`).join('; ');
+  }
+  private keep(r: Response): void {
+    for (const c of r.headers.getSetCookie()) {
+      const [pair] = c.split(';');
+      const eq = pair.indexOf('=');
+      this.jar.set(pair.slice(0, eq), pair.slice(eq + 1));
+    }
+  }
   async open(url: URL | string): Promise<string> {
-    const r = await fetch(url, { headers: { 'X-Forwarded-For': FAKE_IP }, redirect: 'manual' });
-    const set = r.headers.get('set-cookie');
-    if (set) this.cookie = set.split(';')[0];
+    const r = await fetch(url, { headers: { 'X-Forwarded-For': FAKE_IP, Cookie: this.cookie }, redirect: 'manual' });
+    this.keep(r);
     const html = await r.text();
     this.flow = /name="flow" value="([^"]+)"/.exec(html)?.[1] ?? this.flow;
     return html;
   }
-  async post(fields: Record<string, string>, cookie = this.cookie): Promise<{ status: number; html: string; location: string | null }> {
-    const r = await fetch(`${GATEWAY}/oauth/authorize`, {
+  async post(fields: Record<string, string>, cookie = this.cookie, url = `${GATEWAY}/oauth/authorize`): Promise<{ status: number; html: string; location: string | null }> {
+    const r = await fetch(url, {
       method: 'POST', redirect: 'manual',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', Cookie: cookie, 'X-Forwarded-For': FAKE_IP },
-      body: new URLSearchParams({ flow: this.flow, ...fields }),
+      body: new URLSearchParams({ ...(url.endsWith('/oauth/authorize') ? { flow: this.flow } : {}), ...fields }),
     });
-    return { status: r.status, html: await r.text(), location: r.headers.get('location') };
+    this.keep(r);
+    const html = await r.text();
+    this.flow = /name="flow" value="([^"]+)"/.exec(html)?.[1] ?? this.flow;
+    return { status: r.status, html, location: r.headers.get('location') };
   }
 }
 
@@ -88,11 +101,11 @@ class MemoryProvider implements OAuthClientProvider {
   codeVerifier() { return this.verifier; }
 }
 
-async function connect(provider: MemoryProvider, onElicit?: (message: string) => Record<string, unknown> | null): Promise<Client> {
+async function connect(provider: MemoryProvider, onElicit?: (message: string, params: any) => Record<string, unknown> | null): Promise<Client> {
   const client = new Client({ name: 'e2e-oauth', version: '0' }, { capabilities: onElicit ? { elicitation: {} } : {} });
   if (onElicit) {
     client.setRequestHandler(ElicitRequestSchema, async (req) => {
-      const content = onElicit(String(req.params.message));
+      const content = onElicit(String(req.params.message), req.params);
       return content ? { action: 'accept', content } : { action: 'decline' };
     });
   }
@@ -165,14 +178,16 @@ ok('SDK client: 401 → discovery → dynamic registration → PKCE; an email wi
 
 // ---- review mode, enforced by the server -------------------------------------------------
 const prompts: string[] = [];
+const schemas: any[] = [];
 let answer: Record<string, unknown> | null = { approve: true };
-const client = await connect(provider, (message) => {
+const client = await connect(provider, (message, params) => {
   prompts.push(message);
+  schemas.push(params.requestedSchema);
   return answer;
 });
 const tools = (await client.listTools()).tools;
 assert.ok(tools.some((t) => t.name === 'add_note') && tools.some((t) => t.name === 'account_status'));
-assert.ok('operator_approved' in ((tools.find((t) => t.name === 'add_note')!.inputSchema as any).properties ?? {}));
+assert.ok('review_id' in ((tools.find((t) => t.name === 'add_note')!.inputSchema as any).properties ?? {}));
 assert.match(client.getInstructions() ?? '', new RegExp(`logged in as ${username}`));
 const status = parse(await client.callTool({ name: 'account_status', arguments: {} }));
 assert.equal(status.username, username);
@@ -187,7 +202,10 @@ assert.equal(created.title, subject, JSON.stringify(created));
 assert.equal(prompts.length, 1);
 assert.match(prompts[0], /review mode/);
 assert.match(prompts[0], /--- New page: Software:E2E OAuth Game [\s\S]*Nothing special yet\./, 'the operator sees exactly what will be stored');
-ok('review mode: the server shows the operator the whole page (elicitation), publishes after the OK');
+const linkInPrompt = new RegExp(`${GATEWAY.replace(/[.]/g, '\\.')}/review/[A-Za-z0-9_-]+`);
+assert.match(prompts[0], linkInPrompt, 'the prompt links to the review page');
+assert.match(schemas[0].properties.approve.description, linkInPrompt, 'the link sits next to the checkbox too (clients that show only the form)');
+ok('review mode: the server shows the operator the whole page (elicitation, with a link to the review page), publishes after the OK');
 
 answer = null;
 const declined = parse(await client.callTool({ name: 'add_note', arguments: { subject, body: 'The operator will not approve this one.', confidence: 'low' } }));
@@ -200,18 +218,53 @@ assert.equal(dry.dry_run, true);
 assert.equal(prompts.length, before, 'no prompt for an invalid write or a dry run');
 ok('declined → REVIEW_DECLINED, nothing published; invalid writes and dry runs never reach the operator');
 
-// ---- a client without approval prompts: approval in the conversation ------------------------
+// ---- a client without approval prompts: approval on the review page ---------------------------
 const plain = await connect(provider);
-const noteArgs = { subject, body: 'Approved by the operator in the conversation.', confidence: 'medium' };
-const forged = parse(await plain.callTool({ name: 'add_note', arguments: { ...noteArgs, operator_approved: true } }));
-assert.equal(forged.error, 'REVIEW_REQUIRED', 'operator_approved alone, without a preview first, does not publish');
-assert.match(forged.preview, /Approved by the operator in the conversation\./);
-const approved = parse(await plain.callTool({ name: 'add_note', arguments: { ...noteArgs, operator_approved: true } }));
-assert.ok(approved.title && !approved.isError, JSON.stringify(approved));
+const noteArgs = { subject, body: 'Approved by the operator on the review page.', confidence: 'medium' };
+const asked = parse(await plain.callTool({ name: 'add_note', arguments: noteArgs }));
+assert.equal(asked.error, 'REVIEW_REQUIRED', JSON.stringify(asked).slice(0, 300));
+assert.match(asked.review_url, new RegExp(`/review/${asked.review_id}$`));
+const early = parse(await plain.callTool({ name: 'add_note', arguments: { ...noteArgs, review_id: asked.review_id } }));
+assert.equal(early.error, 'REVIEW_PENDING', 'nothing is published before the operator approves');
+const other = parse(await plain.callTool({ name: 'add_note', arguments: { ...noteArgs, body: 'Different text than what was reviewed.', review_id: asked.review_id } }));
+assert.equal(other.error, 'REVIEW_MISMATCH', 'an approval covers exactly the reviewed arguments');
+
+// The agent (or anyone) without the operator's browser session only gets a sign-in page.
+const stranger = new Browser();
+assert.match(await stranger.open(asked.review_url), /Sign in to review/);
+assert.doesNotMatch(await stranger.open(asked.review_url), /Approved by the operator on the review page/);
+const forgedPost = await stranger.post({ action: 'approve', check: 'x' }, stranger.cookie, asked.review_url);
+assert.doesNotMatch(forgedPost.html, /<h1>Approved/);
+
+// The operator's browser has the session from the authorization: it sees the exact text and approves.
+const reviewPage = await browser.open(asked.review_url);
+assert.match(reviewPage, /Publish this on ReverseEngineering\.wiki\?/);
+assert.match(reviewPage, /Approved by the operator on the review page\./);
+const check = /name="check" value="([^"]+)"/.exec(reviewPage)![1];
+const approvedPage = await browser.post({ action: 'approve', check }, browser.cookie, asked.review_url);
+assert.match(approvedPage.html, /<h1>Approved/);
+const published = parse(await plain.callTool({ name: 'add_note', arguments: { ...noteArgs, review_id: asked.review_id } }));
+assert.ok(published.title && !published.isError, JSON.stringify(published));
+const reused = parse(await plain.callTool({ name: 'add_note', arguments: { ...noteArgs, review_id: asked.review_id } }));
+assert.equal(reused.error, 'REVIEW_USED', 'one approval, one publication');
+
+// On another device: sign in with the email code, then approve.
+const second = parse(await plain.callTool({ name: 'add_note', arguments: { subject, body: 'Approved from another device after the email code.', confidence: 'low' } }));
+const device = new Browser();
+await device.open(second.review_url);
+const codePage = await device.post({ action: 'email', email }, device.cookie, second.review_url);
+assert.match(codePage.html, /Check your email/);
+const signedIn = await device.post({ action: 'verify', flow: /name="flow" value="([^"]+)"/.exec(codePage.html)![1], code: await codeFor(email) }, device.cookie, second.review_url);
+assert.equal(signedIn.status, 303);
+const deviceReview = await device.open(second.review_url);
+assert.match(deviceReview, /Approved from another device/);
+await device.post({ action: 'approve', check: /name="check" value="([^"]+)"/.exec(deviceReview)![1] }, device.cookie, second.review_url);
+assert.ok(parse(await plain.callTool({ name: 'add_note', arguments: { subject, body: 'Approved from another device after the email code.', confidence: 'low', review_id: second.review_id } })).title);
+
 const modeBlocked = parse(await plain.callTool({ name: 'account_set_mode', arguments: { mode: 'write' } }));
 assert.equal(modeBlocked.error, 'HUMAN_CONFIRMATION_REQUIRED');
 await plain.close();
-ok('client without prompts: REVIEW_REQUIRED with the preview, publishes only on a repeat after it; the agent cannot switch to write mode');
+ok('client without prompts: REVIEW_REQUIRED with a review link; only the operator\'s browser (authorization session, or email code on another device) sees and approves it; one approval = one publication of exactly those arguments; the agent cannot switch to write mode');
 
 answer = { confirm: true };
 const toWrite = parse(await client.callTool({ name: 'account_set_mode', arguments: { mode: 'write' } }));
@@ -274,7 +327,14 @@ ok('account_rename: confirmed by the operator; MediaWiki user renamed with its p
   assert.equal(reused.error, 'invalid_grant', 'a code is single-use, even after a failed exchange');
   ok('second app: login by email on the page; PKCE S256 required; wrong verifier refused and the code burned');
 
-  // A fresh code, then revocation ends the token.
+  // A fresh code, then revocation ends the token. This is the fourth code to the same address in a
+  // few minutes, past the anti-flood limit (3 per 15 minutes): clear it in the test database.
+  {
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(new URL('../data-test/gateway.sqlite', import.meta.url));
+    db.exec("delete from rate_events where scope like 'mail-%'");
+    db.close();
+  }
   const third = new Browser();
   await third.open(authorize({ state: 's2' }));
   await third.post({ action: 'email', email });

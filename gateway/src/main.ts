@@ -80,6 +80,15 @@ if (app.config.dumpIntervalHours > 0) {
 }
 
 const server = createHttpServer(app, app.auth, app.mailer);
+// Stop promptly on restart (systemd sends SIGTERM): open MCP streams would otherwise keep it alive.
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(signal, () => {
+    log(`${signal}: stopping`);
+    server.close();
+    server.closeAllConnections();
+    setTimeout(() => process.exit(0), 1_000).unref();
+  });
+}
 server.listen(app.config.port, app.config.host, () => {
   log(`ReverseEngineering.wiki gateway listening on ${app.config.publicUrl} (MCP: ${app.config.publicUrl}/mcp)`);
 });
