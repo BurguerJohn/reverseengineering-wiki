@@ -26,9 +26,19 @@ export function hasWriteAllowance(db: AccountsDb, op: Operator): boolean {
 
 /** Writes left in the current hour for this operator's trust level. */
 export function remainingWrites(db: AccountsDb, op: Operator): number {
-  const row = db.db.prepare('select count(*) as n from rate_events where scope = ? and key = ? and at > ?')
-    .get('write', String(op.id), Date.now() - 3_600_000) as { n: number };
-  return Math.max(0, WRITES_PER_HOUR[op.trust] - row.n);
+  return quota(db, op).left;
+}
+
+/** The hourly write quota: limit, writes left, and minutes until the oldest counted write expires. */
+export function quota(db: AccountsDb, op: Operator): { limit: number; left: number; frees_in_minutes: number | null } {
+  const since = Date.now() - 3_600_000;
+  const row = db.db.prepare('select count(*) as n, min(at) as oldest from rate_events where scope = ? and key = ? and at > ?')
+    .get('write', String(op.id), since) as { n: number; oldest: number | null };
+  const limit = WRITES_PER_HOUR[op.trust];
+  return {
+    limit, left: Math.max(0, limit - row.n),
+    frees_in_minutes: row.oldest ? Math.max(1, Math.ceil((row.oldest + 3_600_000 - Date.now()) / 60_000)) : null,
+  };
 }
 
 export function chargeWrite(db: AccountsDb, op: Operator): void {

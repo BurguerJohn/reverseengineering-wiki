@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { createTwoFilesPatch } from 'diff';
 import type { Operator } from '../db/accounts.ts';
 import {
-  ToolError, afterWrite, assertClean, batchContext, charge, link, mwEdit, now, readPage, requireWriter, type Caller, type Services, type Writer,
+  ToolError, afterWrite, assertClean, batchContext, charge, currentWriter, link, mwEdit, now, readPage, requireWriter, type Caller, type Services, type Writer,
 } from './context.ts';
 import { scanText, scanValue } from '../policy/scanner.ts';
 import { atLeast } from '../auth/trust.ts';
@@ -370,15 +370,19 @@ async function linkTopics(s: Services, op: Writer, root: string, lines: string[]
 }
 
 /** End of a batch: one Topics edit per parent, then one index refresh for everything. */
-export async function finishBatch(s: Services, caller: Caller): Promise<void> {
+export async function finishBatch(s: Services, caller: Caller): Promise<string[]> {
   const store = batchContext.getStore();
-  if (!store) return;
-  const op = requireWriter(s, caller);
+  if (!store) return [];
+  // These edits complete writes that were already authorized and counted: no second quota check,
+  // and a failure here never hides the results of the batch.
+  const op = currentWriter(s, caller);
+  const problems: string[] = [];
   for (const [root, lines] of store.topicLinks ?? []) {
-    await linkTopics(s, op, root, lines).catch(() => {});
+    await linkTopics(s, op, root, lines).catch((e) => problems.push(`Topics links on ${root}: ${(e as Error).message}`));
     store.refresh?.add(root);
   }
   if (!store.dryRun && store.refresh?.size) await s.indexer.refresh([...store.refresh]).catch(() => {});
+  return problems;
 }
 
 export async function splitSection(s: Services, caller: Caller, args: { title: string; section: string; base_revision: number; summary: string; topic?: string }) {

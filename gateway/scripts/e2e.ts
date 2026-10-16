@@ -687,6 +687,38 @@ ok('export_symbols (Ghidra) and export_header (C, with padding)');
   ok('titles with colons and bare names, aliases kept whole, no orphans (dry run too), batch in dependency order, search without noise or repeats');
 }
 
+// ---- quota: a batch that uses the last writes keeps its results; dry runs check the quota ----------
+{
+  const { createApp } = await import('../src/app.ts');
+  const app = createApp();
+  const tokenC = await register(`E2e-c-${run}`);
+  const c = await mcp(tokenC);
+  const opC = app.db.operatorByUsernameKey(`e2e-c-${run}`)!;
+  // 27 of the 30 hourly writes of a "new" account already used.
+  const insert = app.db.db.prepare("insert into rate_events (scope, key, at) values ('write', ?, ?)");
+  for (let i = 0; i < 27; i++) insert.run(String(opC.id), Date.now() - 60_000);
+  const game3 = `E2E Quota ${run}`;
+  const three = [
+    { tool: 'create_page', arguments: { type: 'software', title: game3, summary: 'A fictional game for the quota test, three writes.', body: '## Overview\n\nShort.' } },
+    { tool: 'create_page', arguments: { type: 'software', title: `${game3}/Saves`, summary: 'Save format of the quota test game, briefly.', body: '## Layout\n\nBlocks.' } },
+    { tool: 'create_page', arguments: { type: 'software', title: `${game3}/Audio`, summary: 'Audio of the quota test game, briefly described.', body: '## Banks\n\nTwo.' } },
+  ];
+  const last = await call(c, 'batch', { operations: three });
+  assert.equal(last.operations, 3, `the batch that uses the last writes reports its results: ${JSON.stringify(last).slice(0, 300)}`);
+  assert.equal(last.quota.left, 0);
+  assert.equal((await call(anon, 'read', { title: game3 })).topics?.length, 2, 'topics linked although the quota is now used up');
+  const raw = await (await fetch(`${WIKI}/index.php?title=${encodeURIComponent(`Software:${game3}`)}&action=raw`)).text();
+  assert.match(raw, /== Topics ==[\s\S]*Saves[\s\S]*Audio/);
+  const over = await call(c, 'batch', { dry_run: true, operations: [{ tool: 'add_note', arguments: { subject: game3, body: 'One more note, over the quota.', confidence: 'low' } }] });
+  assert.equal(over.error, 'RATE_LIMITED', 'a dry run is refused when the real run would be');
+  assert.equal(over.quota.left, 0);
+  assert.ok(over.quota.frees_in_minutes >= 1 && over.quota.frees_in_minutes <= 60);
+  const status = await (await fetch(`${GATEWAY}/auth/status`, { headers: { Authorization: `Bearer ${tokenC}` } })).json() as any;
+  assert.equal(status.writes_this_hour.left, 0);
+  await c.close();
+  ok('quota: a batch using the last writes reports results and links topics; over-quota dry runs are refused with the numbers');
+}
+
 // ---- public schemas and skill safety ------------------------------------------------------------
 {
   const schemas = await (await fetch(`${GATEWAY}/tools.json`)).json() as any;

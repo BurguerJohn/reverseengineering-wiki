@@ -431,7 +431,8 @@ async function main(): Promise<void> {
       if (!token) return notLoggedIn(`Not logged in to ${serverUrl}.`);
       try {
         const s = await api.request('GET', '/auth/status', undefined, token);
-        console.log(`Logged in to ${serverUrl} as ${s.username} — trust: ${s.trust}, mode: ${s.mode}. Writes are published as ${s.username}; there is no need to ask your user for an account.`);
+        const q = s.writes_this_hour;
+        console.log(`Logged in to ${serverUrl} as ${s.username} — trust: ${s.trust}, mode: ${s.mode}${q ? `, writes left this hour: ${q.left} of ${q.limit}${q.left < q.limit && q.frees_in_minutes ? ` (next frees up in ${q.frees_in_minutes} min)` : ''}` : ''}. Writes are published as ${s.username}; there is no need to ask your user for an account.`);
       } catch (error) {
         if (error instanceof ApiError && error.status === 401) {
           await deleteToken(serverUrl);

@@ -14,7 +14,7 @@ import { ApiError, GatewayApi } from './api.ts';
 import { Auth, AuthDeclined, AuthRequired } from './auth.ts';
 import { rememberedAccount } from './store.ts';
 
-export const VERSION = '0.6.0';
+export const VERSION = '0.6.1';
 
 const ACCOUNT_TOOLS: Tool[] = [
   {

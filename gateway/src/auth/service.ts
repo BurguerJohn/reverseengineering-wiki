@@ -12,6 +12,7 @@ import {
   newAccessToken, newOneTimeCode, normalizeEmail, randomBase62, safeEqualHex, sha256, type Secrets,
 } from '../util/crypto.ts';
 import { checkUsername, suggestions, usernameKey } from './usernames.ts';
+import { quota } from './trust.ts';
 
 export const CODE_TTL_MINUTES = 10;
 export const MAX_ATTEMPTS = 5;
@@ -311,6 +312,7 @@ export class AuthService {
   status(op: Operator, token: TokenRow) {
     return {
       username: op.username, trust: op.trust, mode: op.mode, writes: op.writes,
+      writes_this_hour: quota(this.db, op),
       token_label: token.label, token_expires_at: token.expires_at, created_at: op.created_at,
     };
   }

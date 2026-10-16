@@ -8,8 +8,8 @@ import { resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { REPO_DIR } from '../config.ts';
-import { ToolError, batchContext, requireWriter, type Caller, type Preview, type Services } from '../tools/context.ts';
-import { remainingWrites } from '../auth/trust.ts';
+import { ToolError, batchContext, quotaError, requireWriter, type Caller, type Preview, type Services } from '../tools/context.ts';
+import { quota, remainingWrites } from '../auth/trust.ts';
 import * as read from '../tools/read.ts';
 import * as write from '../tools/write.ts';
 import { exportHeader, exportSymbols } from '../tools/exports.ts';
@@ -18,7 +18,7 @@ import { SUBJECT_TYPES } from '../wiki/titles.ts';
 import { DUMP_KINDS } from '../dumps.ts';
 import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE } from './instructions.ts';
 
-export const VERSION = '0.6.0';
+export const VERSION = '0.6.1';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -464,12 +464,11 @@ async function runBatch(
     else p.args = parsed.data as Record<string, unknown>;
   }
   if (problems.length) throw new ToolError('SCHEMA_INVALID', `Invalid operations: ${problems.slice(0, 10).join(' | ')}`, { problems });
-  const left = remainingWrites(s.db, op);
-  if (!caller.dryRun && planned.length > left) {
-    throw new ToolError('RATE_LIMITED', `This batch has ${planned.length} writes but only ${left} are left this hour for trust level "${op.trust}". Split it, or wait.`);
-  }
+  // Checked in the dry run too: an operator is never asked to approve a batch the quota would stop.
+  if (planned.length > remainingWrites(s.db, op)) throw quotaError(s, op, planned.length);
 
   const done: Array<Record<string, unknown>> = [];
+  let followUp: string[] = [];
   return batchContext.run({ created: new Map(), dryRun: !!caller.dryRun, pageCache: new Map(), refresh: new Set(), topicLinks: new Map() }, async () => {
     try {
     for (const p of planned) {
@@ -488,9 +487,13 @@ async function runBatch(
     }
     } finally {
       // Topics links and the index refresh also happen for what succeeded before an error.
-      await write.finishBatch(s, caller);
+      followUp = await write.finishBatch(s, caller).catch((e) => [(e as Error).message]);
     }
-    return { operations: done.length, order: planned.map((p) => p.index + 1), results: done };
+    return {
+      operations: done.length, order: planned.map((p) => p.index + 1), results: done,
+      warnings: followUp.length ? followUp : undefined,
+      quota: caller.dryRun ? undefined : quota(s.db, op),
+    };
   });
 }
 

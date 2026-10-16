@@ -8,7 +8,7 @@ import type { SessionPool } from '../mw/sessions.ts';
 import { MwError, type EditParams, type EditResult } from '../mw/client.ts';
 import type { Secrets } from '../util/crypto.ts';
 import { describe, type Finding } from '../policy/scanner.ts';
-import { chargeWrite, hasWriteAllowance, maybePromote } from '../auth/trust.ts';
+import { chargeWrite, hasWriteAllowance, maybePromote, quota } from '../auth/trust.ts';
 import { pageUrl, typeOfTitle } from '../wiki/titles.ts';
 import { wikitextToMarkdown } from '../wiki/wikitext.ts';
 import { createTwoFilesPatch } from 'diff';
@@ -90,6 +90,22 @@ export const TAGS = {
   'rewiki-topic': 'Topic subpage created or section moved to one',
 } as const;
 
+/** RATE_LIMITED with the numbers an agent needs to split or schedule its writes. */
+export function quotaError(s: Services, op: Operator, needed?: number): ToolError {
+  const q = quota(s.db, op);
+  const what = needed !== undefined ? `This needs ${needed} writes, but only ${q.left} of ${q.limit}` : `All ${q.limit} writes`;
+  return new ToolError('RATE_LIMITED', `${what} are left this hour for trust level "${op.trust}"${q.frees_in_minutes ? `; the next one frees up in ${q.frees_in_minutes} min` : ''}. Split the work, or wait. Nothing was published.`, {
+    quota: { ...q, trust: op.trust, needed },
+  });
+}
+
+/** The writer for follow-up edits of something already authorized (no second quota check). */
+export function currentWriter(s: Services, caller: Caller): Writer {
+  const fresh = caller.operator ? s.db.operatorById(caller.operator.id) : null;
+  if (!fresh || fresh.blocked_at) throw new ToolError('AUTH_REQUIRED', 'This account is blocked.');
+  return { ...fresh, dryRun: caller.dryRun === true, previews: caller.previews };
+}
+
 export function requireWriter(s: Services, caller: Caller): Writer {
   const op = caller.operator;
   if (!op) {
@@ -98,9 +114,7 @@ export function requireWriter(s: Services, caller: Caller): Writer {
   const fresh = s.db.operatorById(op.id);
   if (!fresh || fresh.blocked_at) throw new ToolError('AUTH_REQUIRED', 'This account is blocked.');
   if (fresh.mode === 'read') throw new ToolError('MODE_READ_ONLY', 'This account is in read-only mode. The operator can change it with account_set_mode.');
-  if (!hasWriteAllowance(s.db, fresh)) {
-    throw new ToolError('RATE_LIMITED', `Write limit reached for trust level "${fresh.trust}". Try again later.`);
-  }
+  if (!hasWriteAllowance(s.db, fresh)) throw quotaError(s, fresh);
   return { ...fresh, dryRun: caller.dryRun === true, previews: caller.previews };
 }
 
