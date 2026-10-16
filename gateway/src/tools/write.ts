@@ -95,13 +95,13 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
     if (!fact.scope.applies_to.startsWith('Build:')) {
       problems.push('Address facts and build-level facts need scope.applies_to = a "Build:" page (create one with register_build). Addresses are only valid for one build.');
     } else {
-      fact.scope.applies_to = title(s, fact.scope.applies_to, ['build']);
+      fact.scope.applies_to = s.index.resolveRedirect(title(s, fact.scope.applies_to, ['build']));
       if (!(await currentPage(s, fact.scope.applies_to))) problems.push(`${fact.scope.applies_to} does not exist; call register_build first (in a batch: before this fact).`);
     }
     if (addressLike && fact.scope.level !== 'build') problems.push('A fact with an address (data.rva or data.address) must have scope.level = "build".');
   }
   if (problems.length) throw new ToolError('SCHEMA_INVALID', problems.join(' '), { problems });
-  fact.scope.observed_in = fact.scope.observed_in.map((o) => normalizeTitle(o));
+  fact.scope.observed_in = fact.scope.observed_in.map((o) => s.index.resolveRedirect(normalizeTitle(o)));
   assertClean(scanValue(fact, 'fact'));
 
   const buildSuffix = fact.scope.level === 'build' ? ` @ ${titleSegment(baseName(fact.scope.applies_to).split('/').slice(1).join(' '), 60)}` : '';
@@ -422,7 +422,7 @@ function serializeSymbols(doc: SymbolsDoc): string {
 
 export async function addSymbols(s: Services, caller: Caller, args: { build: string; symbols: unknown[]; force?: boolean }) {
   const op = requireWriter(s, caller);
-  const build = title(s, args.build, ['build']);
+  const build = s.index.resolveRedirect(title(s, args.build, ['build']));
   await mustExist(s, build, 'Call register_build first.');
   if (!Array.isArray(args.symbols) || !args.symbols.length) throw new ToolError('BAD_REQUEST', 'symbols must be a non-empty array.');
   if (args.symbols.length > MAX_SYMBOLS_PER_CALL) throw new ToolError('BAD_REQUEST', `At most ${MAX_SYMBOLS_PER_CALL} symbols per call; send the rest in further calls.`);

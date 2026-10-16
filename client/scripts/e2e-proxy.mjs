@@ -10,7 +10,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
-const GATEWAY = process.env.GATEWAY_URL ?? 'http://127.0.0.1:8787';
+if (process.env.REWIKI_ENV_FILE !== '.env.test') {
+  console.error('Run the end-to-end tests with "npm run e2e" in gateway/: they use the separate test wiki, never the real one.');
+  process.exit(2);
+}
+const GATEWAY = process.env.GATEWAY_URL ?? 'http://127.0.0.1:8789';
 const MAILPIT = process.env.MAILPIT_URL ?? 'http://localhost:8025';
 const run = randomBytes(3).toString('hex');
 process.on('exit', () => {

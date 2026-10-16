@@ -4,16 +4,24 @@
  * Creates pages prefixed "E2E" in the wiki.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-const GATEWAY = process.env.GATEWAY_URL ?? 'http://127.0.0.1:8787';
+if (process.env.REWIKI_ENV_FILE !== '.env.test') {
+  console.error('Run the end-to-end tests with "npm run e2e": they use the separate test wiki, never the real one.');
+  process.exit(2);
+}
+const GATEWAY = process.env.GATEWAY_URL ?? 'http://127.0.0.1:8789';
+const WIKI = process.env.WIKI_URL ?? 'http://127.0.0.1:8788';
 const MAILPIT = process.env.MAILPIT_URL ?? 'http://localhost:8025';
 const run = randomBytes(3).toString('hex');
 // Whatever happens, the pages this run created leave the wiki (search, dumps, recent pages).
 process.on('exit', () => {
+  if (process.env.E2E_KEEP === '1') return void console.log(`Kept the pages of run ${run} (E2E_KEEP=1).`);
   spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', 'src/cli.ts', 'delete-test-pages', run], {
     cwd: new URL('..', import.meta.url), stdio: 'inherit',
   });
@@ -218,7 +226,7 @@ ok('create_page (with infobox, aliases)');
   const page = await call(anon, 'read', { title: retro.title });
   assert.deepEqual(page.outline.map((o: any) => o.heading), ['Engine & libraries used', 'Controls'], 'only the sections written, "&" not duplicated');
   assert.ok(page.suggested_sections.includes('Identification') && !page.suggested_sections.includes('Engine & libraries used'));
-  const raw = await (await fetch(`http://wikivibe.test/index.php?title=${encodeURIComponent(retro.title)}&action=raw`)).text();
+  const raw = await (await fetch(`${WIKI}/index.php?title=${encodeURIComponent(retro.title)}&action=raw`)).text();
   assert.doesNotMatch(raw, /&amp;|Nothing documented yet/);
 
   const editDry = await call(a, 'edit_section', { title: retro.title, section: 'Controls', body: 'Arrow keys; F3 pauses.', base_revision: page.revision, summary: 'pause key', dry_run: true });
@@ -392,10 +400,13 @@ assert.match(header.header, /uint8_t _pad_C\[0x4\];/);
 ok('export_symbols (Ghidra) and export_header (C, with padding)');
 
 {
-  const list = await call(anon, 'downloads', {});
+  // Asynchronously: a blocked event loop would leave pooled connections that the gateway already closed.
+  await new Promise((done) => spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'src/cli.ts', 'dump'], { cwd: new URL('..', import.meta.url), env: process.env, stdio: 'ignore' }).on('close', done));
+  const fresh = await mcp();
+  const list = await call(fresh, 'downloads', {});
   const text = list.files?.find((f: any) => f.file === 'text.zip');
   assert.ok(text?.sha256 && text.stable_url.endsWith('/dumps/latest/text.zip'), JSON.stringify(list).slice(0, 400));
-  const one = await call(anon, 'downloads', { file: 'pages.xml.gz' });
+  const one = await call(fresh, 'downloads', { file: 'pages.xml.gz' });
   assert.deepEqual(one.files.map((f: any) => f.file), ['pages.xml.gz']);
   const res = await fetch(text.url);
   const bytes = Buffer.from(await res.arrayBuffer());
@@ -455,6 +466,33 @@ ok('export_symbols (Ghidra) and export_header (C, with padding)');
   const pages = await call(anon, 'related', { title: build.title, relation: 'has_symbols' });
   assert.equal(pages.total, 3);
   ok('add_symbols (merge, confirm, conflicts, confidence), symbols (rva/containing/name/prefix/range paging), export + search');
+}
+
+// ---- renaming a build keeps its facts and symbols ---------------------------------------------
+{
+  const { createApp } = await import('../src/app.ts');
+  const app = createApp();
+  const before = await call(anon, 'lookup_binary', { sha256: sha });
+  const symbolPages = (await call(anon, 'related', { title: build.title, relation: 'has_symbols' })).edges.map((e: any) => e.src as string);
+  const renamed = `${build.title.split('/')[0]}/1.0 (windows-x64, steam, renamed)`;
+  const moves = [[build.title, renamed], ...symbolPages.map((p: string) => [p, p.replace(build.title, renamed)])];
+  const list = join(app.config.dataDir, `moves-${run}.txt`);
+  writeFileSync(list, moves.map(([a, b]) => `${a}|${b}`).join('\n') + '\n');
+  const moved = spawnSync(app.config.mw.phpBin, ['maintenance/run.php', 'moveBatch', '-u', app.config.mw.gatewayUser, '-r', 'e2e rename', list], {
+    cwd: app.config.mw.dir, env: app.config.mw.env, encoding: 'utf8',
+  });
+  assert.equal(moved.status, 0, moved.stderr);
+  // The way the gateway learns it: the move log in recent changes (JSON pages keep no redirect).
+  await app.indexer.poll();
+  const after = await call(anon, 'lookup_binary', { sha256: sha });
+  assert.equal(after.build, renamed, JSON.stringify(after).slice(0, 300));
+  assert.equal(after.facts_for_this_build, before.facts_for_this_build, 'facts still point at the old title, through the redirect');
+  assert.equal(after.symbol_map.symbols, before.symbol_map.symbols);
+  const viaOld = await call(anon, 'export_symbols', { build: build.title, tool: 'json' });
+  assert.equal(viaOld.build, renamed, 'the old title resolves to the renamed build');
+  assert.equal(viaOld.from_symbol_map, 3);
+  build.title = renamed;
+  ok('renaming a build (with its symbol pages) keeps its facts and symbol map, old title included');
 }
 
 // ---- scale: paging and topic subpages ----------------------------------------------------------
@@ -530,7 +568,6 @@ ok('export_symbols (Ghidra) and export_header (C, with padding)');
 
 // ---- web login (MediaWiki form → gateway) -------------------------------------------------------
 {
-  const WIKI = process.env.WIKI_URL ?? 'http://wikivibe.test';
   const { createApp } = await import('../src/app.ts');
   const app = createApp();
   // The wiki passes the browser's IP; here that is this machine, so reset its counters for repeatable runs.
@@ -645,13 +682,13 @@ ok('export_symbols (Ghidra) and export_header (C, with padding)');
 
 // ---- public schemas and skill safety ------------------------------------------------------------
 {
-  const schemas = await (await fetch('http://wikivibe.test/tools.json')).json() as any;
+  const schemas = await (await fetch(`${GATEWAY}/tools.json`)).json() as any;
   const addFact = schemas.tools.find((t: any) => t.name === 'add_fact');
   assert.equal(addFact?.access, 'write');
   assert.ok(addFact.input_schema.properties.key && addFact.input_schema.properties.dry_run, 'write schemas are public, with key and dry_run');
-  const skill = await (await fetch('http://wikivibe.test/skill/rewiki/SKILL.md')).text();
+  const skill = await (await fetch(`${GATEWAY}/skill/rewiki/SKILL.md`)).text();
   assert.doesNotMatch(skill, /download this skill again|replace your copy/i, 'the skill never updates itself');
-  const meta = await (await fetch('http://wikivibe.test/.well-known/mcp.json')).json() as any;
+  const meta = await (await fetch(`${GATEWAY}/.well-known/mcp.json`)).json() as any;
   const tarball = Buffer.from(await (await fetch(meta.packages[0].source)).arrayBuffer());
   assert.equal(createHash('sha256').update(tarball).digest('hex'), meta.packages[0].sha256);
   assert.ok(skill.includes(meta.packages[0].sha256), 'the skill pins the package hash');

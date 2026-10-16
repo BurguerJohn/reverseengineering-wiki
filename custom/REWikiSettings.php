@@ -15,6 +15,19 @@ if ( !defined( 'MEDIAWIKI' ) ) {
 }
 
 # ---------------------------------------------------------------------------
+# Test wiki (gateway/scripts/test-env.mjs): same code, separate database, served by PHP's
+# built-in server, so end-to-end tests never touch the real wiki. Selected by the
+# environment, which only the test runner and maintenance commands it starts set.
+# ---------------------------------------------------------------------------
+if ( getenv( 'REWIKI_WIKI' ) === 'test' ) {
+	$wgDBname = getenv( 'REWIKI_TEST_DB' ) ?: 'rewiki_test';
+	$wgServer = getenv( 'REWIKI_TEST_SERVER' ) ?: 'http://127.0.0.1:8788';
+	$wgCanonicalServer = $wgServer;
+	$wgREWikiGatewayInternalUrl = getenv( 'REWIKI_TEST_GATEWAY' ) ?: 'http://127.0.0.1:8789';
+	$wgSitename = 'ReverseEngineering.wiki (test)';
+}
+
+# ---------------------------------------------------------------------------
 # Language: English by default; users can pick another interface language
 # in Special:Preferences.
 # ---------------------------------------------------------------------------

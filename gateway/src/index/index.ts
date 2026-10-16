@@ -88,6 +88,10 @@ create table if not exists symbols (
 create index if not exists symbols_build_rva on symbols(build, rva);
 create index if not exists symbols_name on symbols(name);
 create index if not exists symbols_title on symbols(title);
+create table if not exists moves (
+  old text primary key,
+  new text not null
+);
 create table if not exists state (key text primary key, value text not null);
 `;
 
@@ -151,7 +155,7 @@ export class SearchIndex {
   }
 
   clear(): void {
-    this.db.exec('delete from pages; delete from docs; delete from identifiers; delete from edges; delete from facts; delete from builds; delete from build_files; delete from symbols; delete from state;');
+    this.db.exec('delete from pages; delete from docs; delete from identifiers; delete from edges; delete from facts; delete from builds; delete from build_files; delete from symbols; delete from moves; delete from state;');
   }
 
   removePage(title: string): void {
@@ -165,9 +169,50 @@ export class SearchIndex {
     return this.db.prepare('select * from pages where title = ?').get(title) as any;
   }
 
+  /**
+   * The current title of a page: through a redirect, or through MediaWiki's move log for
+   * pages that cannot hold a redirect (JSON pages: builds, facts, symbol maps).
+   */
   resolveRedirect(title: string): string {
-    const page = this.page(title);
-    return page?.redirect_to ?? title;
+    let current = title;
+    for (let hops = 0; hops < 10; hops++) {
+      const page = this.page(current);
+      if (page && !page.redirect_to) return current;
+      const next = page?.redirect_to ?? (this.db.prepare('select new from moves where old = ?').get(current) as { new: string } | undefined)?.new;
+      if (!next || next === current) return current;
+      current = next;
+    }
+    return current;
+  }
+
+  /** Records a page move (from the move log); documents may still cite the old title. */
+  recordMove(from: string, to: string): void {
+    if (from !== to) this.db.prepare('insert or replace into moves (old, new) values (?, ?)').run(from, to);
+  }
+
+  /** A page and every older title that leads to it (redirects and moves, any number of renames). */
+  namesOf(title: string): string[] {
+    const target = this.resolveRedirect(title);
+    const names = new Set([target]);
+    let frontier = [target];
+    while (frontier.length && names.size < 200) {
+      const next: string[] = [];
+      for (const name of frontier) {
+        const olds = [
+          ...(this.db.prepare('select title as t from pages where redirect_to = ?').all(name) as Array<{ t: string }>),
+          ...(this.db.prepare('select old as t from moves where new = ?').all(name) as Array<{ t: string }>),
+        ];
+        for (const { t } of olds) if (!names.has(t)) { names.add(t); next.push(t); }
+      }
+      frontier = next;
+    }
+    return [...names];
+  }
+
+  /** SQL fragment and values matching a build column against a build and its old titles. */
+  private buildIn(build: string, column = 'build'): { sql: string; values: string[] } {
+    const names = this.namesOf(build);
+    return { sql: `${column} in (${names.map(() => '?').join(', ')})`, values: names };
   }
 
   // ---- indexing ----------------------------------------------------------------
@@ -510,8 +555,11 @@ export class SearchIndex {
   }
 
   factsForBuild(build: string): Array<{ title: string; kind: string; status: string; data: string; subject: string }> {
-    return this.db.prepare(`select title, kind, status, data, subject from facts
-      where applies_to = ? or observed_in like ?`).all(build, `%${JSON.stringify(build).slice(1, -1)}%`) as any[];
+    const names = this.namesOf(build);
+    const applies = names.map(() => 'applies_to = ?').join(' or ');
+    const observed = names.map(() => 'observed_in like ?').join(' or ');
+    return this.db.prepare(`select title, kind, status, data, subject from facts where ${applies} or ${observed}`)
+      .all(...names, ...names.map((n) => `%${JSON.stringify(n).slice(1, -1)}%`)) as any[];
   }
 
   factsForSubject(subject: string, kinds?: string[]): Array<{ title: string; kind: string; status: string; level: string; applies_to: string; data: string }> {
@@ -571,31 +619,36 @@ export class SearchIndex {
   // ---- symbol maps -------------------------------------------------------------------
 
   symbolCount(build: string): { symbols: number; pages: number } {
-    const row = this.db.prepare('select count(*) as n, count(distinct title) as p from symbols where build = ?').get(build) as { n: number; p: number };
+    const b = this.buildIn(build);
+    const row = this.db.prepare(`select count(*) as n, count(distinct title) as p from symbols where ${b.sql}`).get(...b.values) as { n: number; p: number };
     return { symbols: row.n, pages: row.p };
   }
 
   /** The symbol at an RVA, or the closest one below it (with the offset into it). */
   symbolAt(build: string, rva: number): (SymbolRow & { offset: number }) | null {
-    const row = this.db.prepare('select * from symbols where build = ? and rva <= ? order by rva desc limit 1').get(build, rva) as SymbolRow | undefined;
+    const b = this.buildIn(build);
+    const row = this.db.prepare(`select * from symbols where ${b.sql} and rva <= ? order by rva desc limit 1`).get(...b.values, rva) as SymbolRow | undefined;
     return row ? { ...row, offset: rva - row.rva } : null;
   }
 
   symbolsRange(build: string, from: number, to: number, limit: number): SymbolRow[] {
-    return this.db.prepare('select * from symbols where build = ? and rva >= ? and rva <= ? order by rva limit ?').all(build, from, to, limit) as any[];
+    const b = this.buildIn(build);
+    return this.db.prepare(`select * from symbols where ${b.sql} and rva >= ? and rva <= ? order by rva limit ?`).all(...b.values, from, to, limit) as any[];
   }
 
   /** Exact name, or a prefix when the name ends with "*"; optionally across all builds. */
   symbolsByName(name: string, build: string | null, limit: number, offset: number): SymbolRow[] {
     const prefix = name.endsWith('*');
     const value = prefix ? `${name.slice(0, -1).replace(/[!%_]/g, (c) => `!${c}`)}%` : name;
-    const where = `${prefix ? "name like ? escape '!'" : 'name = ?'}${build ? ' and build = ?' : ''}`;
+    const b = build ? this.buildIn(build) : null;
+    const where = `${prefix ? "name like ? escape '!'" : 'name = ?'}${b ? ` and ${b.sql}` : ''}`;
     return this.db.prepare(`select * from symbols where ${where} order by build, rva limit ? offset ?`)
-      .all(...(build ? [value, build] : [value]), limit, offset) as any[];
+      .all(value, ...(b?.values ?? []), limit, offset) as any[];
   }
 
   symbolsForBuild(build: string): SymbolRow[] {
-    return this.db.prepare('select * from symbols where build = ? order by rva').all(build) as any[];
+    const b = this.buildIn(build);
+    return this.db.prepare(`select * from symbols where ${b.sql} order by rva`).all(...b.values) as any[];
   }
 
   allSymbols(): Iterable<SymbolRow> {

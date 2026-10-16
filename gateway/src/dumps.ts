@@ -48,7 +48,7 @@ async function writeGz(path: string, lines: AsyncIterable<string> | Iterable<str
 
 async function xmlDump(s: Services, path: string): Promise<void> {
   const child = spawn(s.config.mw.phpBin, ['maintenance/run.php', 'dumpBackup', '--current', '--quiet'], {
-    cwd: s.config.mw.dir, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: s.config.mw.dir, env: s.config.mw.env, stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stderr = '';
   child.stderr.on('data', (d) => { stderr += d; });

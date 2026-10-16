@@ -23,9 +23,11 @@ try {
 }
 
 try {
-  publishDiscoveryFiles(app.config, REPO_DIR);
-  await publishToolSchemas(app, REPO_DIR);
-  log(`Setup instructions published at ${app.config.publicUrl}/llms.txt`);
+  if (app.config.publishSiteFiles) {
+    publishDiscoveryFiles(app.config, REPO_DIR);
+    await publishToolSchemas(app, REPO_DIR);
+    log(`Setup instructions published at ${app.config.publicUrl}/llms.txt`);
+  }
 } catch (error) {
   log(`WARNING: could not write llms.txt (${(error as Error).message})`);
 }

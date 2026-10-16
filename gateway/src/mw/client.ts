@@ -240,6 +240,17 @@ export class MwClient {
     return out;
   }
 
+  /** Every page move (old title → new title), oldest first. */
+  async *moveLog(): AsyncGenerator<{ from: string; to: string }> {
+    let cont: Record<string, string> = {};
+    for (;;) {
+      const data = await this.call({ action: 'query', list: 'logevents', letype: 'move', ledir: 'newer', lelimit: 'max', leprop: 'title|details', ...cont });
+      for (const e of data.query?.logevents ?? []) if (e.title && e.params?.target_title) yield { from: e.title, to: e.params.target_title };
+      if (!data.continue) return;
+      cont = data.continue;
+    }
+  }
+
   /** Usernames that edited each page (for CC BY-SA attribution), in MediaWiki's order. */
   async contributors(titles: string[]): Promise<Map<string, string[]>> {
     const out = new Map<string, string[]>();

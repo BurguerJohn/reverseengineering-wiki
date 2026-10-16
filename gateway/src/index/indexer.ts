@@ -20,6 +20,7 @@ export class Indexer {
   async rebuild(log: (msg: string) => void = () => {}): Promise<number> {
     const started = new Date().toISOString();
     this.index.clear();
+    for await (const move of this.mw.moveLog()) this.index.recordMove(move.from, move.to);
     let count = 0;
     for (const ns of INDEXED_NAMESPACES) {
       const titles: string[] = [];
@@ -52,7 +53,10 @@ export class Indexer {
     for (const change of changes) {
       touched.add(change.title);
       const target = change.logparams?.target_title;
-      if (change.type === 'log' && typeof target === 'string') touched.add(target);
+      if (change.type === 'log' && typeof target === 'string') {
+        touched.add(target);
+        if ((change as { logtype?: string }).logtype === 'move') this.index.recordMove(change.title, target);
+      }
     }
     await this.refresh([...touched]);
     this.index.setState(CURSOR, changes[changes.length - 1].timestamp);

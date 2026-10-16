@@ -110,7 +110,7 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
 }
 
 export function exportSymbols(s: Services, args: { build: string; tool: 'ghidra' | 'ida' | 'json' }) {
-  const build = cleanTitle(args.build, ['build']);
+  const build = s.index.resolveRedirect(cleanTitle(args.build, ['build']));
   if (!s.index.page(build)) throw new ToolError('NOT_FOUND', `"${build}" is not a known build. Use lookup_binary or register_build.`);
   const rows = s.index.factsForBuild(build).filter((f) => ['function', 'global', 'vtable'].includes(f.kind) && f.status !== 'rejected');
   const symbols: Array<{ rva: number; name: string; kind: string; status: string; fact: string }> = [];

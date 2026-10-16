@@ -38,7 +38,13 @@ export interface Config {
   /** Shared with MediaWiki (LocalSettings $wgREWikiWebLoginSecret): the wiki's email-code login calls /auth/web/*. */
   webLoginSecret: string;
   dataDir: string;
-  mw: { apiUrl: string; publicUrl: string; gatewayUser: string; gatewayPassword: string; dir: string; phpBin: string };
+  /** Write llms.txt, robots.txt, tools.json and the skill into the site root (off for the test instance). */
+  publishSiteFiles: boolean;
+  mw: {
+    apiUrl: string; publicUrl: string; gatewayUser: string; gatewayPassword: string; dir: string; phpBin: string;
+    /** Environment for MediaWiki maintenance commands (the test instance sets REWIKI_WIKI=test, so they hit the test database). */
+    env: NodeJS.ProcessEnv;
+  };
   mail: {
     driver: MailDriver;
     from: string;
@@ -64,6 +70,7 @@ export function loadConfig(): Config {
     secret: get('GATEWAY_SECRET'),
     webLoginSecret: get('WEB_LOGIN_SECRET'),
     dataDir,
+    publishSiteFiles: get('PUBLISH_SITE_FILES', '1') !== '0',
     mw: {
       apiUrl: get('MW_API_URL', 'http://wikivibe.test/api.php'),
       publicUrl: get('MW_PUBLIC_URL', 'http://wikivibe.test').replace(/\/$/, ''),
@@ -71,6 +78,7 @@ export function loadConfig(): Config {
       gatewayPassword: get('MW_GATEWAY_PASSWORD'),
       dir: resolve(GATEWAY_DIR, get('MW_DIR', '..')),
       phpBin: get('PHP_BIN', 'php'),
+      env: { ...process.env, ...Object.fromEntries(get('MW_ENV').split(',').map((kv) => kv.trim()).filter((kv) => kv.includes('=')).map((kv) => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)])) },
     },
     mail: {
       driver: get('MAIL_DRIVER', 'smtp') as MailDriver,

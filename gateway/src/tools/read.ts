@@ -171,7 +171,7 @@ function parseRva(raw: string, field: string): number {
 }
 
 export function symbols(s: Services, args: { build?: string; rva?: string; name?: string; from?: string; to?: string; limit?: number; cursor?: string }) {
-  const build = args.build ? s.index.resolveRedirect(cleanTitle(args.build)) : null;
+  const build = args.build ? s.index.resolveRedirect(cleanTitle(args.build, s)) : null;
   if (build && typeOfTitle(build) !== 'build') throw new ToolError('BAD_TITLE', `"${build}" is not a Build: page.`);
   if (build && !s.index.page(build)) throw new ToolError('NOT_FOUND', `"${build}" is not a known build. Use lookup_binary.`);
   const limit = Math.min(args.limit ?? 100, 1000);

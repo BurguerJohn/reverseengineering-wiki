@@ -5,6 +5,7 @@ import { findSection, headingKey, parseSections } from '../src/wiki/wikitext.ts'
 import { markdownToWikitext } from '../src/wiki/markdown.ts';
 import { tidyArticle } from '../src/wiki/tidy.ts';
 import { extractFromText, isFileName, queryTokens } from '../src/index/identifiers.ts';
+import { SearchIndex } from '../src/index/index.ts';
 
 test('headings with & are one section, however they were written', () => {
   assert.equal(headingKey('Engine &amp; libraries used'), headingKey('Engine & libraries used'));
@@ -64,4 +65,16 @@ test('file names are exact identifiers, not loose words', () => {
   assert.equal(isFileName('e.g.'), false);
   assert.ok(queryTokens('ski.exe').some((t) => t.kind === 'file' && t.token === 'ski.exe'));
   assert.ok(extractFromText('Run EDF5.exe from <game dir>').some((t) => t.kind === 'file' && t.token === 'edf5.exe'));
+});
+
+test('renamed builds: facts citing any older title still find them', () => {
+  const index = new SearchIndex(':memory:');
+  const json = (o: unknown) => JSON.stringify(o);
+  index.indexPage({ title: 'Build:Game/1.0 (snes, cartridge)', revid: 3, timestamp: 't', user: 'u', content: json({ schema: 'rewiki.build/1', software: 'Software:Game', version: '1.0', platform: 'snes', distribution: 'cartridge', files: [] }) });
+  index.indexPage({ title: 'Fact:Game/function/Main @ x', revid: 4, timestamp: 't', user: 'u', content: json({ kind: 'function', subject: 'Software:Game', claim: 'c', status: 'claimed', scope: { level: 'build', applies_to: 'Build:Game/USA Cartridge SNES', observed_in: [] }, data: { name: 'Main', rva: '0x10' } }) });
+  index.recordMove('Build:Game/USA Cartridge SNES', 'Build:Game/USA (snes)');
+  index.recordMove('Build:Game/USA (snes)', 'Build:Game/1.0 (snes, cartridge)');
+  assert.equal(index.resolveRedirect('Build:Game/USA Cartridge SNES'), 'Build:Game/1.0 (snes, cartridge)');
+  assert.deepEqual(index.namesOf('Build:Game/1.0 (snes, cartridge)').sort(), ['Build:Game/1.0 (snes, cartridge)', 'Build:Game/USA (snes)', 'Build:Game/USA Cartridge SNES']);
+  assert.equal(index.factsForBuild('Build:Game/1.0 (snes, cartridge)').length, 1);
 });

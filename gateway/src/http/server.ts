@@ -8,7 +8,7 @@ import type { Services } from '../tools/context.ts';
 import { AuthError, type AuthService } from '../auth/service.ts';
 import type { Mailer } from '../mail/index.ts';
 import { createMcpServer, VERSION } from '../mcp/server.ts';
-import { CLIENT_DIR, clientTarball, llmsTxt, wellKnown } from './discovery.ts';
+import { CLIENT_DIR, clientTarball, llmsTxt, renderSkill, toolSchemas, wellKnown } from './discovery.ts';
 import { DUMP_KINDS, latestDump, listDumps } from '../dumps.ts';
 
 const MAX_BODY = 2 * 1024 * 1024;
@@ -184,6 +184,15 @@ export function createHttpServer(s: Services, auth: AuthService, mailer: Mailer)
         return;
       }
       // ---- agent discovery ---------------------------------------------------------
+      if (path === '/tools.json') {
+        send(res, 200, await toolSchemas(s), { 'Cache-Control': 'public, max-age=300' });
+        return;
+      }
+      if (path === '/skill/rewiki/SKILL.md') {
+        res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'public, max-age=300' });
+        res.end(renderSkill(s.config));
+        return;
+      }
       if (path === '/llms.txt') {
         res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'public, max-age=300' });
         res.end(llmsTxt(s.config));

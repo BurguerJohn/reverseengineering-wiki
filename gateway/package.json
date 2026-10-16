@@ -12,7 +12,9 @@
     "start": "node --disable-warning=ExperimentalWarning src/main.ts",
     "cli": "node --disable-warning=ExperimentalWarning src/cli.ts",
     "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "e2e:setup": "node scripts/test-env.mjs setup",
+    "e2e": "node scripts/test-env.mjs run"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

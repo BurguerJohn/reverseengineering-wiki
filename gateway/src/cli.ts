@@ -52,8 +52,10 @@ function docToWikitext(markdown: string): string {
 }
 
 async function syncPages(app: App): Promise<void> {
-  for (const file of publishDiscoveryFiles(app.config, REPO_DIR)) console.log(`  wrote      ${file}`);
-  console.log(`  wrote      ${await publishToolSchemas(app, REPO_DIR)}`);
+  if (app.config.publishSiteFiles) {
+    for (const file of publishDiscoveryFiles(app.config, REPO_DIR)) console.log(`  wrote      ${file}`);
+    console.log(`  wrote      ${await publishToolSchemas(app, REPO_DIR)}`);
+  }
   const mw = await app.sessions.gateway();
   const root = join(REPO_DIR, 'wiki-pages');
   const pages: Array<[string, string]> = walk(root).map((f) => [titleFromPath(root, f), readFileSync(f, 'utf8')]);
@@ -122,7 +124,7 @@ async function main(): Promise<void> {
       execSync('npm run build', { cwd: clientDir, stdio: 'inherit' });
       const packed = execSync(`npm pack --pack-destination "${out}"`, { cwd: clientDir, encoding: 'utf8' }).trim().split(/\r?\n/).at(-1);
       console.log(`Serving ${app.config.publicUrl}/client/${packed}`);
-      publishDiscoveryFiles(app.config, REPO_DIR);
+      if (app.config.publishSiteFiles) publishDiscoveryFiles(app.config, REPO_DIR);
       console.log('Updated llms.txt and .well-known/mcp.json; run sync-pages to update REWiki:Connect.');
       break;
     }
@@ -139,7 +141,7 @@ async function main(): Promise<void> {
       if (titles.length) {
         const list = join(app.config.dataDir, `delete-${runId}.txt`);
         writeFileSync(list, `${titles.join('\n')}\n`);
-        execSync(`"${app.config.mw.phpBin}" maintenance/run.php deleteBatch -u "${app.config.mw.gatewayUser}" -r "Remove end-to-end test pages (run ${runId})" "${list}"`, { cwd: app.config.mw.dir, stdio: 'ignore' });
+        execSync(`"${app.config.mw.phpBin}" maintenance/run.php deleteBatch -u "${app.config.mw.gatewayUser}" -r "Remove end-to-end test pages (run ${runId})" "${list}"`, { cwd: app.config.mw.dir, env: app.config.mw.env, stdio: 'ignore' });
         rmSync(list, { force: true });
         await app.indexer.refresh(titles);
       }
