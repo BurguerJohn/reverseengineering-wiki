@@ -16,6 +16,8 @@ export class SmtpTransport implements MailTransport {
       host: mail.smtp.host,
       port: mail.smtp.port,
       secure: mail.smtp.secure,
+      // With credentials, STARTTLS is mandatory: never send the SMTP key over a downgraded connection.
+      requireTLS: !mail.smtp.secure && !!mail.smtp.user,
       auth: mail.smtp.user ? { user: mail.smtp.user, pass: mail.smtp.pass } : undefined,
     });
   }
