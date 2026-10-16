@@ -13,6 +13,9 @@ test('privacy rules', () => {
   assert.ok(rules('contact me at someone@gmail.com').includes('email-address'));
   assert.deepEqual(rules('send to dev@example.com'), []);
   assert.ok(rules('server 8.8.8.8 answers').includes('public-ipv4'));
+  // Dotted version numbers after version/patch/build words are not addresses; "server" is not "ver".
+  assert.deepEqual(rules('Tested on version 2.2.4.3, patch 1.0.0.12 and exe build 2.2.4.3, also v2.0.1.7'), []);
+  assert.ok(rules('the game server 8.8.4.4 and the driver of it').includes('public-ipv4'));
   assert.deepEqual(rules('listen on 127.0.0.1 and 192.168.0.10, version 1.2.3.4.5'), []);
   assert.ok(rules('token rewiki_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn').includes('rewiki-token'));
   assert.ok(rules('api_key = "sk_live_abcdefghijklmnop"').includes('secret-assignment'));

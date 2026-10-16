@@ -16,6 +16,8 @@ export interface Finding {
   label: string;
   line: number;
   file?: string;
+  /** The words just before the finding (never the matched value). */
+  where?: string;
 }
 
 export type ScanContext = 'article' | 'note' | 'fact' | 'build' | 'code' | 'summary' | 'repo';
@@ -74,14 +76,36 @@ function codeBlocks(text: string): Array<{ body: string; start: number }> {
   return blocks;
 }
 
+/** "version 2.2.4.3", "patch 1.0.0.12", "build 10.2.0.1": dotted version numbers, not IP addresses. */
+const VERSION_BEFORE = /\b(?:version|ver|v|patch|build|update|release|revision|rev|exe|game|engine|sdk|driver|firmware)\s*[:=#]?\s*$/i;
+
+/** A few words before a finding, so the writer can find it; the matched value itself is never echoed. */
+function contextBefore(text: string, index: number): string {
+  const start = text.lastIndexOf('\n', index - 1) + 1;
+  const before = text.slice(Math.max(start, index - 30), index).trim();
+  return before ? `after "${before}"` : 'at the start of the line';
+}
+
 export function scanText(text: string, context: ScanContext, fileName?: string): Finding[] {
   const findings: Finding[] = [];
   for (const rule of RULES) {
     // Code pages legitimately contain comments and markup-like syntax.
     if (rule.id === 'html-comment' && context === 'code') continue;
-    const m = rule.regex.exec(text);
+    let m: RegExpExecArray | null;
+    if (rule.id === 'public-ipv4') {
+      const all = new RegExp(rule.regex.source, `${rule.regex.flags}g`);
+      m = null;
+      for (let hit = all.exec(text); hit; hit = all.exec(text)) {
+        if (!VERSION_BEFORE.test(text.slice(Math.max(0, hit.index - 24), hit.index))) {
+          m = hit;
+          break;
+        }
+      }
+    } else {
+      m = rule.regex.exec(text);
+    }
     if (m) {
-      findings.push({ rule: rule.id, category: rule.category, label: rule.label, line: lineOf(text, m.index), file: fileName });
+      findings.push({ rule: rule.id, category: rule.category, label: rule.label, line: lineOf(text, m.index), file: fileName, where: contextBefore(text, m.index) });
     }
   }
 
@@ -132,6 +156,6 @@ export function looksLikeInstructions(text: string): boolean {
 
 export function describe(findings: Finding[]): string {
   return findings
-    .map((f) => `${f.label} (${f.file ? `${f.file}, ` : ''}line ${f.line}; rule ${f.rule})`)
+    .map((f) => `${f.label} (${f.file ? `${f.file}, ` : ''}line ${f.line}${f.where ? `, ${f.where}` : ''}; rule ${f.rule})`)
     .join('; ');
 }

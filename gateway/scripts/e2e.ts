@@ -759,6 +759,25 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const anyCave = await call(anon, 'search', { query: 'the Cave', match: 'any', limit: 50 });
   assert.ok(anyCave.hits.length && anyCave.hits.every((h: any) => /cave/i.test(h.title)), JSON.stringify(anyCave.hits.map((h: any) => h.title)));
 
+  // Operations that depend on a failed one are reported as skipped, not as errors of their own.
+  const cascade = await call(a, 'batch', { dry_run: true, operations: [
+    { tool: 'create_page', arguments: { type: 'software', title: `Library:E2E Wrong ${run}`, summary: 'A library prefix on a software page fails.', body: '## A\n\nB' } },
+    { tool: 'add_note', arguments: { subject: `Software:E2E Wrong ${run}`, body: 'Depends on the page above, which fails.', confidence: 'low' } },
+  ] });
+  assert.equal(cascade.error, 'BATCH_INVALID', JSON.stringify(cascade).slice(0, 300));
+  assert.equal(cascade.failures[1].error, 'SKIPPED', JSON.stringify(cascade.failures));
+  assert.match(cascade.failures[1].message, /depends on operation 1/);
+  // Schema errors name the field; a hashed file needs no size; behavior facts take a code range and a setting.
+  const badHash = await expectError(a, 'register_build', { software: cave, version: '2.0', platform: 'windows-x64', distribution: 'steam', files: [{ name: 'x.exe', sha256: 'not-a-hash' }], dry_run: true }, 'SCHEMA_INVALID');
+  assert.match(badHash.message, /files\.0\.sha256/);
+  const noSize = await call(a, 'register_build', { software: cave, version: '2.0', platform: 'windows-x64', distribution: 'steam', files: [{ name: `cave2${run}.exe`, sha256: createHash('sha256').update(`cave2-${run}`).digest('hex') }], dry_run: true });
+  assert.equal(noSize.dry_run, true, JSON.stringify(noSize).slice(0, 300));
+  const behavior = await call(a, 'add_fact', { kind: 'behavior', subject: cave, claim: 'The cave boss retargets five seconds after another player hits it.', scope: { level: 'build', applies_to: sha },
+    data: { trigger: 'hit by another player', effect: 'retarget after 5 s', rva: '0x2A41C0', rva_end: '0x2A4230', setting: { name: 'boss_retarget_time', default: '5' } },
+    evidence: [{ type: 'debugger', detail: 'breakpoint on the retarget timer' }], confidence: 'medium', dry_run: true });
+  assert.equal(behavior.warnings, undefined, JSON.stringify(behavior.warnings));
+  assert.equal(behavior.quota.cost, 1, 'dry runs show what publishing would cost');
+
   // A wrong build title: "did you mean" the real one.
   const typo = await expectError(a, 'add_fact', { ...fn('Cave::Draw', '0x2000', `Build:${cave}/1.0 (Win64, Steam)`), dry_run: true }, 'SCHEMA_INVALID');
   assert.ok(typo.message.includes(`Did you mean "${buildTitle}"`), typo.message);

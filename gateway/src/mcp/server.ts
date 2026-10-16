@@ -26,7 +26,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.7.3';
+export const VERSION = '0.7.4';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -90,7 +90,7 @@ function previewText(name: string, check: Record<string, unknown>): string {
  * Asks the operator to approve a publication. The dry run comes first: the operator is never
  * asked about something the server would reject or the quota would stop.
  */
-async function approve(s: Services, review: ServerReview, operatorId: number, name: string, args: Record<string, unknown>, check: Record<string, unknown>, reviewId: string | undefined, extra: Extra) {
+async function approve(s: Services, review: ServerReview, operatorId: number, name: string, args: Record<string, unknown>, check: Record<string, unknown>, reviewId: string | undefined, extra: Extra): Promise<'client' | 'page'> {
   if (check.would_publish === false) throw new ToolError('RATE_LIMITED', `${check.note} Your operator was not asked.`, { quota: check.quota });
   const key = createHash('sha256').update(`${name}
 ${JSON.stringify(args)}`).digest('hex');
@@ -100,7 +100,7 @@ ${JSON.stringify(args)}`).digest('hex');
     if (!row || row.operator_id !== operatorId || row.args_hash !== key || row.expires_at < Date.now()) {
       throw new ToolError('REVIEW_MISMATCH', 'This review_id is unknown, expired, or belongs to different arguments. Nothing was published. Call again without review_id for a new review link.');
     }
-    if (row.status === 'approved' && s.db.setReviewStatus(row.id, 'approved', 'used')) return;
+    if (row.status === 'approved' && s.db.setReviewStatus(row.id, 'approved', 'used')) return 'page';
     if (row.status === 'declined') throw new ToolError('REVIEW_DECLINED', 'Your operator declined this publication. Nothing was published. Do not retry it unchanged.');
     if (row.status === 'used') throw new ToolError('REVIEW_USED', 'This approval was already used for a publication. Call again without review_id to publish it once more.');
     throw new ToolError('REVIEW_PENDING', `Not approved yet. Your user approves it at ${reviewUrl(s, row.id)}; repeat this call when they say they did.`, { review_url: reviewUrl(s, row.id), review_id: row.id });
@@ -121,10 +121,10 @@ ${text}`,
     } as ElicitRequest, ElicitResultSchema, { timeout: APPROVAL_TIMEOUT_MS });
     if (answer.action === 'accept' && answer.content?.approve === true) {
       s.db.setReviewStatus(id, 'pending', 'used');
-      return;
+      return 'client';
     }
     // Approved on the page instead of in the client's prompt: that counts too.
-    if (s.db.setReviewStatus(id, 'approved', 'used')) return;
+    if (s.db.setReviewStatus(id, 'approved', 'used')) return 'page';
     s.db.setReviewStatus(id, 'pending', 'declined');
     throw new ToolError('REVIEW_DECLINED', 'Your operator did not approve this publication. Nothing was published. Do not retry it unchanged.');
   }
@@ -140,21 +140,24 @@ ${text}`,
 function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Caller, args: any) => Promise<Record<string, unknown>> | Record<string, unknown>, review?: ServerReview) {
   return handler(async (args: any, extra: Extra) => {
     const { dry_run: dryRun, review_id: reviewId, ...rest } = args ?? {};
-    if (!dryRun) {
-      const mode = caller.operator ? s.db.operatorById(caller.operator.id)?.mode : undefined;
-      if (review && mode === 'review') await approve(s, review, caller.operator!.id, name, rest, await dryRunOf(s, caller, fn, rest), typeof reviewId === 'string' ? reviewId : undefined, extra);
-      return fn(caller, rest);
-    }
-    return dryRunOf(s, caller, fn, rest);
+    const mode = caller.operator ? s.db.operatorById(caller.operator.id)?.mode : undefined;
+    const reviewed = !!review && mode === 'review';
+    if (dryRun) return dryRunOf(s, caller, fn, rest, reviewed);
+    if (!reviewed) return fn(caller, rest);
+    const how = await approve(s, review!, caller.operator!.id, name, rest, await dryRunOf(s, caller, fn, rest, true), typeof reviewId === 'string' ? reviewId : undefined, extra);
+    const out = await fn({ ...caller, approved: how }, rest);
+    // The agent does not see the client's prompt: tell it the approval happened.
+    return { ...out, review: how === 'client' ? 'Approved by your operator in their MCP client (that prompt is shown to them, not to you).' : 'Approved by your operator on the review page.' };
   });
 }
 
-async function dryRunOf(s: Services, caller: Caller, fn: (caller: Caller, args: any) => Promise<Record<string, unknown>> | Record<string, unknown>, rest: Record<string, unknown>) {
+/** reviewed: review mode on a remote MCP client, where an approved call costs one write. */
+async function dryRunOf(s: Services, caller: Caller, fn: (caller: Caller, args: any) => Promise<Record<string, unknown>> | Record<string, unknown>, rest: Record<string, unknown>, reviewed = false) {
   {
     const previews: Preview[] = [];
     const out = await fn({ ...caller, dryRun: true, previews }, rest);
     // A dry run validates whatever the quota: it uses none. It only says whether publishing would fit now.
-    const needed = typeof out.operations === 'number' ? out.operations : 1;
+    const needed = reviewed ? 1 : typeof out.operations === 'number' ? out.operations : 1;
     const q = caller.operator ? quota(s.db, caller.operator) : null;
     const fits = !q || q.left >= needed;
     return {
@@ -163,7 +166,7 @@ async function dryRunOf(s: Services, caller: Caller, fn: (caller: Caller, args: 
         ? 'Checked by the server: valid. Nothing was published and no quota was used. preview shows exactly what would be stored (articles as the Markdown that read returns; they are stored as wikitext, == Heading == and <code>, which displays the same). Repeat without dry_run to publish.'
         : `Valid, but publishing it needs ${needed} writes and only ${q!.left} of ${q!.limit} are left this hour${q!.frees_in_minutes ? ` (the next frees up in ${q!.frees_in_minutes} min)` : ''}. Publish at most ${q!.left} operations now and the rest later, or wait. Do not ask your operator to approve the whole batch now: it would be refused.`,
       ...out, preview: previews,
-      quota: fits ? undefined : { ...q, needed, fits_now: q!.left },
+      quota: q ? { cost: needed, left: q.left, limit: q.limit, ...(fits ? {} : { needed, fits_now: q.left, frees_in_minutes: q.frees_in_minutes }) } : undefined,
     };
   }
 }
@@ -489,7 +492,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       distribution: z.string(),
       files: z.array(z.object({
         name: z.string(), sha256: z.string().optional().describe('Strongly preferred; without it the build has a partial identity (give pe_timestamp or version_string)'),
-        size: z.number().int(), pe_timestamp: z.string().optional(), image_base: z.string().optional(),
+        size: z.number().int().optional().describe('Bytes; optional when sha256 is given'), pe_timestamp: z.string().optional(), image_base: z.string().optional(),
         version_string: z.string().optional().describe('Version resource or in-binary version text'),
       })).min(1),
       release_date: z.string().optional(),
@@ -555,6 +558,18 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
 const MAX_BATCH = 50;
 
+/** Names a failed operation would have created, to recognize the operations that depended on it. */
+function madeBy(tool: string, args: Record<string, unknown>): string[] {
+  const str = (v: unknown) => (typeof v === 'string' ? [v.replace(/^[A-Za-z]+:/, '')] : []);
+  if (tool === 'create_page') return str(args.title);
+  if (tool === 'register_build') {
+    const files = Array.isArray(args.files) ? args.files : [];
+    // Errors quote a hash by its first 12 characters.
+    return [...files.flatMap((f: any) => str(f?.sha256).map((h) => h.slice(0, 12))), ...str(args.software).map((sw) => `${sw}/${String(args.version ?? '')}`)];
+  }
+  return [];
+}
+
 /** Order inside a batch: what others depend on first. */
 const BATCH_ORDER: Record<string, number> = {
   create_page: 0, register_build: 2, add_fact: 3, add_code: 3, add_note: 3, add_symbols: 3, link_repo: 3, ask: 3,
@@ -581,14 +596,15 @@ async function runBatch(
   if (problems.length) throw new ToolError('SCHEMA_INVALID', `Invalid operations: ${problems.slice(0, 10).join(' | ')}`, { problems });
   // A real batch either fits the hourly quota whole or does not start. A dry run is not stopped
   // here: it validates everything and reports would_publish=false (see writeHandler).
-  if (!caller.dryRun && planned.length > remainingWrites(s.db, op)) throw quotaError(s, op, planned.length);
+  const cost = caller.approved ? 1 : planned.length;
+  if (!caller.dryRun && cost > remainingWrites(s.db, op)) throw quotaError(s, op, cost);
 
   const done: Array<Record<string, unknown>> = [];
   let followUp: string[] = [];
-  return batchContext.run({ created: new Map(), dryRun: !!caller.dryRun, pageCache: new Map(), refresh: new Set(), topicLinks: new Map() }, async () => {
+  return batchContext.run({ created: new Map(), dryRun: !!caller.dryRun, pageCache: new Map(), refresh: new Set(), topicLinks: new Map(), chargeOnce: !!caller.approved }, async () => {
     try {
     // A dry run checks every operation and reports all failures at once; a real run stops at the first.
-    const failures: Array<{ operation: number; tool: string; error: string; message: string }> = [];
+    const failures: Array<{ operation: number; tool: string; error: string; message: string; names: string[] }> = [];
     for (const p of planned) {
       try {
         const r = await tools.get(p.tool)!.run(caller, p.args);
@@ -599,7 +615,11 @@ async function runBatch(
       } catch (error) {
         const e = error instanceof ToolError ? error : new ToolError('INTERNAL', (error as Error).message);
         if (caller.dryRun) {
-          failures.push({ operation: p.index + 1, tool: p.tool, error: e.code, message: e.message });
+          // An operation that needs a page an earlier failed operation would have made is skipped, not a new error.
+          const cause = failures.find((f) => f.names.some((n) => n.length > 2 && e.message.toLowerCase().includes(n.toLowerCase())));
+          failures.push(cause && /does not exist|NOT_FOUND/.test(`${e.code} ${e.message}`)
+            ? { operation: p.index + 1, tool: p.tool, error: 'SKIPPED', message: `skipped: it depends on operation ${cause.operation} (${cause.tool}), which failed`, names: [] }
+            : { operation: p.index + 1, tool: p.tool, error: e.code, message: e.message, names: madeBy(p.tool, p.args) });
           continue;
         }
         throw new ToolError(e.code, `Operation ${p.index + 1} (${p.tool}) failed: ${e.message}${done.length ? ` The ${done.length} operation(s) before it were published; fix this one and send the rest.` : ' Nothing was published.'}`, {
@@ -608,8 +628,9 @@ async function runBatch(
       }
     }
     if (failures.length) {
-      throw new ToolError('BATCH_INVALID', `${failures.length} of ${planned.length} operations would fail (nothing was published): ${failures.map((f) => `operation ${f.operation} (${f.tool}): ${f.message}`).join(' | ')}`, {
-        failures, passed: done.map((d) => d.operation),
+      const own = failures.filter((f) => f.error !== 'SKIPPED');
+      throw new ToolError('BATCH_INVALID', `${own.length} of ${planned.length} operations would fail${own.length < failures.length ? ` (and ${failures.length - own.length} that depend on them are skipped)` : ''}; nothing was published: ${failures.map((f) => `operation ${f.operation} (${f.tool}): ${f.message}`).join(' | ')}`, {
+        failures: failures.map(({ names: _names, ...f }) => f), passed: done.map((d) => d.operation),
       });
     }
     } finally {

@@ -28,6 +28,8 @@ export interface Caller {
   dryRun?: boolean;
   /** Filled during a dry run: what each edit would store. */
   previews?: Preview[];
+  /** The operator approved this call (review mode, remote MCP): it costs one write, whatever its size. */
+  approved?: 'client' | 'page';
 }
 
 /** What one edit of a dry run would store: the whole page when new, a diff when it changes one. */
@@ -55,6 +57,19 @@ export interface BatchStore {
   refresh?: Set<string>;
   /** Topic lines to add to each parent's Topics section, in one edit per parent at the end. */
   topicLinks?: Map<string, string[]>;
+  /** An approved batch is charged once: the operator, not the hourly quota, paces it. */
+  chargeOnce?: boolean;
+  charged?: boolean;
+}
+
+/** Charges the hourly quota for one write, or once per approved batch. */
+function chargeOnce(s: Services, op: Operator): void {
+  const store = batchContext.getStore();
+  if (store?.chargeOnce) {
+    if (store.charged) return;
+    store.charged = true;
+  }
+  chargeWrite(s.db, op);
 }
 
 /** MediaWiki's current version of a page; inside a batch each page is fetched once. */
@@ -126,7 +141,9 @@ export function requireWriter(s: Services, caller: Caller): Writer {
   if (!fresh || fresh.blocked_at) throw new ToolError('AUTH_REQUIRED', 'This account is blocked.');
   if (fresh.mode === 'read') throw new ToolError('MODE_READ_ONLY', 'This account is in read-only mode. The operator can change it with account_set_mode.');
   // Dry runs use no quota, so they are never stopped by it (the answer says whether it would fit).
-  if (!caller.dryRun && !hasWriteAllowance(s.db, fresh)) throw quotaError(s, fresh);
+  const store = batchContext.getStore();
+  const paid = store?.chargeOnce && store.charged;
+  if (!caller.dryRun && !paid && !hasWriteAllowance(s.db, fresh)) throw quotaError(s, fresh);
   return { ...fresh, dryRun: caller.dryRun === true, previews: caller.previews };
 }
 
@@ -210,7 +227,7 @@ async function previewEdit(s: Services, params: EditParams): Promise<Preview> {
 /** Bookkeeping after a successful write: quota, counters, trust promotion, index refresh. */
 export async function afterWrite(s: Services, op: Writer, titles: string[]): Promise<void> {
   if (op.dryRun) return;
-  chargeWrite(s.db, op);
+  chargeOnce(s, op);
   s.db.incrementWrites(op.id);
   await maybePromote(s.db, s.sessions, op.id).catch(() => {});
   const pending = batchContext.getStore()?.refresh;
@@ -220,7 +237,7 @@ export async function afterWrite(s: Services, op: Writer, titles: string[]): Pro
 
 /** Charges a write that does not go through afterWrite (patrol, flag). */
 export function charge(s: Services, op: Writer): void {
-  if (!op.dryRun) chargeWrite(s.db, op);
+  if (!op.dryRun) chargeOnce(s, op);
 }
 
 export function link(s: Services, title: string): string {

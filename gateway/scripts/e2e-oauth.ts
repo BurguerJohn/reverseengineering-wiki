@@ -205,7 +205,13 @@ assert.match(prompts[0], /--- New page: Software:E2E OAuth Game [\s\S]*Nothing s
 const linkInPrompt = new RegExp(`${GATEWAY.replace(/[.]/g, '\\.')}/review/[A-Za-z0-9_-]+`);
 assert.match(prompts[0], linkInPrompt, 'the prompt links to the review page');
 assert.match(schemas[0].properties.approve.description, linkInPrompt, 'the link sits next to the checkbox too (clients that show only the form)');
-ok('review mode: the server shows the operator the whole page (elicitation, with a link to the review page), publishes after the OK');
+assert.match(created.review, /Approved by your operator in their MCP client/, 'the agent learns the operator approved');
+// An approved batch costs one write of the hourly quota, whatever its size.
+const leftBefore = parse(await client.callTool({ name: 'account_status', arguments: {} })).writes_this_hour.left;
+const three = parse(await client.callTool({ name: 'batch', arguments: { operations: [1, 2, 3].map((n) => ({ tool: 'add_note', arguments: { subject, body: `Approved batch note number ${n}, published together.`, confidence: 'low' } })) } }));
+assert.equal(three.operations, 3, JSON.stringify(three).slice(0, 300));
+assert.equal(parse(await client.callTool({ name: 'account_status', arguments: {} })).writes_this_hour.left, leftBefore - 1);
+ok('review mode: the server shows the operator the whole page (elicitation, with a link to the review page), publishes after the OK; the agent is told; an approved batch costs one write');
 
 answer = null;
 const declined = parse(await client.callTool({ name: 'add_note', arguments: { subject, body: 'The operator will not approve this one.', confidence: 'low' } }));

@@ -126,7 +126,7 @@ export interface FactDoc extends FactInput {
  * ones. Published in tools.json and the add_fact description; fields outside it get a warning.
  */
 export const FACT_DATA: Record<FactKind, { required: string[]; one_of?: string[]; optional: string[]; example: Record<string, unknown> }> = {
-  function: { required: ['name'], one_of: ['rva', 'address', 'signature'], optional: ['prototype', 'calling_convention', 'size'], example: { name: 'Player::TakeDamage', rva: '0x141230', signature: '48 89 5C 24 ?? 57 48 83 EC 20', prototype: 'void __fastcall(Player*, float)' } },
+  function: { required: ['name'], one_of: ['rva', 'address', 'signature'], optional: ['prototype', 'calling_convention', 'size', 'rva_end'], example: { name: 'Player::TakeDamage', rva: '0x141230', signature: '48 89 5C 24 ?? 57 48 83 EC 20', prototype: 'void __fastcall(Player*, float)' } },
   global: { required: ['name', 'type'], one_of: ['rva', 'address', 'signature'], optional: ['size'], example: { name: 'g_GameState', type: 'GameState*', rva: '0x2F1A80' } },
   struct: { required: ['name', 'fields'], one_of: ['size', 'size_min'], optional: ['size_max', 'alignment'], example: { name: 'Weapon', size: '0x88', fields: [{ offset: '0x0', size: 8, type: 'void*', name: 'vtable' }] } },
   vtable: { required: ['class', 'slots'], one_of: ['rva', 'address', 'rtti'], optional: [], example: { class: 'Weapon', rtti: '.?AVWeapon@@', rva: '0x1D3E00', slots: [{ index: 0, name: '~Weapon' }] } },
@@ -135,7 +135,7 @@ export const FACT_DATA: Record<FactKind, { required: string[]; one_of?: string[]
   string: { required: ['value', 'meaning'], optional: ['encoding', 'rva', 'address'], example: { value: 'EDF5_SAVE', meaning: 'Save file tag', encoding: 'ascii' } },
   signature: { required: ['pattern', 'matches'], optional: ['offset'], example: { pattern: '48 8B 05 ?? ?? ?? ?? 48 85 C0', matches: 'load of g_GameState' } },
   identification: { required: ['method', 'indicator'], optional: [], example: { method: 'string', indicator: 'CRI Middleware' } },
-  behavior: { required: [], optional: ['trigger', 'effect', 'condition'], example: { trigger: 'loading a save from another version', effect: 'the game resets the weapon list' } },
+  behavior: { required: [], optional: ['trigger', 'effect', 'condition', 'rva', 'rva_end', 'address', 'signature', 'function', 'setting'], example: { trigger: 'the Witch is shot by another survivor', effect: 'she switches target after a 5 s timer', function: 'Witch::OnTakeDamage', rva: '0x2A41C0', rva_end: '0x2A4230', setting: { name: 'z_witch_retarget_time', default: '5' } } },
 };
 
 /** "0x88", "136" or 136 → 136; anything else (ranges, words) → null. */
@@ -257,7 +257,7 @@ export const buildInputSchema = z.object({
   files: z.array(z.object({
     name: z.string().min(1).max(200),
     sha256: z.string().regex(/^[0-9a-fA-F]{64}$/).optional().describe('Strongly preferred. Without it the build has a partial identity: give size plus pe_timestamp or version_string'),
-    size: z.number().int().nonnegative(),
+    size: z.number().int().nonnegative().optional().describe('Bytes; optional when sha256 is given'),
     pe_timestamp: hex.optional(),
     image_base: hex.optional(),
     version_string: z.string().max(120).optional().describe('Version resource or in-binary version text, e.g. "1.0.3 (Jan 17 1992)"'),

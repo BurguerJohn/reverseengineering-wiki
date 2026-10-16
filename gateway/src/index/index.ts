@@ -344,7 +344,7 @@ export class SearchIndex {
     for (const f of doc.files ?? []) {
       const sha = f.sha256?.toLowerCase() ?? '';
       this.db.prepare('insert into build_files (sha256, title, name, size, pe_timestamp) values (?, ?, ?, ?, ?)')
-        .run(sha, p.title, f.name, f.size, f.pe_timestamp ?? null);
+        .run(sha, p.title, f.name, f.size ?? 0, f.pe_timestamp ?? null);
       this.ids(p.title, '', [...(sha ? [{ kind: 'sha256' as const, token: sha }] : []), { kind: 'file' as const, token: f.name.toLowerCase() }]);
     }
     this.doc(p.title, '', `${summary}\n${(doc.files ?? []).map((f) => f.name).join(' ')}\n${doc.notes ?? ''}`, 'build');

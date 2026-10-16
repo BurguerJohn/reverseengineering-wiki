@@ -112,6 +112,11 @@ function missingGeneralPages(s: Services, wikitext: string): { missing_pages?: s
   };
 }
 
+/** "files.0.size: required; version: too long" from schema issues. */
+function issueList(issues: Array<{ path: PropertyKey[]; message: string }>): string {
+  return issues.slice(0, 8).map((i) => `${i.path.map(String).join('.') || 'arguments'}: ${i.message}`).join('; ');
+}
+
 function result(s: Services, t: string, revision: number | undefined, extra: Record<string, unknown> = {}) {
   return { title: t, revision, url: link(s, t), ...extra };
 }
@@ -141,7 +146,7 @@ export async function addNote(s: Services, caller: Caller, args: { subject: stri
 export async function addFact(s: Services, caller: Caller, input: unknown) {
   const op = requireWriter(s, caller);
   const parsed = factInputSchema.safeParse(input);
-  if (!parsed.success) throw new ToolError('SCHEMA_INVALID', 'Fact does not match rewiki.fact/1.', { issues: parsed.error.issues });
+  if (!parsed.success) throw new ToolError('SCHEMA_INVALID', `Fact does not match rewiki.fact/1: ${issueList(parsed.error.issues)}.`, { issues: parsed.error.issues });
   const fact = parsed.data;
   fact.subject = subjectRoot(title(s, fact.subject, SUBJECTS));
   await mustExist(s, fact.subject, 'Create the subject page first (create_page).');
@@ -735,15 +740,15 @@ export async function linkRepo(s: Services, caller: Caller, args: {
 export async function registerBuild(s: Services, caller: Caller, input: unknown) {
   const op = requireWriter(s, caller);
   const parsed = buildInputSchema.safeParse(input);
-  if (!parsed.success) throw new ToolError('SCHEMA_INVALID', 'Build does not match rewiki.build/1.', { issues: parsed.error.issues });
+  if (!parsed.success) throw new ToolError('SCHEMA_INVALID', `Build does not match rewiki.build/1: ${issueList(parsed.error.issues)}.`, { issues: parsed.error.issues });
   const b = parsed.data;
   b.software = title(s, b.software, ['software']);
   await mustExist(s, b.software, 'Create the Software: page first (create_page with type software).');
   b.files = b.files.map((f) => ({ ...f, sha256: f.sha256?.toLowerCase() }));
   // Without a hash, a file is identified by its size plus a timestamp or version text: weaker.
-  const weak = b.files.filter((f) => !f.sha256 && !f.pe_timestamp && !f.version_string);
+  const weak = b.files.filter((f) => !f.sha256 && (f.size === undefined || (!f.pe_timestamp && !f.version_string)));
   if (weak.length) {
-    throw new ToolError('SCHEMA_INVALID', `${weak.map((f) => f.name).join(', ')}: without sha256, give pe_timestamp or version_string (with size) so the build can still be recognized. A SHA-256 is far better: compute it if you have the file.`);
+    throw new ToolError('SCHEMA_INVALID', `${weak.map((f) => f.name).join(', ')}: without sha256, give size plus pe_timestamp or version_string so the build can still be recognized. A SHA-256 is far better (with it, size is optional): compute it if you have the file.`);
   }
   assertClean(scanValue({ ...b, files: b.files.map((f) => ({ name: f.name, version_string: f.version_string })) }, 'build'));
   for (const f of b.files) {
