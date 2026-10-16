@@ -73,6 +73,9 @@ never ask your operator for an account or a token. In review mode the server sho
 exactly what will be published (a review link opens it in their browser) and waits for their OK
 before publishing: describe what you want to publish, then call the tool. If the answer is
 REVIEW_REQUIRED, give your user review_url, wait until they say they approved, then repeat the
-same call with review_id. Never open the review link yourself. account_status shows the mode and the hourly quota. New accounts
+same call with review_id. Never open the review link yourself. ONE APPROVAL FOR MANY WRITES: put
+everything from a session (pages, facts, builds, code, notes) in one batch call; your operator
+approves the whole batch once. Never merge content into fewer or bigger pages to save approvals:
+keep facts separate and each subject on its own page. account_status shows the mode and the hourly quota. New accounts
 get a random username; if your operator wants another one, account_rename with the name they choose.`;
 }
