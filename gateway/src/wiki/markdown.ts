@@ -5,6 +5,7 @@
  * links, and [[Wiki links]] passed through. Raw HTML is escaped.
  */
 import MarkdownIt from 'markdown-it';
+import { tableToMarkdown } from './wikitext.ts';
 
 const md = new MarkdownIt('default', { html: false, linkify: false, typographer: false });
 
@@ -123,7 +124,10 @@ function renderInline(tokens: Token[], inTable = false): string {
  *   are normalized; without it, levels map one to one ("##" ↔ "=="), as wikitextToMarkdown reads them back.
  */
 export function markdownToWikitext(markdown: string, opts: { topLevel?: number } = {}): string {
-  const tokens = md.parse(markdown.replace(/\r\n?/g, '\n'), {});
+  // Agents sometimes write MediaWiki tables ({| … |}) in their Markdown: take them as the tables they are.
+  const source = markdown.replace(/\r\n?/g, '\n')
+    .replace(/^[ \t]*\{\|[^\n]*\n[\s\S]*?^[ \t]*\|\}[ \t]*$/gm, (table) => `\n${tableToMarkdown(table.replace(/^[ \t]+/gm, ''))}\n`);
+  const tokens = md.parse(source, {});
   const levels = tokens.filter((t) => t.type === 'heading_open').map((t) => Number(t.tag.slice(1)));
   const shift = opts.topLevel !== undefined && levels.length ? opts.topLevel - Math.min(...levels) : 0;
   const out: string[] = [];

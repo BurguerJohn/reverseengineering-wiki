@@ -214,7 +214,7 @@ function inlineToMarkdown(s: string): string {
   );
 }
 
-function tableToMarkdown(block: string): string {
+export function tableToMarkdown(block: string): string {
   const rows: string[][] = [];
   let header = false;
   let current: string[] | null = null;

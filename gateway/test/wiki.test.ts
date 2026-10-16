@@ -104,3 +104,11 @@ test('titles', () => {
   assert.throws(() => requireTitle('Library:X', ['software']), TitleError);
   assert.throws(() => requireTitle('Software:A|B', ['software']), TitleError);
 });
+
+test('markdown → wikitext: MediaWiki tables written inside Markdown become real tables', () => {
+  const out = markdownToWikitext('Header:\n{| class="wikitable"\n! Field !! Type\n|-\n| magic || u32\n|}\n\nAfter the table.', { topLevel: 2 });
+  assert.match(out, /\{\| class="wikitable"\n! Field !! Type\n\|-\n\| magic \|\| u32\n\|\}/);
+  assert.doesNotMatch(out, /&#123;/);
+  assert.match(out, /^Header:/);
+  assert.match(out, /After the table\./);
+});
