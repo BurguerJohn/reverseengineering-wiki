@@ -121,6 +121,37 @@ export interface FactDoc extends FactInput {
   verifications: Array<z.infer<typeof verificationSchema>>;
 }
 
+/**
+ * The data fields of each fact kind: required ones, alternatives (at least one of), optional
+ * ones. Published in tools.json and the add_fact description; fields outside it get a warning.
+ */
+export const FACT_DATA: Record<FactKind, { required: string[]; one_of?: string[]; optional: string[]; example: Record<string, unknown> }> = {
+  function: { required: ['name'], one_of: ['rva', 'address', 'signature'], optional: ['prototype', 'calling_convention', 'size'], example: { name: 'Player::TakeDamage', rva: '0x141230', signature: '48 89 5C 24 ?? 57 48 83 EC 20', prototype: 'void __fastcall(Player*, float)' } },
+  global: { required: ['name', 'type'], one_of: ['rva', 'address', 'signature'], optional: ['size'], example: { name: 'g_GameState', type: 'GameState*', rva: '0x2F1A80' } },
+  struct: { required: ['name', 'fields'], one_of: ['size', 'size_min'], optional: ['size_max', 'alignment'], example: { name: 'Weapon', size: '0x88', fields: [{ offset: '0x0', size: 8, type: 'void*', name: 'vtable' }] } },
+  vtable: { required: ['class', 'slots'], one_of: ['rva', 'address', 'rtti'], optional: [], example: { class: 'Weapon', rtti: '.?AVWeapon@@', rva: '0x1D3E00', slots: [{ index: 0, name: '~Weapon' }] } },
+  enum: { required: ['name', 'values'], optional: ['underlying_type'], example: { name: 'WeaponClass', values: { 0: 'AssaultRifle', 1: 'Shotgun' } } },
+  magic: { required: ['bytes', 'offset', 'meaning'], optional: ['mask'], example: { bytes: '52 41 42 00', offset: '0x0', meaning: 'RAB archive header' } },
+  string: { required: ['value', 'meaning'], optional: ['encoding', 'rva', 'address'], example: { value: 'EDF5_SAVE', meaning: 'Save file tag', encoding: 'ascii' } },
+  signature: { required: ['pattern', 'matches'], optional: ['offset'], example: { pattern: '48 8B 05 ?? ?? ?? ?? 48 85 C0', matches: 'load of g_GameState' } },
+  identification: { required: ['method', 'indicator'], optional: [], example: { method: 'string', indicator: 'CRI Middleware' } },
+  behavior: { required: [], optional: ['trigger', 'effect', 'condition'], example: { trigger: 'loading a save from another version', effect: 'the game resets the weapon list' } },
+};
+
+/** "0x88", "136" or 136 → 136; anything else (ranges, words) → null. */
+export function sizeValue(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isInteger(v) && v >= 0) return v;
+  if (typeof v === 'string' && /^(0x[0-9a-f]+|\d+)$/i.test(v.trim())) return Number(v.trim());
+  return null;
+}
+
+/** Fields of data that are not standard for the kind: published with a warning, not refused. */
+export function unknownFactFields(kind: FactKind, data: Record<string, unknown>): string[] {
+  const spec = FACT_DATA[kind];
+  const known = new Set([...spec.required, ...(spec.one_of ?? []), ...spec.optional, 'notes']);
+  return Object.keys(data).filter((k) => !known.has(k));
+}
+
 /** Kind-specific required data fields. Returns a list of problems. */
 export function checkFactData(kind: FactKind, data: Record<string, unknown>): string[] {
   const problems: string[] = [];
@@ -150,10 +181,23 @@ export function checkFactData(kind: FactKind, data: Record<string, unknown>): st
       need('name'); need('type');
       if (!located && data.signature === undefined) problems.push('global facts need data.rva, data.address or an access data.signature');
       break;
-    case 'struct':
-      need('name'); need('size'); need('fields');
+    case 'struct': {
+      need('name'); need('fields');
       if (data.fields !== undefined && !Array.isArray(data.fields)) problems.push('data.fields must be an array of {offset, size, type, name}');
+      const ranged = data.size_min !== undefined || data.size_max !== undefined;
+      if (data.size !== undefined) {
+        if (sizeValue(data.size) === null) problems.push('data.size must be a number or hex string (136 or "0x88"); if the exact size is unknown, leave size out and give size_min and size_max');
+        if (ranged) problems.push('give either data.size or data.size_min + data.size_max, not both');
+      } else if (!ranged) {
+        problems.push('data.size is required for kind "struct" (if it is not known exactly: data.size_min and data.size_max)');
+      } else {
+        const lo = sizeValue(data.size_min);
+        const hi = sizeValue(data.size_max);
+        if (lo === null || hi === null) problems.push('data.size_min and data.size_max must both be numbers or hex strings');
+        else if (lo > hi) problems.push('data.size_min must not exceed data.size_max');
+      }
       break;
+    }
     case 'vtable':
       need('class'); need('slots');
       if (!located && data.rtti === undefined) problems.push('vtable facts need data.rva, data.address or data.rtti');
@@ -212,10 +256,11 @@ export const buildInputSchema = z.object({
   distribution: z.string().min(2).max(40).describe('e.g. steam, epic, gog, retail, disc'),
   files: z.array(z.object({
     name: z.string().min(1).max(200),
-    sha256: z.string().regex(/^[0-9a-fA-F]{64}$/),
+    sha256: z.string().regex(/^[0-9a-fA-F]{64}$/).optional().describe('Strongly preferred. Without it the build has a partial identity: give size plus pe_timestamp or version_string'),
     size: z.number().int().nonnegative(),
     pe_timestamp: hex.optional(),
     image_base: hex.optional(),
+    version_string: z.string().max(120).optional().describe('Version resource or in-binary version text, e.g. "1.0.3 (Jan 17 1992)"'),
   })).min(1),
   release_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   notes: z.string().max(2000).optional(),
@@ -224,6 +269,8 @@ export type BuildInput = z.infer<typeof buildInputSchema>;
 
 export interface BuildDoc extends BuildInput {
   schema: 'rewiki.build/1';
+  /** sha256: every file hashed; partial: identified by size + timestamp or version text only. */
+  identity?: 'sha256' | 'partial';
   created_by: string;
   created_at: string;
 }

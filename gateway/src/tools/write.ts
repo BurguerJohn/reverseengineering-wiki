@@ -16,7 +16,7 @@ import {
   parseSections, findSection, replaceSectionBody, insertSection, joinSections, sectionBlock, wikitextToMarkdown, headingKey, type Section,
 } from '../wiki/wikitext.ts';
 import {
-  buildArticle, redirectText, factInputSchema, checkFactData, factKey, buildInputSchema, buildTitle,
+  buildArticle, redirectText, factInputSchema, checkFactData, unknownFactFields, FACT_DATA, factKey, buildInputSchema, buildTitle,
   codeMetaSchema, codeFileSchema, renderCodePage, parseCodePage, renderRepo, parseRepos, renderNote,
   symbolInputSchema, mergeSymbols, emptySymbolsDoc, topicPage, wordCount,
   LEADING_SECTIONS, TRAILING_SECTIONS, TOPIC_SPLIT_WORDS, MAX_SYMBOLS_PER_CALL, CODE_PAGE_LIMIT,
@@ -52,6 +52,35 @@ async function currentPage(s: Services, t: string) {
   return text === undefined ? null : { exists: true as const, title: t, pageid: 0, revid: 0, parentid: 0, timestamp: now(), user: '', comment: '', content: text, contentmodel: '', redirect: false };
 }
 
+const SHA256_REF = /^(?:sha256:)?([0-9a-fA-F]{64})$/;
+
+/** Build: titles created earlier in this batch, with their text. */
+function batchBuilds(): Array<[string, string]> {
+  return [...(batchContext.getStore()?.created ?? new Map<string, string>()).entries()].filter(([t]) => t.startsWith('Build:'));
+}
+
+/**
+ * A build reference: its Build: title, or the SHA-256 of one of its files (any build registered
+ * before, or earlier in the same batch). Unknown titles get the closest existing ones suggested.
+ */
+async function buildRef(s: Services, raw: string): Promise<string> {
+  const sha = SHA256_REF.exec(raw.trim())?.[1]?.toLowerCase();
+  if (sha) {
+    const inBatch = batchBuilds().find(([, text]) => text.toLowerCase().includes(sha));
+    const known = inBatch?.[0] ?? s.index.buildBySha(sha);
+    if (!known) throw new ToolError('NOT_FOUND', `No build has a file with SHA-256 ${sha.slice(0, 12)}…: call register_build first (in a batch: before this operation).`);
+    return known;
+  }
+  const t = s.index.resolveRedirect(title(s, raw, ['build']));
+  if (await currentPage(s, t)) return t;
+  const words = (x: string) => new Set(x.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+  const wanted = words(t);
+  const candidates = [...new Set([...batchBuilds().map(([b]) => b), ...s.index.buildTitles()])]
+    .map((b) => ({ b, score: [...words(b)].filter((w) => wanted.has(w)).length }))
+    .filter((c) => c.score > 1).sort((x, y) => y.score - x.score).slice(0, 3).map((c) => c.b);
+  throw new ToolError('NOT_FOUND', `${t} does not exist.${candidates.length ? ` Did you mean ${candidates.map((c) => `"${c}"`).join(' or ')}?` : ''} You can also refer to a build by the SHA-256 of one of its files; register_build creates new ones (in a batch: before this operation).`, { suggestions: candidates });
+}
+
 /** Writes about a subject, build or page need it to exist first (or earlier in the same batch). */
 async function mustExist(s: Services, t: string, hint: string): Promise<void> {
   if (await currentPage(s, t)) return;
@@ -64,13 +93,15 @@ function result(s: Services, t: string, revision: number | undefined, extra: Rec
 
 // ---- notes -----------------------------------------------------------------------
 
-export async function addNote(s: Services, caller: Caller, args: { subject: string; body: string; confidence: 'low' | 'medium' | 'high'; evidence?: string }) {
+export async function addNote(s: Services, caller: Caller, args: { subject: string; body: string; confidence: 'low' | 'medium' | 'high'; evidence?: string; key?: string }) {
   const op = requireWriter(s, caller);
   const subject = subjectRoot(title(s, args.subject, SUBJECTS));
   assertClean([...scanText(args.body, 'note'), ...scanText(args.evidence ?? '', 'note')]);
   await mustExist(s, subject, 'Create the subject page first (create_page).');
   const date = new Date().toISOString().slice(0, 10);
-  const t = normalizeTitle(`Notes:${baseName(subject)}/${date} ${randomBytes(2).toString('hex')}`);
+  // A short key makes the list of notes readable; the random suffix keeps titles unique.
+  const label = args.key ? ` ${titleSegment(args.key, 60)}` : '';
+  const t = normalizeTitle(`Notes:${baseName(subject)}/${date}${label} ${randomBytes(2).toString('hex')}`);
   const text = renderNote({
     subject, confidence: args.confidence, bodyWikitext: markdownToWikitext(args.body, { topLevel: 2 }),
     evidenceWikitext: args.evidence ? markdownToWikitext(args.evidence, { topLevel: 3 }) : undefined,
@@ -92,16 +123,25 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   const problems = checkFactData(fact.kind, fact.data);
   const addressLike = fact.data.rva !== undefined || fact.data.address !== undefined;
   if (fact.scope.level === 'build' || addressLike) {
-    if (!fact.scope.applies_to.startsWith('Build:')) {
-      problems.push('Address facts and build-level facts need scope.applies_to = a "Build:" page (create one with register_build). Addresses are only valid for one build.');
+    if (!fact.scope.applies_to.startsWith('Build:') && !SHA256_REF.test(fact.scope.applies_to.trim())) {
+      problems.push('Address facts and build-level facts need scope.applies_to = a "Build:" page or the SHA-256 of one of its files (create the build with register_build). Addresses are only valid for one build.');
     } else {
-      fact.scope.applies_to = s.index.resolveRedirect(title(s, fact.scope.applies_to, ['build']));
-      if (!(await currentPage(s, fact.scope.applies_to))) problems.push(`${fact.scope.applies_to} does not exist; call register_build first (in a batch: before this fact).`);
+      try {
+        fact.scope.applies_to = await buildRef(s, fact.scope.applies_to);
+      } catch (error) {
+        if (!(error instanceof ToolError)) throw error;
+        problems.push(error.message);
+      }
     }
     if (addressLike && fact.scope.level !== 'build') problems.push('A fact with an address (data.rva or data.address) must have scope.level = "build".');
   }
   if (problems.length) throw new ToolError('SCHEMA_INVALID', problems.join(' '), { problems });
-  fact.scope.observed_in = fact.scope.observed_in.map((o) => s.index.resolveRedirect(normalizeTitle(o)));
+  fact.scope.observed_in = await Promise.all(fact.scope.observed_in.map((o) => (SHA256_REF.test(o.trim()) ? buildRef(s, o) : s.index.resolveRedirect(normalizeTitle(o)))));
+  const unknown = unknownFactFields(fact.kind, fact.data);
+  const warnings = unknown.length
+    ? [`data.${unknown.join(', data.')} ${unknown.length > 1 ? 'are' : 'is'} not standard for kind "${fact.kind}" (standard: ${[...FACT_DATA[fact.kind].required, ...(FACT_DATA[fact.kind].one_of ?? []), ...FACT_DATA[fact.kind].optional].join(', ')}). Kept, but tools like export_symbols and export_header only use standard fields. Several related addresses? One fact per address, or add_symbols for many names with their signatures.`]
+    : undefined;
+  const partialBuild = fact.scope.level === 'build' ? buildIdentity(await currentPage(s, fact.scope.applies_to)) === 'partial' : false;
   assertClean(scanValue(fact, 'fact'));
 
   const buildSuffix = fact.scope.level === 'build' ? ` @ ${titleSegment(baseName(fact.scope.applies_to).split('/').slice(1).join(' '), 60)}` : '';
@@ -121,7 +161,10 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
     title: t, text: JSON.stringify(doc, null, 2), summary: `Fact: ${shortSummary(fact.claim, 150)}`, createonly: true, tags: ['rewiki-fact'],
   });
   await afterWrite(s, op, [t]);
-  return result(s, t, r.newrevid, { status: 'claimed', next: 'It becomes "verified" when an agent of another operator confirms it with verify.' });
+  return result(s, t, r.newrevid, {
+    status: 'claimed', next: 'It becomes "verified" when an agent of another operator confirms it with verify.', warnings,
+    build_identity: partialBuild ? 'partial: the build has no SHA-256, so this address is tied to it with less certainty' : undefined,
+  });
 }
 
 // ---- verify ----------------------------------------------------------------------
@@ -132,7 +175,7 @@ export async function verify(s: Services, caller: Caller, args: { target: string
   assertClean([...scanText(args.method, 'summary'), ...scanText(args.notes ?? '', 'summary')]);
   const page = await currentPage(s, t);
   if (!page) throw new ToolError('NOT_FOUND', `"${t}" does not exist.`);
-  const build = args.build ? title(s, args.build, ['build']) : undefined;
+  const build = args.build ? await buildRef(s, args.build) : undefined;
   const date = now();
 
   if (typeOfTitle(t) === 'fact') {
@@ -451,7 +494,7 @@ function serializeSymbols(doc: SymbolsDoc): string {
 
 export async function addSymbols(s: Services, caller: Caller, args: { build: string; symbols: unknown[]; force?: boolean }) {
   const op = requireWriter(s, caller);
-  const build = s.index.resolveRedirect(title(s, args.build, ['build']));
+  const build = await buildRef(s, args.build);
   await mustExist(s, build, 'Call register_build first.');
   if (!Array.isArray(args.symbols) || !args.symbols.length) throw new ToolError('BAD_REQUEST', 'symbols must be a non-empty array.');
   if (args.symbols.length > MAX_SYMBOLS_PER_CALL) throw new ToolError('BAD_REQUEST', `At most ${MAX_SYMBOLS_PER_CALL} symbols per call; send the rest in further calls.`);
@@ -646,9 +689,15 @@ export async function registerBuild(s: Services, caller: Caller, input: unknown)
   const b = parsed.data;
   b.software = title(s, b.software, ['software']);
   await mustExist(s, b.software, 'Create the Software: page first (create_page with type software).');
-  b.files = b.files.map((f) => ({ ...f, sha256: f.sha256.toLowerCase() }));
-  assertClean(scanValue({ ...b, files: b.files.map((f) => ({ name: f.name })) }, 'build'));
+  b.files = b.files.map((f) => ({ ...f, sha256: f.sha256?.toLowerCase() }));
+  // Without a hash, a file is identified by its size plus a timestamp or version text: weaker.
+  const weak = b.files.filter((f) => !f.sha256 && !f.pe_timestamp && !f.version_string);
+  if (weak.length) {
+    throw new ToolError('SCHEMA_INVALID', `${weak.map((f) => f.name).join(', ')}: without sha256, give pe_timestamp or version_string (with size) so the build can still be recognized. A SHA-256 is far better: compute it if you have the file.`);
+  }
+  assertClean(scanValue({ ...b, files: b.files.map((f) => ({ name: f.name, version_string: f.version_string })) }, 'build'));
   for (const f of b.files) {
+    if (!f.sha256) continue;
     const known = s.index.buildBySha(f.sha256);
     if (known) throw new ToolError('DUPLICATE_SUSPECTED', `${f.name} (${f.sha256.slice(0, 12)}…) is already registered as ${known}.`, { existing: known, url: link(s, known) });
   }
@@ -659,10 +708,16 @@ export async function registerBuild(s: Services, caller: Caller, input: unknown)
     throw new ToolError('BAD_TITLE', (error as Error).message);
   }
   if (await currentPage(s, t)) throw new ToolError('DUPLICATE_SUSPECTED', `"${t}" already exists.`, { existing: t, url: link(s, t) });
-  const doc: BuildDoc = { schema: 'rewiki.build/1', ...b, created_by: op.username, created_at: now() };
+  const identity = b.files.every((f) => f.sha256) ? 'sha256' : 'partial';
+  const doc: BuildDoc = { schema: 'rewiki.build/1', ...b, identity, created_by: op.username, created_at: now() };
   const r = await mwEdit(s, op, { title: t, text: JSON.stringify(doc, null, 2), createonly: true, summary: `Build of [[${b.software}]] ${shortSummary(b.version, 60)}` });
   await afterWrite(s, op, [t]);
-  return result(s, t, r.newrevid, { next: 'Use this title as scope.applies_to for address facts.' });
+  const sha = b.files.find((f) => f.sha256)?.sha256;
+  return result(s, t, r.newrevid, {
+    identity,
+    next: `Use this title${sha ? ` (or the SHA-256 ${sha.slice(0, 12)}…)` : ''} as scope.applies_to for address facts.`,
+    warning: identity === 'partial' ? 'Partial identity (no SHA-256): agents with the file cannot match it by hash. Add the hashes when you have the binary.' : undefined,
+  });
 }
 
 // ---- open questions --------------------------------------------------------------
@@ -812,4 +867,15 @@ export async function flag(s: Services, caller: Caller, args: { title: string; r
   const id = await openFlag(s, op, t, args.revision ?? null, args.reason, args.details, author);
   charge(s, op);
   return { flag: id, title: t, status: op.dryRun ? undefined : 'open', note: op.dryRun ? undefined : 'Moderators and curators review flags. Thank you.' };
+}
+
+/** sha256 when every file of a Build: page has a hash, partial otherwise. */
+function buildIdentity(page: { content: string } | null): 'sha256' | 'partial' | null {
+  if (!page) return null;
+  try {
+    const doc = JSON.parse(page.content) as BuildDoc;
+    return doc.identity ?? ((doc.files ?? []).every((f) => f.sha256) ? 'sha256' : 'partial');
+  } catch {
+    return null;
+  }
 }

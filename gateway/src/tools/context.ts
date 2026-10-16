@@ -34,6 +34,8 @@ export interface Caller {
 export interface Preview {
   title: string;
   action: 'create' | 'edit' | 'undo';
+  /** markdown: articles, as read returns them (stored as wikitext, which displays the same); json: facts, builds, symbol maps. */
+  format?: 'markdown' | 'json';
   content?: string;
   diff?: string;
 }
@@ -93,8 +95,10 @@ export const TAGS = {
 /** RATE_LIMITED with the numbers an agent needs to split or schedule its writes. */
 export function quotaError(s: Services, op: Operator, needed?: number): ToolError {
   const q = quota(s.db, op);
-  const what = needed !== undefined ? `This needs ${needed} writes, but only ${q.left} of ${q.limit}` : `All ${q.limit} writes`;
-  return new ToolError('RATE_LIMITED', `${what} are left this hour for trust level "${op.trust}"${q.frees_in_minutes ? `; the next one frees up in ${q.frees_in_minutes} min` : ''}. Split the work, or wait. Nothing was published.`, {
+  const what = needed !== undefined
+    ? `This needs ${needed} writes, but only ${q.left} of ${q.limit} are left this hour`
+    : `All ${q.limit} writes of this hour are used`;
+  return new ToolError('RATE_LIMITED', `${what} (trust level "${op.trust}")${q.frees_in_minutes ? `; the next one frees up in ${q.frees_in_minutes} min` : ''}. Split the work, or wait. Nothing was published.`, {
     quota: { ...q, trust: op.trust, needed },
   });
 }
@@ -193,13 +197,14 @@ async function previewEdit(s: Services, params: EditParams): Promise<Preview> {
   if (params.undo) return { title: params.title, action: 'undo', content: `Undo of revision ${params.undo}` };
   const text = params.text ?? '';
   const current = await readPage(s, params.title);
-  if (!current.exists) {
-    const type = typeOfTitle(params.title);
-    const json = type === 'fact' || type === 'build' || type === 'symbols';
-    return { title: params.title, action: 'create', content: json ? prettyStored(params.title, text) : wikitextToMarkdown(text) };
-  }
-  const patch = createTwoFilesPatch('current', 'after', prettyStored(params.title, current.content), prettyStored(params.title, text), '', '', { context: 2 });
-  return { title: params.title, action: 'edit', diff: patch.split('\n').slice(2).join('\n') };
+  const type = typeOfTitle(params.title);
+  const json = type === 'fact' || type === 'build' || type === 'symbols';
+  // Articles are previewed in the Markdown agents write and read; both sides of a diff alike.
+  const shown = (stored: string) => (json ? prettyStored(params.title, stored) : `${wikitextToMarkdown(stored).trimEnd()}\n`);
+  const format = json ? 'json' as const : 'markdown' as const;
+  if (!current.exists) return { title: params.title, action: 'create', format, content: shown(text) };
+  const patch = createTwoFilesPatch('current', 'after', shown(current.content), shown(text), '', '', { context: 2 });
+  return { title: params.title, action: 'edit', format, diff: patch.split('\n').slice(2).join('\n') };
 }
 
 /** Bookkeeping after a successful write: quota, counters, trust promotion, index refresh. */

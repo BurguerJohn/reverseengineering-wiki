@@ -62,8 +62,10 @@ export function search(s: Services, args: { query: string; types?: string[]; sub
     subject: args.subject ? s.index.resolveRedirect(cleanTitle(args.subject, s)) : undefined,
     build: args.build ? cleanTitle(args.build) : undefined,
   });
+  const titles = offset ? [] : s.index.titleMatches(args.query);
   return {
     query: args.query,
+    title_matches: titles.length ? titles.map((t) => t.title) : undefined,
     total,
     hits: hits.map((h) => ({ ...h, score: Math.round(h.score * 100) / 100 })),
     next_cursor: offset + hits.length < total ? String(offset + hits.length) : undefined,

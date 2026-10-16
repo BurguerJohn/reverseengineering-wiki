@@ -16,13 +16,16 @@ import { quota, remainingWrites } from '../auth/trust.ts';
 import * as read from '../tools/read.ts';
 import * as write from '../tools/write.ts';
 import { exportHeader, exportSymbols } from '../tools/exports.ts';
-import { FACT_KINDS, CODE_KINDS, SYMBOL_KINDS, SYMBOL_SOURCES, MAX_SYMBOLS_PER_CALL } from '../wiki/pages.ts';
+import { FACT_KINDS, FACT_DATA, CODE_KINDS, SYMBOL_KINDS, SYMBOL_SOURCES, MAX_SYMBOLS_PER_CALL } from '../wiki/pages.ts';
+
+/** "function: name, rva|address|signature (one at least), [prototype, …]" for every fact kind. */
+const FACT_DATA_SUMMARY = Object.entries(FACT_DATA).map(([kind, f]) => `${kind}: ${[...f.required, ...(f.one_of ? [`${f.one_of.join('|')} (at least one)`] : [])].join(', ') || '(free)'}${f.optional.length ? `, optional ${f.optional.join(', ')}` : ''}`).join('; ');
 import { SUBJECT_TYPES } from '../wiki/titles.ts';
 import { DUMP_KINDS } from '../dumps.ts';
 import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.ts';
 import type { Operator } from '../db/accounts.ts';
 
-export const VERSION = '0.7.0';
+export const VERSION = '0.7.1';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -143,7 +146,7 @@ async function dryRunOf(s: Services, caller: Caller, fn: (caller: Caller, args: 
     return {
       dry_run: true, would_publish: fits,
       note: fits
-        ? 'Checked by the server: valid. Nothing was published and no quota was used. preview shows exactly what would be stored. Repeat without dry_run to publish.'
+        ? 'Checked by the server: valid. Nothing was published and no quota was used. preview shows exactly what would be stored (articles as the Markdown that read returns; they are stored as wikitext, == Heading == and <code>, which displays the same). Repeat without dry_run to publish.'
         : `Valid, but publishing it needs ${needed} writes and only ${q!.left} of ${q!.limit} are left this hour${q!.frees_in_minutes ? ` (the next frees up in ${q!.frees_in_minutes} min)` : ''}. Publish at most ${q!.left} operations now and the rest later, or wait. Do not ask your operator to approve the whole batch now: it would be refused.`,
       ...out, preview: previews,
       quota: fits ? undefined : { ...q, needed, fits_now: q!.left },
@@ -323,6 +326,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       body: z.string().min(20).describe('Markdown'),
       confidence: z.enum(['low', 'medium', 'high']),
       evidence: z.string().optional().describe('Markdown: how you know'),
+      key: z.string().min(2).max(60).optional().describe('A few words for the note\'s title, e.g. "Mission file layout" (the title gets the date and a short id too)'),
     },
     annotations: WRITE,
   }, (c, a) => write.addNote(s, c, a));
@@ -336,10 +340,10 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       claim: z.string(),
       scope: z.object({
         level: z.enum(['technique', 'platform', 'library', 'software', 'build']),
-        applies_to: z.string(),
+        applies_to: z.string().describe('What it holds for; for build-level facts a Build: title or the SHA-256 of one of its files (also one registered earlier in the same batch)'),
         observed_in: z.array(z.string()).optional(),
       }),
-      data: z.record(z.string(), z.unknown()).describe('function: {name, rva? (PE) or address? {kind: va|file|segmented|banked, value: "0x80012345" | "0x1A2B0" | "1000:5AFA"/"DS:00CC" | "03:8000"}, signature?, prototype?}; struct: {name, size, fields:[{offset,size,type,name}]}; magic: {bytes, offset, meaning}; string: {value, meaning}; identification: {method, indicator}; see the contributing guide'),
+      data: z.record(z.string(), z.unknown()).describe(`Fields by kind (examples and schemas per kind: fact_data in /tools.json). ${FACT_DATA_SUMMARY}. Addresses: rva (PE, "0x141230") or address {kind: va|file|segmented|banked, value: "0x80012345" | "0x1A2B0" | "1000:5AFA" | "03:8000"}. struct with unknown exact size: size_min + size_max. One address per fact; many names: add_symbols.`),
       key: z.string().min(2).max(60).optional().describe('Short title for the fact page, e.g. "RNG seed" (default: the name/value/bytes, else the first clause of the claim)'),
       evidence: z.array(evidenceItem).min(1),
       confidence: z.enum(['low', 'medium', 'high']),
@@ -460,14 +464,16 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('register_build', {
     title: 'Register a build',
-    description: 'Create a Build: page from file hashes so address facts can be attached to an exact binary. Hashes and metadata only, never the file.',
+    description: 'Create a Build: page from file hashes so address facts can be attached to an exact binary. Hashes and metadata only, never the file. Facts can then refer to it by its title or by a file\'s SHA-256 (in a batch too). Without the file, a partial identity (size + PE timestamp or version text) is accepted and marked as such.',
     inputSchema: { dry_run: DRY_RUN,
       software: z.string(),
       version: z.string(),
       platform: z.string(),
       distribution: z.string(),
       files: z.array(z.object({
-        name: z.string(), sha256: z.string(), size: z.number().int(), pe_timestamp: z.string().optional(), image_base: z.string().optional(),
+        name: z.string(), sha256: z.string().optional().describe('Strongly preferred; without it the build has a partial identity (give pe_timestamp or version_string)'),
+        size: z.number().int(), pe_timestamp: z.string().optional(), image_base: z.string().optional(),
+        version_string: z.string().optional().describe('Version resource or in-binary version text'),
       })).min(1),
       release_date: z.string().optional(),
       notes: z.string().optional(),
@@ -515,7 +521,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('batch', {
     title: 'Several writes at once',
-    description: 'Up to 50 writes in one call, e.g. a new page with its build, facts and code. They run in a safe order (pages, topics, builds, then facts/code/notes/symbols, then edits, then reviews), so later operations may refer to pages created earlier in the same batch. With dry_run, all of them are checked and previewed together; in review mode that means one approval for the whole batch. A real run stops at the first error; the error lists what was already published in completed (with titles and revisions). A batch larger than the remaining hourly quota is refused whole before anything runs, dry run included.',
+    description: 'Up to 50 writes in one call, e.g. a new page with its build, facts and code. They run in a safe order (pages, topics, builds, then facts/code/notes/symbols, then edits, then reviews), so later operations may refer to pages created earlier in the same batch (builds also by a file\'s SHA-256). With dry_run, all of them are checked and previewed together and every failing operation is reported at once; in review mode that means one approval for the whole batch. A real run stops at the first error; the error lists what was already published in completed (with titles and revisions). A real batch larger than the remaining hourly quota is refused whole before anything runs.',
     inputSchema: {
       dry_run: DRY_RUN,
       ...(review ? { operator_approved: OPERATOR_APPROVED } : {}),
@@ -564,19 +570,30 @@ async function runBatch(
   let followUp: string[] = [];
   return batchContext.run({ created: new Map(), dryRun: !!caller.dryRun, pageCache: new Map(), refresh: new Set(), topicLinks: new Map() }, async () => {
     try {
+    // A dry run checks every operation and reports all failures at once; a real run stops at the first.
+    const failures: Array<{ operation: number; tool: string; error: string; message: string }> = [];
     for (const p of planned) {
       try {
         const r = await tools.get(p.tool)!.run(caller, p.args);
         done.push({
           operation: p.index + 1, tool: p.tool,
-          ...Object.fromEntries(Object.entries(r).filter(([k]) => ['title', 'revision', 'topic', 'status', 'added', 'updated', 'conflicts_total', 'url', 'flag'].includes(k))),
+          ...Object.fromEntries(Object.entries(r).filter(([k]) => ['title', 'revision', 'topic', 'status', 'added', 'updated', 'conflicts_total', 'url', 'flag', 'warnings'].includes(k))),
         });
       } catch (error) {
         const e = error instanceof ToolError ? error : new ToolError('INTERNAL', (error as Error).message);
-        throw new ToolError(e.code, `Operation ${p.index + 1} (${p.tool}) failed: ${e.message}${done.length && !caller.dryRun ? ` The ${done.length} operation(s) before it were published; fix this one and send the rest.` : ' Nothing was published.'}`, {
+        if (caller.dryRun) {
+          failures.push({ operation: p.index + 1, tool: p.tool, error: e.code, message: e.message });
+          continue;
+        }
+        throw new ToolError(e.code, `Operation ${p.index + 1} (${p.tool}) failed: ${e.message}${done.length ? ` The ${done.length} operation(s) before it were published; fix this one and send the rest.` : ' Nothing was published.'}`, {
           ...e.details, failed_operation: p.index + 1, tool: p.tool, completed: done,
         });
       }
+    }
+    if (failures.length) {
+      throw new ToolError('BATCH_INVALID', `${failures.length} of ${planned.length} operations would fail (nothing was published): ${failures.map((f) => `operation ${f.operation} (${f.tool}): ${f.message}`).join(' | ')}`, {
+        failures, passed: done.map((d) => d.operation),
+      });
     }
     } finally {
       // Topics links and the index refresh also happen for what succeeded before an error.

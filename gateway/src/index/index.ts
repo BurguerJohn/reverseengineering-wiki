@@ -339,9 +339,10 @@ export class SearchIndex {
     this.db.prepare('insert into builds (title, software, version, platform, distribution) values (?, ?, ?, ?, ?)')
       .run(p.title, doc.software, doc.version, doc.platform, doc.distribution);
     for (const f of doc.files ?? []) {
+      const sha = f.sha256?.toLowerCase() ?? '';
       this.db.prepare('insert into build_files (sha256, title, name, size, pe_timestamp) values (?, ?, ?, ?, ?)')
-        .run(f.sha256.toLowerCase(), p.title, f.name, f.size, f.pe_timestamp ?? null);
-      this.ids(p.title, '', [{ kind: 'sha256', token: f.sha256.toLowerCase() }, { kind: 'file', token: f.name.toLowerCase() }]);
+        .run(sha, p.title, f.name, f.size, f.pe_timestamp ?? null);
+      this.ids(p.title, '', [...(sha ? [{ kind: 'sha256' as const, token: sha }] : []), { kind: 'file' as const, token: f.name.toLowerCase() }]);
     }
     this.doc(p.title, '', `${summary}\n${(doc.files ?? []).map((f) => f.name).join(' ')}\n${doc.notes ?? ''}`, 'build');
     this.edge(p.title, 'build_of', doc.software);
@@ -449,6 +450,12 @@ export class SearchIndex {
       }
     }
 
+    // A page whose title holds every term beats one that only mentions them.
+    for (const m of this.titleMatches(opts.query, 20)) {
+      const page = this.page(m.title);
+      if (page) consider({ title: m.title, section: '', type: page.type as PageType, snippet: 'title match', summary: page.summary, status: page.status, revision: page.revision, score: 6 });
+    }
+
     let hits = [...scores.values()].filter((h) => h.type !== ('other' as PageType));
     if (opts.types?.length) hits = hits.filter((h) => opts.types!.includes(h.type));
     if (opts.status) hits = hits.filter((h) => h.status === opts.status);
@@ -545,6 +552,31 @@ export class SearchIndex {
   }
 
   // ---- binaries, facts, graph ------------------------------------------------------
+
+  /** Every Build: title (for "did you mean" suggestions). */
+  buildTitles(limit = 500): string[] {
+    return (this.db.prepare('select title from builds order by title limit ?').all(limit) as Array<{ title: string }>).map((r) => r.title);
+  }
+
+  /** Pages whose title contains every word of the query (subjects first): better than a body match. */
+  titleMatches(query: string, limit = 5): Array<{ title: string; type: string; summary: string }> {
+    const words = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+    if (!words.length || words.length > 6) return [];
+    const where = words.map(() => "(' ' || lower(title) || ' ') like ?").join(' and ');
+    const rows = this.db.prepare(`select coalesce(redirect_to, title) as title from pages where ${where} limit 50`)
+      .all(...words.map((w) => `%${w}%`)) as Array<{ title: string }>;
+    const order = ['software', 'library', 'format', 'platform', 'technique', 'tool'];
+    const seen = new Set<string>();
+    const out: Array<{ title: string; type: string; summary: string }> = [];
+    for (const r of rows) {
+      const page = this.page(r.title);
+      if (!page || seen.has(r.title)) continue;
+      seen.add(r.title);
+      out.push({ title: r.title, type: page.type, summary: page.summary });
+    }
+    const rank = (t: string) => (order.includes(t) ? order.indexOf(t) : order.length);
+    return out.sort((a, b) => rank(a.type) - rank(b.type) || a.title.length - b.title.length).slice(0, limit);
+  }
 
   buildBySha(sha256: string): string | null {
     const row = this.db.prepare('select title from build_files where sha256 = ?').get(sha256.toLowerCase()) as { title: string } | undefined;
@@ -660,6 +692,12 @@ export class SearchIndex {
 
   allSymbols(): Iterable<SymbolRow> {
     return this.db.prepare('select * from symbols order by build, rva').iterate() as Iterable<SymbolRow>;
+  }
+
+  /** Subject pages (not facts, notes or builds), most recently changed first. */
+  recentSubjects(limit: number): Array<{ title: string; type: string; summary: string }> {
+    return this.db.prepare(`select title, type, summary from pages where redirect_to is null
+      and type in ('software', 'library', 'format', 'platform', 'technique', 'tool') order by touched desc limit ?`).all(limit) as any[];
   }
 
   stats(): Record<string, number> {

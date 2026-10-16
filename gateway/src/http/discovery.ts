@@ -21,9 +21,12 @@ interface Setup {
   npxArgs: string[];
 }
 
+/** The reverseengineering-wiki release on npm that the setup notes pin (it changes less often than the gateway). */
+export const PACKAGE_VERSION = '0.7.0';
+
 function setup(config: Config): Setup {
   const site = config.publicUrl;
-  const packageSpec = `reverseengineering-wiki@${VERSION}`;
+  const packageSpec = `reverseengineering-wiki@${PACKAGE_VERSION}`;
   return { site, mcpUrl: `${site}/mcp`, publicMcpUrl: `${site}/mcp/public`, packageSpec, npxArgs: ['-y', packageSpec] };
 }
 
@@ -48,7 +51,7 @@ Adding a server changes your client's configuration, so your user does it: show 
 claude mcp add --transport http --scope user rewiki ${s.mcpUrl}
 \`\`\`
 
-Then, in Claude Code, \`/mcp\` → rewiki → Authenticate: the browser opens the login page.
+Then restart Claude Code, or the server does not show up (\`claude --continue\` picks the conversation back up), and run \`/mcp\` → rewiki → Authenticate: the browser opens the login page.
 
 ### Claude (claude.ai, Claude Desktop)
 
@@ -166,8 +169,12 @@ export async function toolSchemas(s: import('../tools/context.ts').Services): Pr
   await Promise.all([server.connect(a), client.connect(b)]);
   const { tools } = await client.listTools();
   await client.close();
+  const { FACT_DATA } = await import('../wiki/pages.ts');
   return {
     server: 'rewiki', version: VERSION,
+    fact_data: Object.fromEntries(Object.entries(FACT_DATA).map(([kind, f]) => [kind, {
+      required: f.required, at_least_one_of: f.one_of, optional: f.optional, example: f.example,
+    }])),
     note: 'Read tools work without an account at /mcp/public. Write tools need an account: connect to /mcp (OAuth) or use the rewiki package; every write tool takes dry_run to check without publishing.',
     tools: tools.map((t) => ({ name: t.name, access: t.annotations?.readOnlyHint ? 'read' : 'write', description: t.description, input_schema: t.inputSchema })),
   };
@@ -276,7 +283,7 @@ export function wellKnown(config: Config) {
       { type: 'streamable-http', url: s.publicMcpUrl, access: 'read-only', auth: 'none' },
     ],
     packages: [{
-      registry: 'npm', name: 'reverseengineering-wiki', bin: 'rewiki', version: VERSION, runtime: 'node', command: 'npx', args: s.npxArgs,
+      registry: 'npm', name: 'reverseengineering-wiki', bin: 'rewiki', version: PACKAGE_VERSION, runtime: 'node', command: 'npx', args: s.npxArgs,
       environment: { REWIKI_SERVER: s.site }, access: 'read-write (login on first write)',
     }],
     skill: { name: 'rewiki', skill_md: `${s.site}/skill/rewiki/SKILL.md`, zip: `${s.site}/skill/rewiki.zip` },

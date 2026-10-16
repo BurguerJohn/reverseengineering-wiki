@@ -242,6 +242,8 @@ ok('create_page (with infobox, aliases)');
 
   const editDry = await call(a, 'edit_section', { title: retro.title, section: 'Controls', body: 'Arrow keys; F3 pauses.', base_revision: page.revision, summary: 'pause key', dry_run: true });
   assert.match(editDry.preview[0].diff, /-Arrow keys\.\n\+Arrow keys; F3 pauses\./, 'changes are previewed as a diff');
+  assert.equal(editDry.preview[0].format, 'markdown', 'article diffs are in Markdown, like new pages');
+  assert.doesNotMatch(editDry.preview[0].diff, /==\s*Controls\s*==/);
 
   const retroBuild = await call(a, 'register_build', {
     software: retro.title, version: '1.0', platform: 'win16', distribution: 'retail',
@@ -698,6 +700,84 @@ ok('export_symbols (Ghidra) and export_header (C, with padding)');
   ok('titles with colons and bare names, aliases kept whole, no orphans (dry run too), batch in dependency order, search without noise or repeats');
 }
 
+// ---- agent feedback: builds by hash, every batch error at once, fact schemas, notes with a key ----
+{
+  {
+    // Operator A has used its hourly writes by now: a fresh hour for this section (test database only).
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(new URL('../data-test/gateway.sqlite', import.meta.url));
+    const id = (db.prepare('select id from operators where username = ?').get(nameA) as any).id;
+    db.prepare("delete from rate_events where scope = 'write' and key = ?").run(String(id));
+    db.close();
+  }
+  const cave = `E2E Cave ${run}`;
+  const sha = createHash('sha256').update(`cave-${run}`).digest('hex');
+  const fn = (name: string, rva: string, applies: string, extra: Record<string, unknown> = {}) => ({
+    kind: 'function', subject: cave, claim: `${name} runs one step of the cave game loop.`, scope: { level: 'build', applies_to: applies },
+    data: { name, rva, signature: '48 89 5C 24 ?? 57', ...extra }, evidence: [{ type: 'debugger', detail: 'breakpoint hit every frame' }], confidence: 'medium',
+  });
+  // The build of the same batch is referred to by its file's SHA-256: no need to guess its title.
+  const ops = [
+    { tool: 'create_page', arguments: { type: 'software', title: cave, summary: 'A fictional game for build references by hash.', body: '## Engine\n\nCustom `tick()` loop.' } },
+    { tool: 'register_build', arguments: { software: cave, version: '1.0', platform: 'windows-x64', distribution: 'steam', files: [{ name: `cave${run}.exe`, sha256: sha, size: 1000 }] } },
+    { tool: 'add_fact', arguments: fn('Cave::Update', '0x1000', sha) },
+  ];
+  const dry = await call(a, 'batch', { operations: ops, dry_run: true });
+  assert.equal(dry.dry_run, true, JSON.stringify(dry).slice(0, 500));
+  const created = dry.preview.find((p: any) => p.title === `Software:${cave}`);
+  assert.equal(created.format, 'markdown');
+  assert.match(created.content, /## Engine[\s\S]*`tick\(\)`/, 'articles are previewed as Markdown');
+  const published = await call(a, 'batch', { operations: ops });
+  assert.equal(published.operations, 3, JSON.stringify(published).slice(0, 500));
+  const buildTitle = `Build:${cave}/1.0 (windows-x64, steam)`;
+  const factTitle = published.results.find((r: any) => r.tool === 'add_fact').title;
+  assert.ok(JSON.stringify(await call(anon, 'read', { title: factTitle })).includes(buildTitle), 'applies_to resolved from the SHA-256 to the Build: title');
+
+  // A wrong build title: "did you mean" the real one.
+  const typo = await expectError(a, 'add_fact', { ...fn('Cave::Draw', '0x2000', `Build:${cave}/1.0 (Win64, Steam)`), dry_run: true }, 'SCHEMA_INVALID');
+  assert.ok(typo.message.includes(`Did you mean "${buildTitle}"`), typo.message);
+
+  // A dry-run batch reports every failing operation at once; the valid ones are listed as passed.
+  const struct = (data: Record<string, unknown>) => ({ kind: 'struct', subject: cave, claim: 'The cave state struct holds the player and the map.', scope: { level: 'software', applies_to: 'all versions' },
+    data: { name: 'CaveState', fields: [{ offset: '0x0', size: 8, type: 'Player*', name: 'player' }], ...data }, evidence: [{ type: 'debugger', detail: 'memory dump' }], confidence: 'low' });
+  const mixed = await call(a, 'batch', { dry_run: true, operations: [
+    { tool: 'add_note', arguments: { subject: cave, body: 'A valid note inside a batch with two broken operations.', confidence: 'low' } },
+    { tool: 'add_fact', arguments: struct({ size: '0x88-0x90' }) },
+    { tool: 'add_fact', arguments: fn('Cave::Draw', '0x2000', `Build:${cave}/9.9 (nowhere, nothing)`) },
+  ] });
+  assert.equal(mixed.error, 'BATCH_INVALID', JSON.stringify(mixed).slice(0, 400));
+  assert.deepEqual(mixed.failures.map((f: any) => f.operation), [2, 3], 'both failures reported in one round');
+  assert.deepEqual(mixed.passed, [1]);
+  assert.match(mixed.failures[0].message, /size_min and size_max/, 'a size range as text is refused, with the right fields named');
+
+  // A struct whose exact size is unknown; fields outside the schema of the kind are kept with a warning.
+  const ranged = await call(a, 'add_fact', { ...struct({ size_min: '0x88', size_max: '0x90' }), dry_run: true });
+  assert.equal(ranged.dry_run, true, JSON.stringify(ranged).slice(0, 300));
+  const odd = await call(a, 'add_fact', { ...fn('Cave::Loop', '0x3000', sha, { loop_backedge: '0x3040' }), dry_run: true });
+  assert.match(odd.warnings?.[0] ?? '', /data\.loop_backedge is not standard[\s\S]*add_symbols/);
+  const schemas = await (await fetch(`${GATEWAY}/tools.json`)).json() as any;
+  assert.deepEqual(schemas.fact_data.struct.required, ['name', 'fields']);
+  assert.deepEqual(schemas.fact_data.struct.at_least_one_of, ['size', 'size_min']);
+
+  // Notes get a readable key in their title.
+  const keyed = await call(a, 'add_note', { subject: cave, key: 'Mission file layout', body: 'Missions are stored as one file per stage, in order.', confidence: 'low' });
+  assert.match(keyed.title ?? JSON.stringify(keyed), new RegExp(`^Notes:${cave}/\\d{4}-\\d{2}-\\d{2} Mission file layout [0-9a-f]{4}$`));
+
+  // A build without the file: partial identity (size + version text), marked on facts tied to it.
+  const floppy = { software: cave, version: '0.9', platform: 'win16', distribution: 'floppy' };
+  await expectError(a, 'register_build', { ...floppy, files: [{ name: `CAVE${run}.EXE`, size: 51200 }] }, 'SCHEMA_INVALID');
+  const partial = await call(a, 'register_build', { ...floppy, files: [{ name: `CAVE${run}.EXE`, size: 51200, version_string: 'Cave 0.9 (Jan 17 1992)' }] });
+  assert.equal(partial.identity, 'partial', JSON.stringify(partial));
+  const onPartial = await call(a, 'add_fact', { ...fn('Cave::Init', '0x0400', partial.title), dry_run: true });
+  assert.match(onPartial.build_identity ?? '', /^partial/);
+
+  // Search: a page whose title holds the query is suggested first.
+  const found = await call(anon, 'search', { query: `Cave ${run}`, match: 'any' });
+  assert.equal(found.title_matches?.[0], `Software:${cave}`, JSON.stringify(found.title_matches));
+  assert.equal(found.hits[0].title, `Software:${cave}`);
+  ok('builds by SHA-256 in a batch, "did you mean", every dry-run batch error at once, struct size ranges, per-kind fact schemas with warnings, note keys, partial build identity, title matches first, Markdown previews');
+}
+
 // ---- quota: a batch that uses the last writes keeps its results; dry runs check the quota ----------
 {
   const { createApp } = await import('../src/app.ts');
@@ -757,7 +837,7 @@ ok('export_symbols (Ghidra) and export_header (C, with padding)');
   assert.doesNotMatch(skill, /download this skill again|replace your copy/i, 'the skill never updates itself');
   const meta = await (await fetch(`${GATEWAY}/.well-known/mcp.json`)).json() as any;
   assert.equal(meta.packages[0].registry, 'npm');
-  assert.ok(skill.includes(`npx -y reverseengineering-wiki@${meta.version}`), 'the skill pins the npm package to the server version');
+  assert.ok(skill.includes(`npx -y reverseengineering-wiki@${meta.packages[0].version}`), 'the skill pins the npm package release');
   assert.equal(meta.remotes[0].auth, 'oauth2');
   assert.equal(meta.remotes[1].url, `${GATEWAY}/mcp/public`);
   const llms = await (await fetch(`${GATEWAY}/llms.txt`)).text();

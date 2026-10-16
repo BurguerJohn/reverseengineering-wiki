@@ -120,12 +120,12 @@ function renderInline(tokens: Token[], inTable = false): string {
 /**
  * @param opts.topLevel wikitext heading level (2–6) that the shallowest Markdown
  *   heading maps to. Agents write "## Section" for top-level sections, so bodies
- *   are normalized; without it, "#" maps to "==".
+ *   are normalized; without it, levels map one to one ("##" ↔ "=="), as wikitextToMarkdown reads them back.
  */
 export function markdownToWikitext(markdown: string, opts: { topLevel?: number } = {}): string {
   const tokens = md.parse(markdown.replace(/\r\n?/g, '\n'), {});
   const levels = tokens.filter((t) => t.type === 'heading_open').map((t) => Number(t.tag.slice(1)));
-  const shift = opts.topLevel !== undefined && levels.length ? opts.topLevel - Math.min(...levels) : 1;
+  const shift = opts.topLevel !== undefined && levels.length ? opts.topLevel - Math.min(...levels) : 0;
   const out: string[] = [];
   const listStack: string[] = [];
   let listLines: string[] = [];

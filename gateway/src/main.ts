@@ -5,6 +5,7 @@ import { createHttpServer } from './http/server.ts';
 import { createDumps, dumpDue } from './dumps.ts';
 import { publishDiscoveryFiles, publishToolSchemas } from './http/discovery.ts';
 import { REPO_DIR } from './config.ts';
+import { publishOverview } from './wiki/overview.ts';
 
 const app = createApp();
 const log = (msg: string) => console.log(`[${new Date().toISOString()}] ${msg}`);
@@ -54,6 +55,12 @@ const runJobs = () => {
 };
 setTimeout(runJobs, 5_000);
 setInterval(runJobs, 15_000);
+// The main page's overview (counts and recent subjects), rewritten only when it changed.
+const overview = () => publishOverview(app.index, app.sessions)
+  .then((changed) => { if (changed) log('wiki overview updated'); })
+  .catch((error) => log(`wiki overview failed: ${(error as Error).message}`));
+setTimeout(overview, 20_000);
+setInterval(overview, 10 * 60_000);
 app.mailer.startWorker();
 setInterval(() => app.db.pruneRateEvents(), 3_600_000);
 

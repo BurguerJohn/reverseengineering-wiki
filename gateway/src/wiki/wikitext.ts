@@ -264,7 +264,8 @@ export function wikitextToMarkdown(wikitext: string): string {
 
   const lines = text.split('\n').map((line) => {
     const heading = HEADING.exec(line);
-    if (heading) return `${'#'.repeat(heading[1].length - 1)} ${inlineToMarkdown(heading[2])}`;
+    // "== X ==" is a top-level section, which agents write as "## X": the same level both ways.
+    if (heading) return `${'#'.repeat(heading[1].length)} ${inlineToMarkdown(heading[2])}`;
     if (line === '----') return '---';
     const list = /^([*#:]+)\s?(.*)$/.exec(line);
     if (list && !line.startsWith('#REDIRECT')) {
