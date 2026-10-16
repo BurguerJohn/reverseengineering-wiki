@@ -86,16 +86,26 @@ export class ReviewPages {
       const said = { approved: 'You approved this publication. Tell your agent: it publishes when it repeats the call.', used: 'This publication was approved and published.', declined: 'You declined this publication. Nothing was published.' }[review.status];
       return sendHtml(res, 200, page('Review', `<h1>${review.status === 'declined' ? 'Declined' : 'Approved'}</h1><p>${esc(said)}</p>`));
     }
+    // Anyone with the link sees the preview: it is unguessable, and the agent already knows the content.
+    // Approving is what needs the operator: the client's own prompt, or this browser signed in.
     const signedIn = webSessionOperator(this.s.db, req);
-    if (signedIn !== review.operator_id) return this.signIn(req, res, review, error, signedIn !== undefined);
+    const owner = signedIn === review.operator_id;
     const err = error ? `<p class="notice error">${esc(error)}</p>` : '';
-    sendHtml(res, 200, page('Approve a publication', `${PREVIEW_STYLE}<h1>Publish this on ReverseEngineering.wiki?</h1>${err}
+    const actions = owner
+      ? `<form method="post"><input type="hidden" name="check" value="${esc(this.check(req, review))}">
+<div class="row"><button class="secondary" type="submit" name="action" value="decline">Decline</button><button type="submit" name="action" value="approve">Approve</button></div></form>
+<p class="muted">After you approve, go back to your agent: it publishes when it repeats the call. This link expires one hour after it was created.</p>`
+      : `<div class="client"><b>Approve it in your agent's app</b>: tick the checkbox it shows you (Claude Code, for example). Nothing else is needed.
+<p class="muted">No checkbox in your app? Approve here instead: sign in once in this browser (it stays signed in for 90 days). Approving needs you, not just the link, because the link passes through your agent.</p>
+${signedIn !== undefined ? '<p class="notice">This browser is signed in to another account.</p>' : ''}
+<form method="post"><input type="hidden" name="action" value="email">
+<label for="email">Your email</label><input id="email" name="email" type="email" autocomplete="email" required>
+<button class="secondary" type="submit">Send code to approve here</button></form></div>`;
+    sendHtml(res, 200, page('Review a publication', `${PREVIEW_STYLE}<h1>Publish this on ReverseEngineering.wiki?</h1>${err}
 <p>Your agent wants to publish as <b>${esc(op.username)}</b> (<code>${esc(review.tool)}</code>). This is exactly what will be stored; it becomes public, under CC BY-SA 4.0 (text) and MIT-0 (code).</p>
 <p class="muted">Articles are shown as Markdown; the wiki stores them as wikitext, which displays the same. In changes, green lines are added and red lines removed.</p>
 ${renderPreview(review.preview)}
-<form method="post"><input type="hidden" name="check" value="${esc(this.check(req, review))}">
-<div class="row"><button class="secondary" type="submit" name="action" value="decline">Decline</button><button type="submit" name="action" value="approve">Approve</button></div></form>
-<p class="muted">After you approve, go back to your agent: it publishes when it repeats the call. This link expires one hour after it was created.</p>`));
+${actions}`));
   }
 
   /** Ties the approve form to this browser session and this review (with the SameSite cookie, against forged posts). */
@@ -103,20 +113,16 @@ ${renderPreview(review.preview)}
     return createHash('sha256').update(`${cookieValue(req, 'rewiki_session')}|${review.id}`).digest('base64url');
   }
 
-  private signIn(req: IncomingMessage, res: ServerResponse, review: ReviewRow, error?: string, otherAccount = false, flow?: LoginFlow, cookies: string[] = []): void {
+  /** The email-code step of signing in on this page; without a pending code, the review page itself. */
+  private signIn(req: IncomingMessage, res: ServerResponse, review: ReviewRow, error?: string, flow?: LoginFlow, cookies: string[] = []): void {
     const err = error ? `<p class="notice error">${esc(error)}</p>` : '';
-    const notice = otherAccount ? '<p class="notice">This browser is signed in to another account.</p>' : '';
     if (flow?.challengeId) {
       return sendHtml(res, 200, page('Enter the code', `<h1>Check your email</h1>${flow.notice ? `<p class="notice">${esc(flow.notice)}</p>` : ''}${err}
 <form method="post"><input type="hidden" name="flow" value="${esc(flow.cookie)}"><input type="hidden" name="action" value="verify">
 <label for="code">6-digit code</label><input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required autofocus>
 <button type="submit">Continue</button></form>`), cookies);
     }
-    sendHtml(res, 200, page('Sign in to review', `<h1>Sign in to review</h1>${notice}${err}
-<p>Your agent is waiting for your approval to publish on ReverseEngineering.wiki. Sign in with the email of the account to see exactly what it wants to publish.</p>
-<form method="post"><input type="hidden" name="action" value="email">
-<label for="email">Your email</label><input id="email" name="email" type="email" autocomplete="email" required autofocus>
-<button type="submit">Send code</button></form>`));
+    this.show(req, res, review, error);
   }
 
   private async post(req: IncomingMessage, res: ServerResponse, review: ReviewRow, ip: string): Promise<void> {
@@ -140,7 +146,7 @@ ${renderPreview(review.preview)}
         const nonce = randomBytes(24).toString('base64url');
         const started = await this.auth.loginStart({ email: form.email, client_nonce_hash: createHash('sha256').update(nonce).digest('hex'), client_label: 'the review page' }, ip);
         const flow = this.newFlow(review.id, started.challenge_id, nonce, started.message);
-        return this.signIn(req, res, review, undefined, false, flow, [this.flowCookie(flow)]);
+        return this.signIn(req, res, review, undefined, flow, [this.flowCookie(flow)]);
       }
       if (form.action === 'verify') {
         const flow = this.flowFor(req, form.flow, review.id);
@@ -149,7 +155,7 @@ ${renderPreview(review.preview)}
         try {
           op = this.auth.loginOperator({ challenge_id: flow.challengeId, code: String(form.code ?? '').replace(/\s/g, ''), client_nonce: flow.nonce }).op;
         } catch (error) {
-          if (error instanceof AuthError) return this.signIn(req, res, review, error.message, false, flow);
+          if (error instanceof AuthError) return this.signIn(req, res, review, error.message, flow);
           throw error;
         }
         this.flows.delete(flow.cookie);

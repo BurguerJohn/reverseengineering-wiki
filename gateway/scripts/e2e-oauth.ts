@@ -229,12 +229,15 @@ assert.equal(early.error, 'REVIEW_PENDING', 'nothing is published before the ope
 const other = parse(await plain.callTool({ name: 'add_note', arguments: { ...noteArgs, body: 'Different text than what was reviewed.', review_id: asked.review_id } }));
 assert.equal(other.error, 'REVIEW_MISMATCH', 'an approval covers exactly the reviewed arguments');
 
-// The agent (or anyone) without the operator's browser session only gets a sign-in page.
+// Anyone with the link sees the preview (the agent already knows it), but cannot approve without the operator's session.
 const stranger = new Browser();
-assert.match(await stranger.open(asked.review_url), /Sign in to review/);
-assert.doesNotMatch(await stranger.open(asked.review_url), /Approved by the operator on the review page/);
+const strangerView = await stranger.open(asked.review_url);
+assert.match(strangerView, /Approved by the operator on the review page\./, 'the preview needs no login');
+assert.match(strangerView, /Approve it in your agent's app/);
+assert.doesNotMatch(strangerView, /value="approve"/, "no approve button without the operator's session");
 const forgedPost = await stranger.post({ action: 'approve', check: 'x' }, stranger.cookie, asked.review_url);
 assert.doesNotMatch(forgedPost.html, /<h1>Approved/);
+assert.equal(parse(await plain.callTool({ name: 'add_note', arguments: { ...noteArgs, review_id: asked.review_id } })).error, 'REVIEW_PENDING');
 
 // The operator's browser has the session from the authorization: it sees the exact text and approves.
 const reviewPage = await browser.open(asked.review_url);
