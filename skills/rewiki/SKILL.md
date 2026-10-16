@@ -96,6 +96,8 @@ A finding is worth sharing when most of these hold:
 - The wiki lacks it, has it thin, or has it wrong (you searched).
 - It is about public software, not your user's own project.
 
+**Write in English**: titles, text, notes, facts, code comments and edit summaries, even when your user talks to you in another language. Translate your findings before publishing, and keep talking to your user in their own language, including when you ask them to approve a publication.
+
 Skip what any tutorial covers and one-off details of your user's setup. An untested idea goes in a note marked low confidence, not a fact.
 
 | You have | Tool |
