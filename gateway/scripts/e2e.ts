@@ -90,7 +90,9 @@ async function mcp(token?: string, proxy = false): Promise<Client> {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
   if (proxy) headers['X-REWiki-Client'] = 'rewiki';
-  await client.connect(new StreamableHTTPClientTransport(new URL(`${GATEWAY}/mcp`), { requestInit: { headers } }));
+  // Without an account: the public endpoint (/mcp itself asks MCP clients to log in with OAuth).
+  const endpoint = token || proxy ? '/mcp' : '/mcp/public';
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${GATEWAY}${endpoint}`), { requestInit: { headers } }));
   return client;
 }
 
@@ -191,6 +193,15 @@ const b = await mcp(tokenB);
 assert.ok((await a.listTools()).tools.some((t) => t.name === 'revert'));
 assert.match(a.getInstructions() ?? '', /PUBLIC wiki/);
 ok(`anonymous sees ${anonTools.length} read tools; operators also get write tools; instructions delivered`);
+{
+  const r = await fetch(`${GATEWAY}/mcp`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'x', version: '0' } } }),
+  });
+  assert.equal(r.status, 401);
+  assert.match(r.headers.get('www-authenticate') ?? '', /^Bearer resource_metadata="[^"]+\/\.well-known\/oauth-protected-resource\/mcp"/);
+}
+ok('/mcp without a login → 401 with WWW-Authenticate pointing MCP clients to OAuth; /mcp/public reads anonymously');
 const proxyAnon = await mcp(undefined, true);
 await expectError(proxyAnon, 'add_note', { subject: 'Software:X', body: 'x'.repeat(30), confidence: 'low' }, 'AUTH_REQUIRED');
 ok('write without a token → AUTH_REQUIRED');
@@ -745,11 +756,13 @@ ok('export_symbols (Ghidra) and export_header (C, with padding)');
   const skill = await (await fetch(`${GATEWAY}/skill/rewiki/SKILL.md`)).text();
   assert.doesNotMatch(skill, /download this skill again|replace your copy/i, 'the skill never updates itself');
   const meta = await (await fetch(`${GATEWAY}/.well-known/mcp.json`)).json() as any;
-  const tarball = Buffer.from(await (await fetch(meta.packages[0].source)).arrayBuffer());
-  assert.equal(createHash('sha256').update(tarball).digest('hex'), meta.packages[0].sha256);
-  assert.ok(skill.includes(meta.packages[0].sha256), 'the skill pins the package hash');
-  assert.match(meta.packages[0].integrity, /^sha512-/);
-  ok('tools.json publishes every schema; the skill pins the package SHA-256 and never replaces itself');
+  assert.equal(meta.packages[0].registry, 'npm');
+  assert.ok(skill.includes(`npx -y rewiki@${meta.version}`), 'the skill pins the npm package to the server version');
+  assert.equal(meta.remotes[0].auth, 'oauth2');
+  assert.equal(meta.remotes[1].url, `${GATEWAY}/mcp/public`);
+  const llms = await (await fetch(`${GATEWAY}/llms.txt`)).text();
+  assert.match(llms, /claude mcp add --transport http --scope user rewiki http:\/\/[^\s]+\/mcp\n/, 'llms.txt leads with the remote MCP connection');
+  ok('tools.json publishes every schema; the skill pins the npm package and never replaces itself; mcp.json and llms.txt lead with remote MCP (OAuth)');
 }
 
 // ---- MediaWiki-side enforcement (layer 3) -----------------------------------------------------

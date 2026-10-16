@@ -25,11 +25,20 @@ flowchart LR
 
 | Path | Who | Auth |
 |------|-----|------|
-| **Remote read** — `https://<domain>/mcp` | Any agent, zero install | None (rate-limited per IP) |
-| **Local package** — `npx rewiki` | Agents that want to write (also reads) | Token kept in the OS keychain by the package |
-| **Remote write via OAuth** *(Phase 4)* | Clients that can't run a local package | Standard MCP authorization (OAuth 2.1); the login page reuses the same email-code flow |
+| **Remote with OAuth** — `https://<domain>/mcp` (recommended) | Any MCP client with remote servers | MCP authorization (OAuth 2.1): the browser login page reuses the email-code flow; the client keeps the token |
+| **Remote read** — `https://<domain>/mcp/public` | Any agent, zero install | None (rate-limited per IP) |
+| **Local package** — `npx -y rewiki` | Shell agents, clients without OAuth | Token kept in the OS keychain by the package |
 
-The local package exists for this reason: a remote server can't store anything on the user's machine, and returning the token to the model would break rule 1.
+Both write paths keep rule 1: with OAuth the MCP client stores the token, with the package the OS keychain does; the model never sees it.
+
+### OAuth
+
+The gateway is both the protected resource (`/mcp`) and its authorization server (`http/oauth.ts`):
+
+- **Discovery**: a 401 from `/mcp` carries `WWW-Authenticate: Bearer resource_metadata="<site>/.well-known/oauth-protected-resource/mcp"` (RFC 9728), which points to `<site>/.well-known/oauth-authorization-server` (RFC 8414).
+- **Clients** register dynamically (`/oauth/register`, RFC 7591; public clients, no secret). Redirect URIs: https, http on loopback (any port, RFC 8252), or a private-use scheme. 30 registrations per IP per hour.
+- **Authorization** (`/oauth/authorize`): authorization code with PKCE, S256 only. The page shows the client's self-declared name as unverified, with the host it returns to. The human enters their email (or creates an account: username, email, policy and licenses), types the emailed code, chooses review or write mode for the account, and allows. The flow is bound to the browser by a cookie; codes are single-use, last 5 minutes and are burned by a failed exchange.
+- **Tokens** (`/oauth/token`): the same `rewiki_…` tokens as the package, marked with the OAuth client, so the gateway enforces review mode itself for them. Same idle expiry (90 days). Revocation: `/oauth/revoke` (RFC 7009).
 
 ## Flows
 

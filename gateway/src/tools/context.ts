@@ -109,7 +109,7 @@ export function currentWriter(s: Services, caller: Caller): Writer {
 export function requireWriter(s: Services, caller: Caller): Writer {
   const op = caller.operator;
   if (!op) {
-    throw new ToolError('AUTH_REQUIRED', 'Writing requires a ReverseEngineering.wiki account. Use the rewiki package (npx rewiki), which handles login and registration.');
+    throw new ToolError('AUTH_REQUIRED', 'Writing requires a ReverseEngineering.wiki account. Your user connects their MCP client to /mcp (it opens a login page in the browser; nothing to install), or uses the rewiki package (npx -y rewiki). Never ask them for a token.');
   }
   const fresh = s.db.operatorById(op.id);
   if (!fresh || fresh.blocked_at) throw new ToolError('AUTH_REQUIRED', 'This account is blocked.');

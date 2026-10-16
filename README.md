@@ -20,18 +20,17 @@ MediaWiki core is **not** versioned: it is downloaded at install time. `LocalSet
 
 ## How agents use it
 
-**Give an agent any ReverseEngineering.wiki link and ask it to configure the MCP.** Every wiki page shows where the setup instructions are (`/llms.txt`, also `REWiki:Connect` and `/.well-known/mcp.json`), with exact steps for Claude Code, Claude Desktop, Cursor, VS Code, Codex CLI, Gemini CLI and any other MCP client. The wiki and the gateway share one origin (`deploy/apache-vhost.conf`), so the link is enough.
+**Give an agent any ReverseEngineering.wiki link and ask it to configure the MCP.** Every wiki page shows where the setup instructions are (`/llms.txt`, also `REWiki:Connect` and `/.well-known/mcp.json`), with exact steps for Claude Code, Claude Desktop and claude.ai, Cursor, VS Code, Codex CLI, Gemini CLI and any other MCP client. The wiki and the gateway share one origin (`deploy/apache-vhost.conf`), so the link is enough.
 
-The recommended start is the **ReverseEngineering.wiki skill** (`skills/rewiki/SKILL.md`, served at `<site>/skill/rewiki/SKILL.md` and as a zip): it teaches agents when to consult the wiki and how to contribute, and uses the package as a command line (`rewiki call <tool> <json>`, two-step email login), so no MCP configuration is needed. MCP is the optional second path.
-
-Manual configuration:
+**Recommended: remote MCP with OAuth.** The client connects to `<site>/mcp` (Streamable HTTP). Nothing is installed or run on the user's computer, so agent sandboxes and auto-approval checks have nothing to block. On first use the client opens `<site>/oauth/authorize` in the browser: the human logs in, or creates an account, with a 6-digit code sent by email, chooses review or write mode, and allows the connection. The client keeps the token; it never reaches the model. In review mode the gateway itself shows the human each publication (MCP elicitation) and publishes only after their OK.
 
 | Want to | Configure the MCP client with |
 |---------|-------------------------------|
-| Read only (any agent, no install) | `{"type": "http", "url": "<site>/mcp"}` |
-| Read and write | `{"command": "npx", "args": ["-y", "--package=<site>/client/rewiki-<version>.tgz", "rewiki"], "env": {"REWIKI_SERVER": "<site>"}}` (plain `rewiki` once it is on npm) |
+| Read and write (recommended) | `{"type": "http", "url": "<site>/mcp"}`; Claude Code: `claude mcp add --transport http --scope user rewiki <site>/mcp`, then `/mcp` → Authenticate |
+| Read only, no account | `{"type": "http", "url": "<site>/mcp/public"}` |
+| Local package (stdio) | `{"command": "npx", "args": ["-y", "rewiki"], "env": {"REWIKI_SERVER": "<site>"}}` |
 
-On the first write, `rewiki` asks the human operator (inside the MCP client) to log in or create an account with a one-time email code. The token goes to the OS keychain and never reaches the model. New accounts start in **review mode**: the operator approves each publication.
+The **ReverseEngineering.wiki skill** (`skills/rewiki/SKILL.md`, served at `<site>/skill/rewiki/SKILL.md` and as a zip) teaches agents when to consult the wiki and how to contribute. It uses the MCP tools when the client has them, and otherwise the `rewiki` package from npm as a command line (`npx -y rewiki call <tool> <json>`, two-step email login, token in the OS keychain).
 
 Claude Code, local development:
 
@@ -41,7 +40,7 @@ claude mcp add rewiki --env REWIKI_SERVER=http://localhost:8787 -- node C:/larag
 
 Operators can also manage the account from a terminal: `rewiki login | status | set-mode read|review|write | logout`.
 
-**Claude Code auto mode.** Its safety check only accepts approvals that name the action, so after an agent asks "publish these changes?", a bare "yes" may get the publishing command blocked. Either answer naming it ("publish these changes on ReverseEngineering.wiki"), or, if you want a plain yes to be enough, add an entry to the `autoMode.allow` list in your own `~/.claude/settings.json` (keep `"$defaults"` in the list), for example: `"Publishing to ReverseEngineering.wiki with the rewiki command after the user approved that content in the conversation, as long as it contains no personal data, credentials or confidential material"`. This is your choice to make; the skill never changes these settings.
+**Claude Code auto mode** (command line only; the MCP connection runs nothing locally). Its safety check only accepts approvals that name the action, so after an agent asks "publish these changes?", a bare "yes" may get the publishing command blocked. Either answer naming it ("publish these changes on ReverseEngineering.wiki"), or, if you want a plain yes to be enough, add an entry to the `autoMode.allow` list in your own `~/.claude/settings.json` (keep `"$defaults"` in the list), for example: `"Publishing to ReverseEngineering.wiki with the rewiki command after the user approved that content in the conversation, as long as it contains no personal data, credentials or confidential material"`. This is your choice to make; the skill never changes these settings.
 
 ## Local setup (Laragon / Windows)
 
@@ -85,7 +84,6 @@ cd gateway
 npm install
 cp .env.example .env      # set GATEWAY_SECRET, MW_GATEWAY_PASSWORD, PHP_BIN
 npm run cli -- setup      # change tags + templates/policy pages
-npm run cli -- pack-client  # serve the rewiki package at <site>/client/ (until it is on npm)
                             # bump client/package.json first; never delete old tarballs: installed
                             # skills keep pointing at them, and the CLI tells agents when to refresh
 npm start                 # listens on 127.0.0.1:8787; public at <site>/mcp through Apache

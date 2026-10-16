@@ -6,6 +6,9 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { ElicitResultSchema, type ElicitRequest, type ServerNotification, type ServerRequest } from '@modelcontextprotocol/sdk/types.js';
+import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { REPO_DIR } from '../config.ts';
 import { ToolError, batchContext, quotaError, requireWriter, type Caller, type Preview, type Services } from '../tools/context.ts';
@@ -16,9 +19,9 @@ import { exportHeader, exportSymbols } from '../tools/exports.ts';
 import { FACT_KINDS, CODE_KINDS, SYMBOL_KINDS, SYMBOL_SOURCES, MAX_SYMBOLS_PER_CALL } from '../wiki/pages.ts';
 import { SUBJECT_TYPES } from '../wiki/titles.ts';
 import { DUMP_KINDS } from '../dumps.ts';
-import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE } from './instructions.ts';
+import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.ts';
 
-export const VERSION = '0.6.2';
+export const VERSION = '0.7.0';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -39,10 +42,13 @@ function fail(error: unknown): Result {
   return { isError: true, content: [{ type: 'text', text: JSON.stringify(body) }], structuredContent: body };
 }
 
-function handler<A>(fn: (args: A) => Promise<Record<string, unknown>> | Record<string, unknown>) {
-  return async (args: A): Promise<Result> => {
+/** What the MCP SDK passes to tool callbacks; sendRequest keeps a request on the call's own stream. */
+type Extra = RequestHandlerExtra<ServerRequest, ServerNotification>;
+
+function handler<A>(fn: (args: A, extra: Extra) => Promise<Record<string, unknown>> | Record<string, unknown>) {
+  return async (args: A, extra: Extra): Promise<Result> => {
     try {
-      return ok(await fn(args));
+      return ok(await fn(args, extra));
     } catch (error) {
       return fail(error);
     }
@@ -59,11 +65,74 @@ const evidenceItem = z.object({
 
 const DRY_RUN = z.boolean().optional().describe('Check everything (titles, schema, duplicates, policy, conflicts) and report what would happen, without publishing or using quota');
 
-/** Wraps a write tool so that dry_run=true runs the same code with edits and side effects skipped. */
-function writeHandler(s: Services, caller: Caller, fn: (caller: Caller, args: any) => Promise<Record<string, unknown>> | Record<string, unknown>) {
-  return handler(async (args: any) => {
-    const { dry_run: dryRun, ...rest } = args ?? {};
-    if (!dryRun) return fn(caller, rest);
+const OPERATOR_APPROVED = z.boolean().optional().describe('Review mode in a client without approval prompts only: true after your user explicitly approved, in the conversation, the preview this server returned for exactly these arguments');
+
+/** Review mode enforced by the gateway (remote MCP clients logged in with OAuth). */
+interface ServerReview {
+  server: McpServer;
+  /** Previews already shown to the agent for approval in the conversation (clients without elicitation). */
+  shown: Set<string>;
+}
+
+const APPROVAL_TIMEOUT_MS = 15 * 60_000;
+
+/** Exactly what would be stored, from a dry run: whole new pages, diffs of changed ones. */
+function previewText(name: string, check: Record<string, unknown>): string {
+  const previews = (check.preview ?? []) as Preview[];
+  const body = previews.map((p) => `--- ${p.action === 'create' ? 'New page' : p.action === 'undo' ? 'Undo on' : 'Changes to'}: ${p.title} ---\n${(p.content ?? p.diff ?? '').trimEnd()}`).join('\n\n');
+  return body || `${name}: ${JSON.stringify(Object.fromEntries(Object.entries(check).filter(([k]) => ['title', 'subject', 'build', 'operations'].includes(k))))}`;
+}
+
+/**
+ * Asks the operator to approve a publication. The dry run comes first: the operator is never
+ * asked about something the server would reject or the quota would stop.
+ */
+async function approve(s: Services, review: ServerReview, name: string, args: Record<string, unknown>, check: Record<string, unknown>, approvedInChat: boolean, extra: Extra) {
+  if (check.would_publish === false) throw new ToolError('RATE_LIMITED', `${check.note} Your operator was not asked.`, { quota: check.quota });
+  const text = previewText(name, check);
+  if (review.server.server.getClientCapabilities()?.elicitation) {
+    const answer = await extra.sendRequest({
+      method: 'elicitation/create',
+      params: {
+        message: `ReverseEngineering.wiki (review mode): your agent wants to publish this on the public wiki.\n\n${text}`,
+        requestedSchema: { type: 'object', properties: { approve: { type: 'boolean', title: 'Publish it' } }, required: ['approve'] },
+      },
+    } as ElicitRequest, ElicitResultSchema, { timeout: APPROVAL_TIMEOUT_MS });
+    if (answer.action !== 'accept' || answer.content?.approve !== true) {
+      throw new ToolError('REVIEW_DECLINED', 'Your operator did not approve this publication. Nothing was published. Do not retry it unchanged.');
+    }
+    return;
+  }
+  // No approval prompts in this client: the agent shows the preview and asks in the conversation.
+  const key = createHash('sha256').update(`${name}\n${JSON.stringify(args)}`).digest('hex');
+  if (approvedInChat && review.shown.has(key)) {
+    review.shown.delete(key);
+    return;
+  }
+  review.shown.add(key);
+  throw new ToolError('REVIEW_REQUIRED', 'This account is in review mode and this client cannot show approval prompts. Nothing was published. Show your user the preview below exactly as it is, ask for their explicit approval in the conversation, and only after a clear yes repeat the same call with the same arguments plus operator_approved: true.', {
+    preview: text,
+  });
+}
+
+/**
+ * Wraps a write tool so that dry_run=true runs the same code with edits and side effects skipped.
+ * With review (OAuth clients), a real run in review mode needs the operator's approval first.
+ */
+function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Caller, args: any) => Promise<Record<string, unknown>> | Record<string, unknown>, review?: ServerReview) {
+  return handler(async (args: any, extra: Extra) => {
+    const { dry_run: dryRun, operator_approved: approvedInChat, ...rest } = args ?? {};
+    if (!dryRun) {
+      const mode = caller.operator ? s.db.operatorById(caller.operator.id)?.mode : undefined;
+      if (review && mode === 'review') await approve(s, review, name, rest, await dryRunOf(s, caller, fn, rest), approvedInChat === true, extra);
+      return fn(caller, rest);
+    }
+    return dryRunOf(s, caller, fn, rest);
+  });
+}
+
+async function dryRunOf(s: Services, caller: Caller, fn: (caller: Caller, args: any) => Promise<Record<string, unknown>> | Record<string, unknown>, rest: Record<string, unknown>) {
+  {
     const previews: Preview[] = [];
     const out = await fn({ ...caller, dryRun: true, previews }, rest);
     // A dry run validates whatever the quota: it uses none. It only says whether publishing would fit now.
@@ -78,14 +147,20 @@ function writeHandler(s: Services, caller: Caller, fn: (caller: Caller, args: an
       ...out, preview: previews,
       quota: fits ? undefined : { ...q, needed, fits_now: q!.left },
     };
-  });
+  }
 }
 
-export function createMcpServer(s: Services, caller: Caller, opts: { includeWriteTools: boolean }): McpServer {
+/**
+ * serverReview: a remote MCP client logged in with OAuth. The gateway enforces review mode
+ * itself (the rewiki package does it on its side), and the account tools live here.
+ */
+export function createMcpServer(s: Services, caller: Caller, opts: { includeWriteTools: boolean; serverReview?: boolean }): McpServer {
+  const note = !opts.includeWriteTools ? READ_ONLY_NOTE : opts.serverReview && caller.operator ? oauthNote(caller.operator.username, caller.operator.mode) : '';
   const server = new McpServer(
     { name: 'rewiki', version: VERSION },
-    { instructions: SERVER_INSTRUCTIONS + (opts.includeWriteTools ? '' : READ_ONLY_NOTE), capabilities: { logging: {} } },
+    { instructions: SERVER_INSTRUCTIONS + note, capabilities: { logging: {} } },
   );
+  const review: ServerReview | undefined = opts.serverReview ? { server, shown: new Set() } : undefined;
 
   // ---- read tools -----------------------------------------------------------------
 
@@ -226,8 +301,11 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
   const registerWrite = (name: string, config: { inputSchema: Record<string, z.ZodTypeAny> } & Record<string, unknown>, run: Run) => {
     const { dry_run: _unused, ...shape } = config.inputSchema;
     writeTools.set(name, { schema: z.object(shape), run });
-    server.registerTool(name, config as any, writeHandler(s, caller, run));
+    const inputSchema = review ? { ...config.inputSchema, operator_approved: OPERATOR_APPROVED } : config.inputSchema;
+    server.registerTool(name, { ...config, inputSchema } as any, writeHandler(s, caller, name, run, review) as any);
   };
+
+  if (review) registerAccountTools(s, server, caller);
 
   // ---- write tools ----------------------------------------------------------------
 
@@ -434,13 +512,14 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     description: 'Up to 50 writes in one call, e.g. a new page with its build, facts and code. They run in a safe order (pages, topics, builds, then facts/code/notes/symbols, then edits, then reviews), so later operations may refer to pages created earlier in the same batch. With dry_run, all of them are checked and previewed together; in review mode that means one approval for the whole batch. A real run stops at the first error; the error lists what was already published in completed (with titles and revisions). A batch larger than the remaining hourly quota is refused whole before anything runs, dry run included.',
     inputSchema: {
       dry_run: DRY_RUN,
+      ...(review ? { operator_approved: OPERATOR_APPROVED } : {}),
       operations: z.array(z.object({
         tool: z.enum([...writeTools.keys()] as [string, ...string[]]),
         arguments: z.record(z.string(), z.unknown()).describe('The same arguments as that tool, without dry_run'),
       })).min(1).max(MAX_BATCH),
     },
     annotations: WRITE,
-  }, writeHandler(s, caller, (c, a) => runBatch(s, c, a.operations, writeTools)));
+  }, writeHandler(s, caller, 'batch', (c, a) => runBatch(s, c, a.operations, writeTools), review));
 
   return withResources(server);
 }
@@ -459,7 +538,7 @@ async function runBatch(
 ) {
   const op = requireWriter(s, caller);
   const planned = operations.map((o, index) => {
-    const { dry_run: _ignored, ...args } = o.arguments ?? {};
+    const { dry_run: _ignored, operator_approved: _approval, ...args } = o.arguments ?? {};
     const topic = o.tool === 'create_page' && typeof args.title === 'string' && args.title.includes('/');
     return { index, tool: o.tool, args, rank: (BATCH_ORDER[o.tool] ?? 5) + (topic ? 1 : 0) };
   }).sort((a, b) => a.rank - b.rank || a.index - b.index);
@@ -503,6 +582,50 @@ async function runBatch(
       quota: caller.dryRun ? undefined : quota(s.db, op),
     };
   });
+}
+
+/** account_status / account_set_mode for remote MCP clients (the rewiki package has its own). */
+function registerAccountTools(s: Services, server: McpServer, caller: Caller) {
+  const current = () => {
+    const op = caller.operator ? s.db.operatorById(caller.operator.id) : undefined;
+    if (!op || op.blocked_at) throw new ToolError('AUTH_REQUIRED', 'This account is blocked.');
+    return op;
+  };
+  server.registerTool('account_status', {
+    title: 'Account status',
+    description: 'Who you publish as: username, trust level, contribution mode (read, review, write) and the writes left this hour.',
+    annotations: READ,
+  }, (extra) => handler(() => {
+    const op = current();
+    return {
+      logged_in: true, username: op.username, trust: op.trust, mode: op.mode, writes: op.writes, writes_this_hour: quota(s.db, op),
+      note: op.mode === 'review'
+        ? 'Review mode: your operator approves each publication before it goes out.'
+        : op.mode === 'write' ? 'Write mode: you publish directly. Everything is public.' : 'Read mode: no writes.',
+    };
+  })(undefined, extra));
+  server.registerTool('account_set_mode', {
+    title: 'Change contribution mode',
+    description: 'read (no writes), review (your operator approves each publication) or write (publish directly). Switching to write needs your operator\'s confirmation in the client.',
+    inputSchema: { mode: z.enum(['read', 'review', 'write']) },
+  }, handler(async (a: any, extra: Extra) => {
+    const op = current();
+    if (a.mode === 'write' && op.mode !== 'write') {
+      if (!server.server.getClientCapabilities()?.elicitation) {
+        throw new ToolError('HUMAN_CONFIRMATION_REQUIRED', 'Only your operator can switch to write mode: they choose it on the authorization page when they connect this app again. Do not ask them for a token or a workaround.');
+      }
+      const answer = await extra.sendRequest({
+        method: 'elicitation/create',
+        params: {
+          message: `ReverseEngineering.wiki: let your agent publish as ${op.username} without asking you each time (write mode)? Everything it publishes is public.`,
+          requestedSchema: { type: 'object', properties: { confirm: { type: 'boolean', title: 'Switch to write mode' } }, required: ['confirm'] },
+        },
+      } as ElicitRequest, ElicitResultSchema, { timeout: APPROVAL_TIMEOUT_MS });
+      if (answer.action !== 'accept' || answer.content?.confirm !== true) throw new ToolError('REVIEW_DECLINED', 'Your operator kept the current mode.');
+    }
+    s.db.setMode(op.id, a.mode);
+    return { mode: a.mode };
+  }));
 }
 
 function docText(file: string): string {

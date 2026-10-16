@@ -1,17 +1,37 @@
-/** HTTP entry points: /mcp (Streamable HTTP, stateless), /auth/* (accounts), /health, /dumps/*. */
+/**
+ * HTTP entry points: /mcp (Streamable HTTP; OAuth for remote MCP clients), /mcp/public (anonymous,
+ * read-only), /oauth/* and /.well-known/oauth-* (http/oauth.ts), /auth/* (the rewiki package's
+ * accounts), /health, /dumps/*.
+ */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Services } from '../tools/context.ts';
 import { AuthError, type AuthService } from '../auth/service.ts';
 import type { Mailer } from '../mail/index.ts';
 import { createMcpServer, VERSION } from '../mcp/server.ts';
-import { CLIENT_DIR, clientTarball, llmsTxt, renderSkill, toolSchemas, wellKnown } from './discovery.ts';
+import { llmsTxt, renderSkill, toolSchemas, wellKnown } from './discovery.ts';
 import { DUMP_KINDS, latestDump, listDumps } from '../dumps.ts';
+import { OAuthServer, challengeHeader } from './oauth.ts';
 
 const MAX_BODY = 2 * 1024 * 1024;
+const SESSION_IDLE_MS = 60 * 60_000;
+
+/** CORS for browser-based MCP clients: bearer tokens only, no cookies, so any origin is fine. */
+const MCP_CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version, Last-Event-ID',
+  'Access-Control-Expose-Headers': 'Mcp-Session-Id, WWW-Authenticate',
+};
+
+interface McpSession {
+  transport: StreamableHTTPServerTransport;
+  operatorId: number;
+  seen: number;
+}
 
 function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   const text = JSON.stringify(body);
@@ -50,33 +70,104 @@ export function createHttpServer(s: Services, auth: AuthService, mailer: Mailer)
     return req.socket.remoteAddress ?? 'unknown';
   };
 
+  const oauth = new OAuthServer(s, auth);
+
+  // Remote MCP clients (OAuth) get a session each: the server may ask the human to approve a
+  // publication in the middle of a tool call (elicitation), which needs the session's stream.
+  const sessions = new Map<string, McpSession>();
+  setInterval(() => {
+    for (const session of sessions.values()) {
+      if (Date.now() - session.seen > SESSION_IDLE_MS) void session.transport.close();
+    }
+  }, 5 * 60_000).unref();
+
+  /** One stateless request: the rewiki package (with its token or none) and anonymous readers. */
+  const stateless = async (req: IncomingMessage, res: ServerResponse, caller: Parameters<typeof createMcpServer>[1], writeTools: boolean) => {
+    if (req.method !== 'POST') {
+      send(res, 405, { error: 'METHOD_NOT_ALLOWED', message: 'This endpoint is stateless: use POST.' }, { Allow: 'POST' });
+      return;
+    }
+    const server = createMcpServer(s, caller, { includeWriteTools: writeTools });
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    res.on('close', () => {
+      void transport.close();
+      void server.close();
+    });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, await readBody(req));
+  };
+
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname.replace(/\/+$/, '') || '/';
     try {
       // ---- MCP -----------------------------------------------------------------------
-      if (path === '/mcp') {
-        if (req.method !== 'POST') {
-          send(res, 405, { error: 'METHOD_NOT_ALLOWED', message: 'This server is stateless: use POST.' }, { Allow: 'POST' });
+      if (path === '/mcp' || path === '/mcp/public') {
+        if (req.method === 'OPTIONS') {
+          res.writeHead(204, { ...MCP_CORS, 'Access-Control-Max-Age': '86400' });
+          res.end();
+          return;
+        }
+        for (const [k, v] of Object.entries(MCP_CORS)) res.setHeader(k, v);
+        if (path === '/mcp/public') {
+          // No account: read tools only, whatever the request carries.
+          await stateless(req, res, { operator: null }, false);
           return;
         }
         const token = bearer(req);
         const session = token ? auth.authenticate(token) : null;
         if (token && !session) {
-          send(res, 401, { error: 'INVALID_TOKEN', message: 'Token is invalid, expired or revoked. Log in again.' });
+          send(res, 401, { error: 'INVALID_TOKEN', message: 'Token is invalid, expired or revoked. Log in again.' }, { 'WWW-Authenticate': challengeHeader(s, 'invalid_token') });
           return;
         }
         const proxy = req.headers['x-rewiki-client'] === 'rewiki';
-        const server = createMcpServer(s, { operator: session?.operator ?? null }, { includeWriteTools: !!session || proxy });
-        const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-        res.on('close', () => {
-          void transport.close();
-          void server.close();
+        if (!session && !proxy) {
+          // MCP clients log in with OAuth from here (the header says where); anonymous reading is /mcp/public.
+          send(res, 401, {
+            error: 'AUTH_REQUIRED',
+            message: `This endpoint needs a ReverseEngineering.wiki login (OAuth), which your MCP client opens for you. To read without an account, use ${s.config.publicUrl}/mcp/public.`,
+          }, { 'WWW-Authenticate': challengeHeader(s) });
+          return;
+        }
+        if (!session?.token.oauth_client_id) {
+          // The rewiki package: it asks the human for review approvals itself.
+          await stateless(req, res, { operator: session?.operator ?? null }, true);
+          return;
+        }
+        const sid = req.headers['mcp-session-id'];
+        if (typeof sid === 'string') {
+          const existing = sessions.get(sid);
+          if (!existing || existing.operatorId !== session.operator.id) {
+            send(res, 404, { jsonrpc: '2.0', error: { code: -32001, message: 'Session not found: initialize a new one' }, id: null });
+            return;
+          }
+          existing.seen = Date.now();
+          await existing.transport.handleRequest(req, res, req.method === 'POST' ? await readBody(req) : undefined);
+          return;
+        }
+        if (req.method !== 'POST') {
+          send(res, 400, { jsonrpc: '2.0', error: { code: -32000, message: 'Mcp-Session-Id header required' }, id: null });
+          return;
+        }
+        const server = createMcpServer(s, { operator: session.operator }, { includeWriteTools: true, serverReview: true });
+        const operatorId = session.operator.id;
+        const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID(),
+          onsessioninitialized: (id) => {
+            sessions.set(id, { transport, operatorId, seen: Date.now() });
+          },
         });
+        transport.onclose = () => {
+          if (transport.sessionId) sessions.delete(transport.sessionId);
+          void server.close();
+        };
         await server.connect(transport);
         await transport.handleRequest(req, res, await readBody(req));
         return;
       }
+
+      // ---- OAuth (remote MCP clients) ------------------------------------------------
+      if (await oauth.handle(req, res, path, clientIp(req))) return;
 
       // ---- accounts ------------------------------------------------------------------
       if (path.startsWith('/auth/')) {
@@ -202,20 +293,9 @@ export function createHttpServer(s: Services, auth: AuthService, mailer: Mailer)
         send(res, 200, wellKnown(s.config), { 'Cache-Control': 'public, max-age=300' });
         return;
       }
-      if (path.startsWith('/client/')) {
-        const name = basename(decodeURIComponent(path.slice('/client/'.length)));
-        const file = join(CLIENT_DIR(s.config), name);
-        if (!/^rewiki-\d+\.\d+\.\d+\.tgz$/.test(name) || !existsSync(file)) {
-          send(res, 404, { error: 'NOT_FOUND', latest: clientTarball(s.config) });
-          return;
-        }
-        res.writeHead(200, { 'Content-Type': 'application/gzip', 'Content-Length': String(statSync(file).size), 'Cache-Control': 'public, max-age=86400, immutable' });
-        createReadStream(file).pipe(res);
-        return;
-      }
       if (path === '/') {
         send(res, 200, {
-          name: 'ReverseEngineering.wiki gateway', version: VERSION, mcp: `${s.config.publicUrl}/mcp`, wiki: s.config.mw.publicUrl,
+          name: 'ReverseEngineering.wiki gateway', version: VERSION, mcp: `${s.config.publicUrl}/mcp`, mcp_public: `${s.config.publicUrl}/mcp/public`, wiki: s.config.mw.publicUrl,
           setup_instructions: `${s.config.publicUrl}/llms.txt`, dumps: `${s.config.publicUrl}/dumps`,
         });
         return;

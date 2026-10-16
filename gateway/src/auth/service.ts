@@ -176,6 +176,12 @@ export class AuthService {
   }
 
   async registerVerify(body: any): Promise<TokenGrant> {
+    const { operatorId, label } = await this.registerOperator(body);
+    return this.issueToken(operatorId, String(body?.client_label ?? label));
+  }
+
+  /** Checks a registration code and creates the account (MediaWiki user included). */
+  async registerOperator(body: any): Promise<{ operatorId: number; label: string }> {
     const challenge = this.verifyChallenge(body?.challenge_id, body?.code, body?.client_nonce, 'register');
     // Re-check: someone may have taken the name since the availability check.
     const availability = await this.usernameAvailable(challenge.username);
@@ -206,7 +212,7 @@ export class AuthService {
     } catch {
       throw new AuthError('USERNAME_UNAVAILABLE', 'That username or email was registered a moment ago. Start again.', 409);
     }
-    return this.issueToken(operatorId, String(body?.client_label ?? challenge.client_label));
+    return { operatorId, label: challenge.client_label };
   }
 
   // ---- login -------------------------------------------------------------------
@@ -264,25 +270,29 @@ export class AuthService {
 
   /** Checks the code for the wiki and returns the account name; no API token is issued. */
   webLoginVerify(body: any): { username: string } {
-    const challenge = this.verifyChallenge(body?.challenge_id, body?.code, body?.client_nonce, 'login');
-    const op = this.db.operatorById(challenge.operator_id!);
-    if (!op || op.blocked_at) throw new AuthError('INVALID_CODE', 'The code is invalid or expired.', 401);
-    return { username: op.username };
+    return { username: this.loginOperator(body).op.username };
   }
 
   async loginVerify(body: any): Promise<TokenGrant> {
+    const { op, label } = this.loginOperator(body);
+    return this.issueToken(op.id, String(body?.client_label ?? label));
+  }
+
+  /** Checks a login code and returns the account; no token is issued. */
+  loginOperator(body: any): { op: Operator; label: string } {
     const challenge = this.verifyChallenge(body?.challenge_id, body?.code, body?.client_nonce, 'login');
     const op = this.db.operatorById(challenge.operator_id!);
     if (!op || op.blocked_at) throw new AuthError('INVALID_CODE', 'The code is invalid or expired.', 401);
-    return this.issueToken(op.id, String(body?.client_label ?? challenge.client_label));
+    return { op, label: challenge.client_label };
   }
 
   // ---- tokens --------------------------------------------------------------------
 
-  private issueToken(operatorId: number, label: string): TokenGrant {
+  /** oauthClientId: tokens of remote MCP clients, for which the gateway itself enforces review mode. */
+  issueToken(operatorId: number, label: string, oauthClientId: string | null = null): TokenGrant {
     const token = newAccessToken();
     const expires = new Date(Date.now() + TOKEN_IDLE_DAYS * 86_400_000).toISOString();
-    this.db.insertToken(operatorId, sha256(token), label.slice(0, 80), expires);
+    this.db.insertToken(operatorId, sha256(token), label.slice(0, 80), expires, oauthClientId);
     const op = this.db.operatorById(operatorId)!;
     return { token, expires_at: expires, username: op.username, trust: op.trust, mode: op.mode };
   }

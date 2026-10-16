@@ -368,9 +368,9 @@ function newer(a: string, b: string): boolean {
 }
 
 /**
- * Once a day, asks the server which package version it serves. Old versions keep
- * working (the server keeps their tarballs); this only tells the agent to refresh
- * the skill, whose command line points at the current package.
+ * Once a day, asks the server which package version is current. Old versions keep
+ * working (they stay on npm); this only tells the agent to refresh the skill, whose
+ * command line points at the current package.
  */
 async function updateNotice(): Promise<void> {
   try {

@@ -31,6 +31,27 @@ export interface TokenRow {
   last_used_at: string;
   expires_at: string;
   revoked_at: string | null;
+  /** Set when the token came from the OAuth flow (remote MCP): the gateway enforces review mode itself. */
+  oauth_client_id: string | null;
+}
+
+export interface OAuthClient {
+  client_id: string;
+  name: string;
+  redirect_uris: string;
+  created_at: string;
+  ip: string;
+}
+
+export interface OAuthCode {
+  code_hash: string;
+  client_id: string;
+  operator_id: number;
+  redirect_uri: string;
+  code_challenge: string;
+  created_at: number;
+  expires_at: number;
+  consumed_at: number | null;
 }
 
 export interface Challenge {
@@ -95,6 +116,25 @@ create table if not exists tokens (
   last_used_at text not null,
   expires_at text not null,
   revoked_at text
+);
+
+create table if not exists oauth_clients (
+  client_id text primary key,
+  name text not null,
+  redirect_uris text not null,
+  created_at text not null,
+  ip text not null
+);
+
+create table if not exists oauth_codes (
+  code_hash text primary key,
+  client_id text not null,
+  operator_id integer not null references operators(id),
+  redirect_uri text not null,
+  code_challenge text not null,
+  created_at integer not null,
+  expires_at integer not null,
+  consumed_at integer
 );
 
 create table if not exists challenges (
@@ -179,6 +219,9 @@ export class AccountsDb {
     this.db = new DatabaseSync(path);
     this.db.exec('pragma journal_mode = wal; pragma foreign_keys = on;');
     this.db.exec(SCHEMA);
+    // Columns added after the first release (create table if not exists keeps old tables as they were).
+    const tokenColumns = (this.db.prepare('pragma table_info(tokens)').all() as Array<{ name: string }>).map((c) => c.name);
+    if (!tokenColumns.includes('oauth_client_id')) this.db.exec('alter table tokens add column oauth_client_id text');
   }
 
   // ---- operators -----------------------------------------------------------
@@ -237,10 +280,10 @@ export class AccountsDb {
 
   // ---- tokens --------------------------------------------------------------
 
-  insertToken(operatorId: number, tokenHash: string, label: string, expiresAt: string): void {
+  insertToken(operatorId: number, tokenHash: string, label: string, expiresAt: string, oauthClientId: string | null = null): void {
     const now = new Date().toISOString();
-    this.db.prepare(`insert into tokens (operator_id, token_hash, label, created_at, last_used_at, expires_at)
-      values (?, ?, ?, ?, ?, ?)`).run(operatorId, tokenHash, label, now, now, expiresAt);
+    this.db.prepare(`insert into tokens (operator_id, token_hash, label, created_at, last_used_at, expires_at, oauth_client_id)
+      values (?, ?, ?, ?, ?, ?, ?)`).run(operatorId, tokenHash, label, now, now, expiresAt, oauthClientId);
   }
 
   tokenByHash(hash: string): TokenRow | undefined {
@@ -259,6 +302,30 @@ export class AccountsDb {
   revokeAllTokens(operatorId: number): void {
     this.db.prepare('update tokens set revoked_at = ? where operator_id = ? and revoked_at is null')
       .run(new Date().toISOString(), operatorId);
+  }
+
+  // ---- OAuth (remote MCP clients) -------------------------------------------
+
+  insertOAuthClient(client: OAuthClient): void {
+    this.db.prepare('insert into oauth_clients (client_id, name, redirect_uris, created_at, ip) values (?, ?, ?, ?, ?)')
+      .run(client.client_id, client.name, client.redirect_uris, client.created_at, client.ip);
+  }
+
+  oauthClient(clientId: string): OAuthClient | undefined {
+    return this.db.prepare('select * from oauth_clients where client_id = ?').get(clientId) as OAuthClient | undefined;
+  }
+
+  insertOAuthCode(code: Omit<OAuthCode, 'consumed_at'>): void {
+    this.db.prepare(`insert into oauth_codes (code_hash, client_id, operator_id, redirect_uri, code_challenge, created_at, expires_at)
+      values (?, ?, ?, ?, ?, ?, ?)`).run(code.code_hash, code.client_id, code.operator_id, code.redirect_uri, code.code_challenge, code.created_at, code.expires_at);
+  }
+
+  /** Marks an authorization code used and returns it; undefined when unknown, expired or already used. */
+  takeOAuthCode(codeHash: string): OAuthCode | undefined {
+    const row = this.db.prepare('select * from oauth_codes where code_hash = ?').get(codeHash) as OAuthCode | undefined;
+    if (!row || row.consumed_at || row.expires_at < Date.now()) return undefined;
+    const taken = this.db.prepare('update oauth_codes set consumed_at = ? where code_hash = ? and consumed_at is null').run(Date.now(), codeHash);
+    return taken.changes === 1 ? row : undefined;
   }
 
   // ---- challenges ----------------------------------------------------------

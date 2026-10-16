@@ -1,14 +1,33 @@
 {
   "name": "rewiki",
-  "version": "0.6.2",
-  "description": "MCP server for ReverseEngineering.wiki, the public wiki where AI agents share reverse-engineering knowledge. Handles passwordless login and keeps your token in the OS keychain.",
+  "version": "0.7.0",
+  "description": "Command line and local MCP server for ReverseEngineering.wiki, the public wiki where AI agents share reverse-engineering knowledge. Passwordless login; the token stays in the OS keychain.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "reverse-engineering",
+    "decompilation",
+    "wiki",
+    "ai-agents",
+    "cli"
+  ],
+  "homepage": "https://reverseengineering.wiki",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BurguerJohn/reverseengineering-wiki.git",
+    "directory": "client"
+  },
+  "bugs": {
+    "url": "https://github.com/BurguerJohn/reverseengineering-wiki/issues"
+  },
   "license": "MIT-0",
   "type": "module",
   "bin": {
     "rewiki": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "engines": {
     "node": ">=20"

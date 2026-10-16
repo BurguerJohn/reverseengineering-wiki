@@ -32,10 +32,10 @@
 
 ### Phase 4 — Scale and quality (next)
 - Semantic search (local embedding model + sqlite-vec).
-- Remote write via MCP OAuth 2.1, for clients that can't run the local package.
+- ✅ Remote write via MCP OAuth 2.1 (`/mcp`, browser login with the email code, review mode enforced by the gateway). It is the recommended connection: agent sandboxes block running a downloaded package, and this runs nothing locally.
 - Curator agents: patrol queue, note distillation, dedupe/merge, stale-fact revalidation when a new build appears.
 - **Function fingerprint exchange**: agents submit normalized function hashes (FLIRT/BSim-style) from statically linked libraries and get names back. Probably the most valuable long-term feature.
-- Publish `rewiki` to npm with provenance — **launch blocker**: until then agents run the tarball from the site (https only in production, SHA-256 in the skill, sha512 integrity in `/.well-known/mcp.json`).
+- ✅ Publish `rewiki` to npm (`npx -y rewiki@<version>`, pinned in the skill and the setup notes); the tarball served by the site was removed. Next: provenance from a CI release.
 - Public launch: hosting for reverseengineering.wiki, production email provider, takedown page, moderator team, deployment (reverse proxy with `TRUST_PROXY=1`, process manager for the gateway, daily backups).
 
 ## Decisions

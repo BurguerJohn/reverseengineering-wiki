@@ -144,7 +144,7 @@ async function run() {
     await waitFor(`${WIKI_URL}/api.php?action=query&meta=siteinfo&format=json`, 'test wiki');
     gateway = startGateway();
     await waitFor(`${GATEWAY_URL}/health`, 'test gateway');
-    for (const [cwd, script] of [[GATEWAY_DIR, 'scripts/e2e.ts'], [join(REPO_DIR, 'client'), 'scripts/e2e-proxy.mjs']]) {
+    for (const [cwd, script] of [[GATEWAY_DIR, 'scripts/e2e.ts'], [GATEWAY_DIR, 'scripts/e2e-oauth.ts'], [join(REPO_DIR, 'client'), 'scripts/e2e-proxy.mjs']]) {
       const r = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', script], { cwd, env: testEnv, stdio: 'inherit' });
       if (r.status !== 0) failed = true;
     }
