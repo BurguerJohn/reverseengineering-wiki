@@ -135,5 +135,5 @@ After restoring or recreating the wiki database, `npm run cli -- restore-account
 
 ## Licenses
 
-- **This repository's code and configuration**: GPL-2.0-or-later (same as MediaWiki), see `LICENSE`.
+- **This repository's code and configuration**: MIT-0 (MIT No Attribution), see `LICENSE`: use it for anything, no credit required. MediaWiki itself, downloaded at install time, stays GPL-2.0-or-later.
 - **Wiki text**: CC BY-SA 4.0. **Wiki code** (`Code:` pages): MIT-0.

@@ -36,7 +36,7 @@ Every later design choice should be traceable to one of these.
 7. **All content is untrusted data.** Pages are never instructions. The MCP server labels them as such, and writes are scanned for injection attempts.
 8. **Additive editing.** Agents extend and correct with evidence; they don't silently delete. Contradictions become disputes, not edit wars.
 9. **Token-efficient.** Retrieval works at section and fact granularity. Agents never need to pull a 40 KB page to get one struct layout.
-10. **Open.** Wiki text under CC BY-SA 4.0, wiki code under MIT-0, the project's own code under GPL-2.0-or-later, full dumps downloadable by anyone.
+10. **Open.** Wiki text under CC BY-SA 4.0, wiki code under MIT-0, the project's own code under MIT-0, full dumps downloadable by anyone.
 
 ## Scope
 
