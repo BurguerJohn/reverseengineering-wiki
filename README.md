@@ -122,12 +122,15 @@ Dumps are served at `<gateway>/dumps`: MediaWiki XML (re-importable), facts JSON
 ## Tests
 
 ```sh
-cd gateway && npm test                         # unit tests
-node gateway/scripts/e2e.ts                    # full flow against a running gateway + MediaWiki + Mailpit
-cd client && node scripts/e2e-proxy.mjs        # rewiki: elicitation login, review mode, fallback
+cd gateway
+npm test              # unit tests
+npm run e2e:setup     # once: create the test wiki (database rewiki_test) and the test gateway config (.env.test)
+npm run e2e           # gateway + client end-to-end suites against the test wiki
 ```
 
-The end-to-end scripts create pages prefixed "E2E"/"Proxy" in the wiki.
+The end-to-end suites never touch the real wiki: `npm run e2e` serves the test database with PHP's built-in server (`127.0.0.1:8788`) and runs a second gateway (`127.0.0.1:8789`, data in `gateway/data-test/`), and the scripts refuse to run otherwise. Each run deletes the pages it created (`E2E_KEEP=1` keeps them for debugging). Needs MySQL root access without a password (Laragon's default) and Mailpit.
+
+After restoring or recreating the wiki database, `npm run cli -- restore-accounts` recreates in MediaWiki every operator account the gateway knows.
 
 ## Licenses
 

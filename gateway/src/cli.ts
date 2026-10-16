@@ -6,6 +6,7 @@
  *   dump                        write downloadable dumps
  *   tidy-pages [--dry-run]      merge duplicate sections, drop empty placeholders (older pages)
  *   delete-test-pages <run id>  delete the pages an end-to-end test run created (the test scripts call it)
+ *   restore-accounts            recreate in MediaWiki every operator account the gateway knows (after a wiki restore)
  *   pack-client                 build client/ and publish its tarball at <site>/client/ (until it is on npm)
  *   operators                   list operator accounts
  *   set-trust <user> <level>    new | established | trusted | curator
@@ -166,6 +167,20 @@ async function main(): Promise<void> {
     case 'dump':
       for (const file of await createDumps(app, console.log)) console.log(`  ${file}`);
       break;
+    case 'restore-accounts': {
+      // Operator accounts live in the gateway (with the MediaWiki password it generated); this
+      // brings MediaWiki back in line after the wiki database was restored or recreated.
+      const mw = await app.sessions.gateway();
+      const ops = app.db.db.prepare('select id from operators where blocked_at is null order by id').all() as Array<{ id: number }>;
+      for (const { id } of ops) {
+        const op = app.db.operatorById(id)!;
+        const exists = (await mw.usersExist([op.username])).get(op.username);
+        if (!exists) await mw.createAccount(op.username, app.secrets.decrypt(op.mw_password_enc));
+        await setTrust(app.db, app.sessions, op, op.trust);
+        console.log(`  ${exists ? 'kept     ' : 'recreated'} ${op.username} (${op.trust})`);
+      }
+      break;
+    }
     case 'operators':
       for (const op of app.db.db.prepare('select id, username, trust, mode, writes, created_at, blocked_at from operators order by id').all()) {
         console.log(op);

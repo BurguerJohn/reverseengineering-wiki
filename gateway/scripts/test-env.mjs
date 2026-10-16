@@ -89,7 +89,7 @@ export async function emptyCopy(source, target, dbUser) {
     if (r.status !== 0) throw new Error(`mysqldump failed: ${r.stderr}`);
     return r.stdout;
   };
-  const schema = dump(['--no-data', '--skip-triggers', source]);
+  const schema = Buffer.from(String(dump(['--no-data', '--skip-triggers', source])).replace(/ AUTO_INCREMENT=\d+/g, ''));
   const keep = dump(['--no-create-info', source, 'updatelog', 'interwiki']);
   const host = String(spawnSync(mysqlBin, ['-uroot', '-N', '-e', `SELECT host FROM mysql.user WHERE user='${dbUser}' LIMIT 1`]).stdout).trim() || 'localhost';
   must(mysqlBin, ['-uroot', '-e', `DROP DATABASE IF EXISTS \`${target}\`; CREATE DATABASE \`${target}\` CHARACTER SET binary; GRANT ALL PRIVILEGES ON \`${target}\`.* TO '${dbUser}'@'${host}';`]);
