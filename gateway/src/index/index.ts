@@ -788,6 +788,28 @@ export class SearchIndex {
     return kinds?.length ? rows.filter((r) => kinds.includes(r.kind)) : rows;
   }
 
+  /**
+   * Subject pages a short name may refer to: "PE" for "Format:PE (Portable Executable)" (the name before or inside the
+   * parentheses), "DLL proxy" for "Technique:DLL proxy loading" (a word prefix), or any title containing it.
+   */
+  subjectsNamed(name: string): Array<{ title: string; via: 'title' | 'short name' | 'similar title' }> {
+    const n = name.trim().toLowerCase();
+    if (n.length < 2) return [];
+    const rows = this.db.prepare(`select title from pages where redirect_to is null
+      and type in ('software', 'library', 'format', 'platform', 'technique', 'tool') and instr(title, '/') = 0
+      and instr(lower(substr(title, instr(title, ':') + 1)), ?) > 0 limit 200`).all(n) as Array<{ title: string }>;
+    const out: Array<{ title: string; via: 'title' | 'short name' | 'similar title' }> = [];
+    for (const { title } of rows) {
+      const base = title.slice(title.indexOf(':') + 1).toLowerCase();
+      const outer = base.replace(/\s*\(([^)]*)\)\s*$/, '').trim();
+      const inner = /\(([^)]*)\)\s*$/.exec(base)?.[1]?.trim();
+      if (base === n) out.push({ title, via: 'title' });
+      else if (outer === n || inner === n) out.push({ title, via: 'short name' });
+      else if (new RegExp(`(?:^|[\\s(/-])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[\\s)/-])`).test(base) || base.startsWith(`${n} `)) out.push({ title, via: 'similar title' });
+    }
+    return out.sort((a, b) => ['title', 'short name', 'similar title'].indexOf(a.via) - ['title', 'short name', 'similar title'].indexOf(b.via)).slice(0, 5);
+  }
+
   /** Pages whose text contains a string (a repository URL), for "already listed on". */
   pagesMentioning(text: string, limit = 20): string[] {
     return (this.db.prepare('select distinct title from docs where instr(body, ?) > 0 limit ?').all(text, limit) as Array<{ title: string }>).map((r) => r.title);

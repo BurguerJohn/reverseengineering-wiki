@@ -136,10 +136,9 @@ export function exists(s: Services, args: { names: string[] }) {
       const page = s.index.page(t);
       if (page) found.set(page.redirect_to ?? t, page.redirect_to ? `alias ${t}` : 'title');
     }
-    for (const h of s.index.search({ query: name, types: [...SUBJECT_TYPES], limit: 5 }).hits) {
-      if (h.snippet === 'title match' && !found.has(h.title)) found.set(h.title, 'similar title');
-    }
+    for (const h of s.index.subjectsNamed(name)) if (!found.has(h.title)) found.set(h.title, h.via);
     const pages = [...found].map(([title, via]) => ({ title, type: typeOfTitle(title), via, summary: s.index.page(title)?.summary?.slice(0, 140) }));
+    // A short name ("PE") counts as existing; a similar title is shown for the agent to judge.
     return { name: raw, exists: pages.some((p) => p.via !== 'similar title'), pages: pages.length ? pages : undefined };
   });
   const missing = results.filter((r) => !r.exists).map((r) => r.name);

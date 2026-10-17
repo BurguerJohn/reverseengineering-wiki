@@ -82,7 +82,9 @@ export async function proposeFromRepo(s: Services, args: { url: string; commit?:
   }
   const mentioned = [...named.keys()].slice(0, 15);
   const subjects = args.subjects?.length ? args.subjects : mentioned.slice(0, 3);
-  const firstParagraph = readmeText.split(/\n\s*\n/).map((x) => x.replace(/^#+.*$/gm, '').replace(/\s+/g, ' ').trim()).find((x) => x.length > 40)?.slice(0, 300) ?? '';
+  const plain = (x: string) => x.replace(/^#+.*$/gm, '').replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/<[^>]+>/g, '').replace(/[*_`]/g, '').replace(/\s+/g, ' ').trim();
+  const firstParagraph = readmeText.split(/\n\s*\n/).map(plain).find((x) => x.length > 40 && /[a-z]{3,}\s+[a-z]{2,}/i.test(x))?.slice(0, 300) ?? '';
   const subject = subjects[0] ?? '<subject page>';
   const operations = [
     { tool: 'link_repo', arguments: { url: info.url, commit: info.commit, subjects: subjects.length ? subjects : ['<subject page>'], description: firstParagraph || 'TODO: what the repository is', tested_on: 'TODO: what you checked (or "repository survey")', tested_how: 'read' } },
