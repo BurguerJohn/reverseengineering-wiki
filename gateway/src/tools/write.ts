@@ -769,6 +769,11 @@ export async function addSymbols(s: Services, caller: Caller, args: { build: str
   const issues: string[] = [];
   args.symbols.forEach((rawInput, i) => {
     let raw = rawInput as Record<string, unknown>;
+    // A WebAssembly function index: kept in the map as its index, marked so scripts do not take it for an address.
+    if (raw && typeof raw === 'object' && typeof raw.wasm_func === 'number' && raw.rva === undefined && raw.va === undefined) {
+      const { wasm_func: index, ...rest } = raw;
+      raw = { ...rest, rva: `0x${(index as number).toString(16).toUpperCase()}`, overlay: 'wasm:func', kind: rest.kind ?? 'function' };
+    }
     if (raw && typeof raw === 'object' && raw.va !== undefined && raw.rva === undefined) {
       const va = hexToNumber(raw.va);
       const { va: _va, ...rest } = raw;

@@ -42,3 +42,33 @@ test('build scripts carry types and stay valid Python', async () => {
     assert.equal(py.status, 0, `${tool}: ${py.stderr}`);
   }
 });
+
+test('wasm-names writes a valid name section', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { mkdtempSync, writeFileSync, readFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const facts = [{ title: 'Fact:W/function/run @ 1', kind: 'function', status: 'claimed', level: 'build', applies_to: 'Build:W/1', data: JSON.stringify({ name: 'run', address: { kind: 'wasm', value: 'func:1' } }) }];
+  const map = [{ rva: 2, name: 'Game::Tick', kind: 'function', confidence: 'medium', title: 'Build:W/1/symbols/0', overlay: 'wasm:func', absolute: 0 }];
+  const b = { index: { resolveRedirect: (t: string) => t, page: () => ({ type: 'build' }), factsForBuild: () => facts, symbolsForBuild: () => map } } as unknown as Services;
+  const out = exportSymbols(b, { build: 'Build:W/1', tool: 'wasm-names' }) as any;
+  assert.equal(out.wasm_functions, 2);
+  assert.equal(out.symbols, 0, 'function indexes are not addresses');
+  // A module: one imported function (index 0) and two defined ones (1, 2).
+  const leb = (n: number) => { const o: number[] = []; do { let b = n & 0x7f; n >>>= 7; if (n) b |= 0x80; o.push(b); } while (n); return o; };
+  const str = (t: string) => [...leb(t.length), ...Buffer.from(t)];
+  const sec = (id: number, body: number[]) => [id, ...leb(body.length), ...body];
+  const body = [0, 0x0b];
+  const wasm = Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, ...sec(1, [1, 0x60, 0, 0]), ...sec(2, [1, ...str('env'), ...str('log'), 0, 0]),
+    ...sec(3, [2, 0, 0]), ...sec(10, [2, body.length, ...body, body.length, ...body])]);
+  const dir = mkdtempSync(join(tmpdir(), 'rewiki-wasm-'));
+  writeFileSync(join(dir, 'wasm_names.py'), out.script);
+  writeFileSync(join(dir, 'in.wasm'), wasm);
+  const py = spawnSync('python', ['-I', join(dir, 'wasm_names.py'), join(dir, 'in.wasm'), join(dir, 'out.wasm')]);
+  if (py.error) return; // no Python here
+  assert.equal(py.status, 0, String(py.stderr));
+  const named = readFileSync(join(dir, 'out.wasm'));
+  assert.ok(WebAssembly.validate(named));
+  const section = Buffer.from(WebAssembly.Module.customSections(new WebAssembly.Module(named), 'name')[0]).toString('latin1');
+  assert.ok(section.includes('run') && section.includes('Game::Tick'), section);
+});

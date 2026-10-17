@@ -66,7 +66,7 @@ const bytePattern = z.string().regex(/^(?:[0-9A-Fa-f]{2}|\?\?|\?)(?: (?:[0-9A-Fa
  * executables (segment:offset), console ROMs (bank:address), fixed-address images (va),
  * or raw positions in a file (file offset). PE builds keep using data.rva.
  */
-export const ADDRESS_KINDS = ['va', 'file', 'segmented', 'banked', 'hardware'] as const;
+export const ADDRESS_KINDS = ['va', 'file', 'segmented', 'banked', 'hardware', 'wasm'] as const;
 const ADDRESS_FORMAT: Record<(typeof ADDRESS_KINDS)[number], { re: RegExp; example: string }> = {
   va: { re: /^0x[0-9A-Fa-f]+$/, example: '0x80012345' },
   file: { re: /^0x[0-9A-Fa-f]+$/, example: '0x1A2B0' },
@@ -74,6 +74,8 @@ const ADDRESS_FORMAT: Record<(typeof ADDRESS_KINDS)[number], { re: RegExp; examp
   banked: { re: /^[0-9A-Fa-f]{1,4}:[0-9A-Fa-f]{1,8}$/, example: '03:8000' },
   // Fixed for every program of a platform: memory-mapped I/O, interrupt vectors, BIOS entry points.
   hardware: { re: /^0x[0-9A-Fa-f]+$/, example: '0xFF46' },
+  // WebAssembly: a function index (imported functions count first), as stack traces and the name section use it.
+  wasm: { re: /^func:\d+$/, example: 'func:123' },
 };
 
 export function checkAddress(address: unknown): string | null {

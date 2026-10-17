@@ -358,7 +358,7 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
   return { subject, build, facts: facts.length, warnings: warnings.length ? warnings : undefined, header: lines.join('\n') };
 }
 
-type SymbolTool = 'ghidra' | 'ida' | 'json' | 'sym';
+type SymbolTool = 'ghidra' | 'ida' | 'json' | 'sym' | 'wasm-names';
 
 /** A platform's fixed hardware addresses (memory-mapped I/O, vectors, BIOS calls), for every program on it. */
 function exportPlatformSymbols(s: Services, args: { platform: string; tool: SymbolTool }) {
@@ -604,6 +604,8 @@ export function exportSymbols(s: Services, args: { build?: string; platform?: st
   };
   const signatureOnly: Array<{ name: string; pattern: string; fact: string }> = [];
   const otherAddresses: Array<{ name: string; kind: string; value: string; fact: string }> = [];
+  // WebAssembly functions by index (facts: address func:N; symbol maps: wasm_func).
+  const wasmFuncs = new Map<number, { name: string; fact: string }>();
   for (const f of rows) {
     const data = JSON.parse(f.data);
     const rva = hexNum(data.rva);
@@ -612,6 +614,7 @@ export function exportSymbols(s: Services, args: { build?: string; platform?: st
     const typed = typing(name, f.kind, f.kind === 'function' ? data.prototype : data.type, f.kind === 'global' ? data.size : undefined);
     if (rva !== null) symbols.push({ rva, name, kind: f.kind, status: f.status, fact: f.title, ...typed });
     else if (va !== null) symbols.push({ rva: va, name, kind: f.kind, status: f.status, fact: f.title, absolute: true, ...typed });
+    else if (data.address?.kind === 'wasm' && /^func:\d+$/.test(String(data.address.value))) wasmFuncs.set(Number(String(data.address.value).slice(5)), { name, fact: f.title });
     else if (data.address && typeof data.address.value === 'string') otherAddresses.push({ name, kind: String(data.address.kind), value: data.address.value, fact: f.title });
     else if (typeof data.signature === 'string') signatureOnly.push({ name, pattern: data.signature, fact: f.title });
   }
@@ -619,6 +622,10 @@ export function exportSymbols(s: Services, args: { build?: string; platform?: st
   const byFact = new Set(symbols.map((x) => x.rva));
   let fromMap = 0;
   for (const m of s.index.symbolsForBuild(build)) {
+    if (m.overlay === 'wasm:func') {
+      if (!wasmFuncs.has(m.rva)) wasmFuncs.set(m.rva, { name: qualifiedName(m.name, 'rewiki_function'), fact: m.title });
+      continue;
+    }
     if (byFact.has(m.rva) || (m.kind !== 'function' && m.kind !== 'global' && m.kind !== 'vtable' && m.kind !== 'label')) continue;
     const kind = m.kind === 'label' ? 'global' : m.kind;
     const name = qualifiedName(m.name, `rewiki_${m.kind}`);
@@ -635,8 +642,101 @@ export function exportSymbols(s: Services, args: { build?: string; platform?: st
   ].join('\n');
   const head = `# ${HEADER_NOTE}\n# Build: ${comment(build)}\n# Generated: ${new Date().toISOString()}\n`;
 
+  const wasmList = [...wasmFuncs].sort((a, b) => a[0] - b[0]).map(([index, x]) => `    ${index}: ${ascii(x.name)},`).join('\n');
+  const wasmNote = wasmFuncs.size ? `\n# ${wasmFuncs.size} WebAssembly functions are named by index: export_symbols with tool "wasm-names" writes them into the module's name section.\n` : '';
   let script: string;
-  if (args.tool === 'sym') {
+  if (args.tool === 'wasm-names') {
+    script = `${head}# Writes the function names into the module's "name" custom section (names already there are kept
+# unless the wiki names the same index). Ghidra's wasm loader, wabt (wasm2wat), browsers and V8 stack traces read it.
+# Usage: python wasm_names.py <module.wasm> <out.wasm>
+import sys
+
+NAMES = {
+${wasmList}
+}
+
+
+def leb(n):
+    out = bytearray()
+    while True:
+        byte = n & 0x7F
+        n >>= 7
+        if n:
+            out.append(byte | 0x80)
+        else:
+            out.append(byte)
+            return bytes(out)
+
+
+def read_leb(data, i):
+    result, shift = 0, 0
+    while True:
+        byte = data[i]
+        i += 1
+        result |= (byte & 0x7F) << shift
+        shift += 7
+        if not byte & 0x80:
+            return result, i
+
+
+def vec_name(name):
+    raw = name.encode("utf-8")
+    return leb(len(raw)) + raw
+
+
+def parse_name_section(payload):
+    """Subsections of an existing name section: {id: bytes}; function names as a dict."""
+    subs, functions, i = {}, {}, 0
+    while i < len(payload):
+        sid = payload[i]
+        size, j = read_leb(payload, i + 1)
+        subs[sid] = payload[j:j + size]
+        i = j + size
+    if 1 in subs:
+        body = subs[1]
+        count, k = read_leb(body, 0)
+        for _ in range(count):
+            idx, k = read_leb(body, k)
+            n, k = read_leb(body, k)
+            functions[idx] = body[k:k + n].decode("utf-8", "replace")
+            k += n
+    return subs, functions
+
+
+def main(path, out_path):
+    data = open(path, "rb").read()
+    if data[:4] != bytes([0, 0x61, 0x73, 0x6D]):
+        sys.exit("%s is not a WebAssembly module" % path)
+    kept, subs, existing, i = [], {}, {}, 8
+    while i < len(data):
+        sid = data[i]
+        size, j = read_leb(data, i + 1)
+        end = j + size
+        if sid == 0:
+            n, k = read_leb(data, j)
+            if data[k:k + n] == b"name":
+                subs, existing = parse_name_section(data[k + n:end])
+                i = end
+                continue
+        kept.append(data[i:end])
+        i = end
+    names = dict(existing)
+    names.update(NAMES)
+    body = leb(len(names)) + b"".join(leb(idx) + vec_name(names[idx]) for idx in sorted(names))
+    subs[1] = body
+    payload = b"".join(bytes([sid]) + leb(len(subs[sid])) + subs[sid] for sid in sorted(subs))
+    content = vec_name("name") + payload
+    with open(out_path, "wb") as f:
+        f.write(data[:8] + b"".join(kept) + bytes([0]) + leb(len(content)) + content)
+    print("ReverseEngineering.wiki: %d function names written to %s (%d already there)" % (len(names), out_path, len(existing)))
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        sys.exit("usage: python wasm_names.py <module.wasm> <out.wasm>")
+    main(sys.argv[1], sys.argv[2])
+`;
+  } else if (args.tool === 'sym') {
     // bank:address name (RGBDS, BGB, mGBA and most retro debuggers): banked facts as they are.
     const banked = otherAddresses.filter((x) => x.kind === 'banked').map((x) => {
       const [bank, addr] = x.value.split(':');
@@ -645,7 +745,7 @@ export function exportSymbols(s: Services, args: { build?: string; platform?: st
     script = `; ${HEADER_NOTE}\n; Build: ${comment(build)}\n${banked.sort().join('\n')}\n`;
   } else if (args.tool === 'json') {
     const hex = (n: number) => `0x${n.toString(16).toUpperCase()}`;
-    script = JSON.stringify({ build, symbols: symbols.map((x) => ({ ...x, rva: x.absolute ? undefined : hex(x.rva), va: x.absolute ? hex(x.rva) : undefined })), signature_only: signatureOnly, other_addresses: otherAddresses }, null, 2);
+    script = JSON.stringify({ build, symbols: symbols.map((x) => ({ ...x, rva: x.absolute ? undefined : hex(x.rva), va: x.absolute ? hex(x.rva) : undefined })), wasm_functions: wasmFuncs.size ? [...wasmFuncs].sort((a, b) => a[0] - b[0]).map(([index, x]) => ({ index, ...x })) : undefined, signature_only: signatureOnly, other_addresses: otherAddresses }, null, 2);
   } else if (args.tool === 'ghidra') {
     script = `${head}# Run in Ghidra's Script Manager (Jython or PyGhidra) with the program open.
 # APPLY_TYPES also applies the prototypes and data types published with the names (import the subject's
@@ -699,7 +799,7 @@ for rva, name, kind, status, fact, absolute, ctype, decl, size in SYMBOLS:
             untyped.append("%s: %s" % (name, ctype or size))
 print("ReverseEngineering.wiki: applied %d symbols, %d with their type" % (len(SYMBOLS), typed))
 if untyped:
-    print("Types not applied (import the header first, or set them by hand): " + "; ".join(untyped[:50]))
+    print("Types not applied (import the header first, or set them by hand): " + "; ".join(untyped[:50]))${wasmNote}
 ${pySigs ? `\n# Not applied automatically (signature only, or a segmented, banked or file-offset address):\n${pySigs}\n` : ''}`;
   } else {
     script = `${head}# Run in IDA via File > Script file (IDAPython).
@@ -733,11 +833,11 @@ for rva, name, kind, status, fact, absolute, ctype, decl, size in SYMBOLS:
             untyped.append("%s: %s" % (name, decl or size))
 print("ReverseEngineering.wiki: applied %d symbols, %d with their type" % (len(SYMBOLS), typed))
 if untyped:
-    print("Types not applied (load the header first, or set them by hand): " + "; ".join(untyped[:50]))
+    print("Types not applied (load the header first, or set them by hand): " + "; ".join(untyped[:50]))${wasmNote}
 ${pySigs ? `\n# Not applied automatically (signature only, or a segmented, banked or file-offset address):\n${pySigs}\n` : ''}`;
   }
   return {
-    build, tool: args.tool, symbols: symbols.length, typed: typedCount, from_facts: symbols.length - fromMap, from_symbol_map: fromMap, signature_only: signatureOnly.length, other_addresses: otherAddresses.length, script,
+    build, tool: args.tool, symbols: symbols.length, typed: typedCount, wasm_functions: wasmFuncs.size || undefined, from_facts: symbols.length - fromMap, from_symbol_map: fromMap, signature_only: signatureOnly.length, other_addresses: otherAddresses.length, script,
     types_hint: typedCount ? `${typedCount} symbols carry a prototype or data type. Import the header (export_header with the build's software or library) first, so the types they name exist.` : undefined,
     warning: 'Review generated scripts before running. Names come from community facts (status claimed/verified) and the symbol map (status map:<confidence>).',
   };

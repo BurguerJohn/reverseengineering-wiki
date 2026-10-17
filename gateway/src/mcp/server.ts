@@ -27,7 +27,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.19';
+export const VERSION = '0.8.20';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -410,7 +410,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       platform: z.string().optional().describe('Platform: page, for its hardware addresses (I/O registers, vectors, BIOS calls)'),
       subject: z.string().optional().describe('A software, library or format page: a script that finds its signature facts in your binary'),
       also: z.array(z.string()).max(10).optional().describe('With subject: more pages whose signatures to include (a fork\'s parent library); the answer lists connected pages that have some'),
-      tool: z.enum(['ghidra', 'ida', 'json', 'sym']),
+      tool: z.enum(['ghidra', 'ida', 'json', 'sym', 'wasm-names']).describe('wasm-names: a Python script that writes a WebAssembly build\'s function names into the module\'s name section (read by Ghidra\'s wasm loader, wabt, browsers)'),
     },
     annotations: READ,
   }, handler((a: any) => exportSymbols(s, a)));
@@ -559,6 +559,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
         rva: z.string().optional().describe('RVA relative to the image base, e.g. 0x141230 (PE)'),
         va: z.string().optional().describe("Absolute address instead of rva, e.g. 0x80010DF4 (PlayStation, consoles, fixed images): relative to the build's image_base if it declares one, else kept absolute"),
         overlay: z.string().optional().describe('Overlay or segment, when several share the address'),
+        wasm_func: z.number().int().min(0).optional().describe('WebAssembly: the function index instead of an address (imported functions count first)'),
         name: z.string(),
         kind: z.enum(SYMBOL_KINDS),
         type: z.string().optional().describe('C prototype or type'),
