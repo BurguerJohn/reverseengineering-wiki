@@ -119,6 +119,10 @@ export interface FactDoc extends FactInput {
   created_by: string;
   created_at: string;
   verifications: Array<z.infer<typeof verificationSchema>>;
+  /** Corrections (edit_fact): who changed the claim, data or scope, and why. */
+  revisions?: Array<{ by: string; date: string; summary: string; changed: string[] }>;
+  /** Verifications of an earlier version, kept when a correction reset the status. */
+  earlier_verifications?: Array<z.infer<typeof verificationSchema> & { of_revision: number }>;
 }
 
 /**

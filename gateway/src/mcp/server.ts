@@ -226,7 +226,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('search', {
     title: 'Search the wiki',
-    description: 'Full-text + exact-identifier search over articles, topic pages, facts, code, builds, symbol maps and notes. Every term must match (match="any" to relax). Hex constants, symbol names, file names, RTTI names and hashes are matched exactly. One result per page, with the matching sections listed. Paged: pass next_cursor back as cursor.',
+    description: 'Full-text + exact-identifier search over articles, topic pages, facts, code, builds, symbol maps and notes. query "*" with types lists every page of those types by title (browse what exists). Every term must match (match="any" to relax). Hex constants, symbol names, file names, RTTI names and hashes are matched exactly. One result per page, with the matching sections listed. Paged: pass next_cursor back as cursor.',
     inputSchema: {
       query: z.string().min(1),
       types: z.array(z.enum([...SUBJECT_TYPES, 'fact', 'code', 'build', 'symbols', 'notes'])).optional(),
@@ -403,6 +403,23 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     annotations: WRITE,
   }, (c, a) => write.addFact(s, c, a));
 
+  registerWrite('edit_fact', {
+    title: 'Correct a fact',
+    description: 'Correct a published fact in place: its claim, data, scope, confidence or related pages, or add evidence. The title (kind, subject, key) stays; for a different subject or kind, add_fact a new one and verify the old one as refuted. Changing the claim, data or scope makes it "claimed" again, keeping earlier verifications apart. Pass the revision you read as base_revision.',
+    inputSchema: { dry_run: DRY_RUN,
+      target: z.string().describe('The Fact: page'),
+      base_revision: z.number().int(),
+      summary: z.string().min(5).describe('What you corrected and why (the evidence)'),
+      claim: z.string().min(10).max(2000).optional(),
+      data: z.record(z.string(), z.unknown()).optional().describe('The whole new data object (fields by kind: fact_data in /tools.json)'),
+      scope: z.object({ level: z.enum(['technique', 'platform', 'format', 'library', 'tool', 'software', 'build']), applies_to: z.string(), observed_in: z.array(z.string()).optional() }).optional(),
+      add_evidence: z.array(evidenceItem).optional(),
+      confidence: z.enum(['low', 'medium', 'high']).optional(),
+      related: z.array(z.string()).optional(),
+    },
+    annotations: WRITE,
+  }, (c, a) => write.editFact(s, c, a));
+
   registerWrite('verify', {
     title: 'Verify a fact or code page',
     description: 'Report what happened when you used a fact (confirmed/refuted/partial) or ran code (ran/broken/partial). A confirmation from another operator makes a fact "verified".',
@@ -440,7 +457,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       type: z.enum(SUBJECT_TYPES),
       title: z.string().describe('Official full name, e.g. "Earth Defense Force 5"; or "<subject>/<topic>" for a topic subpage'),
       summary: z.string().describe('1–3 sentences'),
-      infobox: z.record(z.string(), z.string()).optional().describe('developer, publisher, vendor, engine, uses ([[Library:X]] links), platforms, versions, magic, extensions, endianness, license, website'),
+      infobox: z.record(z.string(), z.string()).optional().describe('developer, publisher, vendor, engine, uses ([[Library:X]] links), formats ([[Format:X]] links: the file formats it reads or writes), platforms, versions, magic, extensions, endianness, license, website'),
       body: z.string().describe('Markdown with ## sections'),
       aliases: z.array(z.string()).optional(),
       confirm_new: z.boolean().optional(),

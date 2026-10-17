@@ -157,7 +157,7 @@ export const INFOBOX_FIELDS = [
 /** Fields whose values are lists of subject links; they form the subject graph. */
 export const RELATION_FIELDS: Record<string, string> = {
   engine: 'uses', uses: 'uses', developer: 'developed_by', publisher: 'published_by', vendor: 'made_by',
-  platforms: 'runs_on', used_by: 'used_by',
+  platforms: 'runs_on', used_by: 'used_by', formats: 'uses_format',
 };
 
 export function renderInfobox(type: string, fields: Infobox): string {

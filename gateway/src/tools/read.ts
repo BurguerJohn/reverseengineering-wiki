@@ -56,6 +56,12 @@ function truncate(text: string, maxTokens: number): { text: string; truncated: b
 export function search(s: Services, args: { query: string; types?: string[]; subject?: string; build?: string; status?: string; limit?: number; cursor?: string; match?: 'all' | 'any' }) {
   const offset = offsetOf(args.cursor);
   const limit = args.limit ?? 10;
+  if (args.query.trim() === '*') {
+    // Browse: every page of the given types (subjects by default), by title.
+    const types = args.types?.length ? args.types : ['software', 'library', 'format', 'platform', 'technique', 'tool'];
+    const listed = s.index.listPages(types, offset, Math.min(limit, 50));
+    return { query: '*', types, total: listed.total, hits: listed.hits, next_cursor: offset + listed.hits.length < listed.total ? String(offset + listed.hits.length) : undefined };
+  }
   const { hits, total } = s.index.search({
     ...args,
     limit,
@@ -343,6 +349,8 @@ export async function read(s: Services, args: { title: string; section?: string;
     facts.by_kind[f.kind] = (facts.by_kind[f.kind] ?? 0) + 1;
   }
   const topics = isSubject ? s.index.topicsOf(root).filter((t) => t.title !== title) : [];
+  // What a game's formats, platforms and libraries already hold: often more than the game page.
+  const general = isSubject && root === title ? s.index.generalNeighbors(title) : [];
   return {
     ...base,
     section: sectionName,
@@ -354,6 +362,7 @@ export async function read(s: Services, args: { title: string; section?: string;
     content: wrap(sectionName ? `${title}#${sectionName}` : title, page.revid, text),
     truncated: truncated ? 'Content truncated: request one section from the outline, or raise max_tokens.' : undefined,
     facts: factRows.length ? { total: factRows.length, ...facts, list_with: `related title="${title}" relation=has_facts (filter by kind/status, paged)` } : undefined,
+    general_pages: general.length ? general : undefined,
     open_questions: openQuestions && !/Nothing documented yet/.test(openQuestions.body) ? wikitextToMarkdown(openQuestions.body) : undefined,
   };
 }

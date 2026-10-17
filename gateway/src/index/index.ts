@@ -609,6 +609,34 @@ export class SearchIndex {
       .all(...names, ...names.map((n) => `%${JSON.stringify(n).slice(1, -1)}%`)) as any[];
   }
 
+  /**
+   * The general pages (formats, platforms, libraries, techniques, tools) a subject is connected to,
+   * in either direction (infobox fields or links), with how much they hold.
+   */
+  generalNeighbors(title: string): Array<{ title: string; type: string; summary: string; facts: number; code: number }> {
+    const rows = this.db.prepare(`select dst as other from edges where src = ? and rel in ('uses', 'uses_format', 'runs_on', 'links', 'used_by')
+      union select src as other from edges where dst = ? and rel in ('uses', 'uses_format', 'runs_on', 'links', 'used_by')`).all(title, title) as Array<{ other: string }>;
+    const out: Array<{ title: string; type: string; summary: string; facts: number; code: number }> = [];
+    for (const r of rows) {
+      const target = this.resolveRedirect(r.other);
+      const page = this.page(target);
+      if (!page || target === title || !['format', 'platform', 'library', 'technique', 'tool'].includes(page.type) || out.some((o) => o.title === target)) continue;
+      const facts = (this.db.prepare('select count(*) as n from facts where subject = ?').get(target) as { n: number }).n;
+      const code = (this.db.prepare("select count(*) as n from edges where dst = ? and rel = 'code_for'").get(target) as { n: number }).n;
+      out.push({ title: target, type: page.type, summary: page.summary.slice(0, 160), facts, code });
+    }
+    return out.slice(0, 20);
+  }
+
+  /** Every page of some types, by title (search with query "*"). */
+  listPages(types: string[], offset: number, limit: number): { hits: Array<{ title: string; type: string; summary: string; status: string | null; revision: number }>; total: number } {
+    const placeholders = types.map(() => '?').join(', ');
+    const total = (this.db.prepare(`select count(*) as n from pages where redirect_to is null and type in (${placeholders})`).get(...types) as { n: number }).n;
+    const hits = this.db.prepare(`select title, type, summary, status, revision from pages where redirect_to is null and type in (${placeholders}) order by title limit ? offset ?`)
+      .all(...types, limit, offset) as any[];
+    return { hits: hits.map((h) => ({ ...h, summary: String(h.summary ?? '').slice(0, 200) })), total };
+  }
+
   factsForSubject(subject: string, kinds?: string[]): Array<{ title: string; kind: string; status: string; level: string; applies_to: string; data: string }> {
     const rows = this.db.prepare('select title, kind, status, level, applies_to, data from facts where subject = ?').all(subject) as any[];
     return kinds?.length ? rows.filter((r) => kinds.includes(r.kind)) : rows;

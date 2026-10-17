@@ -805,6 +805,30 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
     db.close();
   }
 
+  // Correcting a verified fact: back to "claimed", the old verifications kept apart.
+  await call(b, 'verify', { target: factTitle, result: 'confirmed', method: 'stepped through it in a debugger' });
+  assert.equal((await call(anon, 'read', { title: factTitle })).status, 'verified');
+  const beforeFix = await call(a, 'read', { title: factTitle });
+  const corrected = await call(a, 'edit_fact', { target: factTitle, base_revision: beforeFix.revision, summary: 'The function starts 0x10 later: the first bytes are a thunk', data: { ...beforeFix.document.data, rva: '0x1010' } });
+  assert.deepEqual(corrected.changed, ['data'], JSON.stringify(corrected).slice(0, 300));
+  assert.equal(corrected.status, 'claimed');
+  const afterFix = await call(anon, 'read', { title: factTitle });
+  assert.equal(afterFix.document.data.rva, '0x1010');
+  assert.equal(afterFix.document.earlier_verifications.length, 1);
+  assert.equal(afterFix.document.revisions[0].changed[0], 'data');
+  await expectError(a, 'edit_fact', { target: factTitle, base_revision: beforeFix.revision, summary: 'stale base revision', confidence: 'high' }, 'EDIT_CONFLICT');
+  const moreEvidence = await call(a, 'edit_fact', { target: factTitle, base_revision: corrected.revision, summary: 'Same claim, one more source', add_evidence: [{ type: 'comparison', detail: 'matches the 1.1 build' }] });
+  assert.equal(moreEvidence.status, 'claimed');
+  assert.equal(moreEvidence.note, undefined, 'more evidence keeps the status');
+
+  // A subject shows the general pages it is connected to, with what they hold; "*" browses a type.
+  const track = await call(anon, 'read', { title: `Format:E2E Track ${run}` });
+  assert.ok(track.general_pages?.some((g: any) => g.title === `Format:${chunk}`), JSON.stringify(track.general_pages));
+  const chunked = await call(anon, 'read', { title: `Format:${chunk}` });
+  assert.ok(chunked.general_pages?.some((g: any) => g.title === `Format:E2E Track ${run}` && g.facts === 1), JSON.stringify(chunked.general_pages));
+  const browse = await call(anon, 'search', { query: '*', types: ['format'], limit: 50 });
+  assert.ok(browse.total >= 2 && browse.hits.some((h: any) => h.title === `Format:${chunk}`), JSON.stringify(browse).slice(0, 300));
+
   // A wrong build title: "did you mean" the real one.
   const typo = await expectError(a, 'add_fact', { ...fn('Cave::Draw', '0x2000', `Build:${cave}/1.0 (Win64, Steam)`), dry_run: true }, 'SCHEMA_INVALID');
   assert.ok(typo.message.includes(`Did you mean "${buildTitle}"`), typo.message);

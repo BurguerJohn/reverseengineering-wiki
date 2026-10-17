@@ -210,6 +210,65 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   });
 }
 
+// ---- correcting a fact ----------------------------------------------------------------
+
+/**
+ * Corrects a published fact in place (the page title, kind and subject stay). A change of claim,
+ * data or scope sends it back to "claimed": earlier confirmations were about the old version, so
+ * they move to earlier_verifications. More evidence or another confidence keeps the status.
+ */
+export async function editFact(s: Services, caller: Caller, args: {
+  target: string; base_revision: number; summary: string;
+  claim?: string; data?: Record<string, unknown>; scope?: { level: string; applies_to: string; observed_in?: string[] };
+  add_evidence?: Array<{ type: string; detail: string }>; confidence?: 'low' | 'medium' | 'high'; related?: string[];
+}) {
+  const op = requireWriter(s, caller);
+  const t = title(s, args.target, ['fact']);
+  const page = await currentPage(s, t);
+  if (!page) throw new ToolError('NOT_FOUND', `"${t}" does not exist. add_fact creates facts.`);
+  if (page.revid && page.revid !== args.base_revision) {
+    throw new ToolError('EDIT_CONFLICT', `${t} changed since revision ${args.base_revision} (now ${page.revid}). Read it again and re-apply your correction.`, { current_revision: page.revid });
+  }
+  const doc = JSON.parse(page.content) as FactDoc;
+  const changed: string[] = [];
+  if (args.claim !== undefined && args.claim !== doc.claim) { doc.claim = args.claim; changed.push('claim'); }
+  if (args.data !== undefined && JSON.stringify(args.data) !== JSON.stringify(doc.data)) { doc.data = args.data; changed.push('data'); }
+  if (args.scope !== undefined) {
+    const scope = { ...args.scope, observed_in: args.scope.observed_in ?? doc.scope.observed_in ?? [] };
+    if (scope.level === 'build' || SHA256_REF.test(scope.applies_to.trim())) scope.applies_to = await buildRef(s, scope.applies_to);
+    if (JSON.stringify(scope) !== JSON.stringify(doc.scope)) { doc.scope = scope as FactDoc['scope']; changed.push('scope'); }
+  }
+  if (args.add_evidence?.length) { doc.evidence = [...doc.evidence, ...args.add_evidence as FactDoc['evidence']]; changed.push('evidence'); }
+  if (args.confidence && args.confidence !== doc.confidence) { doc.confidence = args.confidence; changed.push('confidence'); }
+  if (args.related) { doc.related = args.related; changed.push('related'); }
+  if (!changed.length) throw new ToolError('BAD_REQUEST', 'Nothing to change: give claim, data, scope, add_evidence, confidence or related.');
+  const parsed = factInputSchema.safeParse(doc);
+  if (!parsed.success) throw new ToolError('SCHEMA_INVALID', `The corrected fact does not match rewiki.fact/1: ${issueList(parsed.error.issues)}.`, { issues: parsed.error.issues });
+  const problems = checkFactData(doc.kind, doc.data);
+  if (problems.length) throw new ToolError('SCHEMA_INVALID', problems.join(' '), { problems });
+  assertClean([...scanValue({ claim: doc.claim, data: doc.data, evidence: doc.evidence }, 'fact'), ...scanText(args.summary, 'summary')]);
+  const substantive = changed.some((c) => ['claim', 'data', 'scope'].includes(c));
+  const previous = doc.status;
+  if (substantive && doc.status !== 'claimed') {
+    doc.earlier_verifications = [...(doc.earlier_verifications ?? []), ...(doc.verifications ?? []).map((v) => ({ ...v, of_revision: page.revid }))];
+    doc.verifications = [];
+    doc.status = 'claimed';
+  }
+  doc.revisions = [...(doc.revisions ?? []), { by: op.username, date: now(), summary: shortSummary(args.summary, 200), changed }];
+  const r = await mwEdit(s, op, {
+    title: t, text: JSON.stringify(doc, null, 2), baserevid: page.revid || undefined, nocreate: true, tags: ['rewiki-fact'],
+    summary: `Correct fact (${changed.join(', ')}): ${shortSummary(args.summary, 150)}`,
+  });
+  await afterWrite(s, op, [t]);
+  return result(s, t, r.newrevid, {
+    changed, status: doc.status,
+    note: substantive && previous !== 'claimed'
+      ? `The claim changed, so the fact is "claimed" again (it was "${previous}"); its earlier verifications are kept in earlier_verifications.`
+      : undefined,
+    warnings: unknownFactFields(doc.kind, doc.data).length ? [`Non-standard data fields kept: ${unknownFactFields(doc.kind, doc.data).join(', ')}.`] : undefined,
+  });
+}
+
 // ---- verify ----------------------------------------------------------------------
 
 export async function verify(s: Services, caller: Caller, args: { target: string; result: string; method: string; build?: string; notes?: string }) {
