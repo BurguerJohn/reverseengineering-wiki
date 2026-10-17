@@ -778,6 +778,33 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   assert.equal(behavior.warnings, undefined, JSON.stringify(behavior.warnings));
   assert.equal(behavior.quota.cost, 1, 'dry runs show what publishing would cost');
 
+  // Pages of the same batch, and pages that only mention another one, are not duplicates of it.
+  const chunk = `E2E Chunked ${run}`;
+  const twoFormats = await call(a, 'batch', { operations: [
+    { tool: 'create_page', arguments: { type: 'format', title: chunk, summary: 'A fictional container used by the track format of the same batch.', body: `## Users\n\nE2E Track ${run} files, E2E Track ${run} saves and every E2E Track ${run} design use it.` } },
+    { tool: 'create_page', arguments: { type: 'format', title: `E2E Track ${run}`, summary: 'A fictional track design format stored in the container.', body: `## Container\n\nSee [[Format:${chunk}]].` } },
+  ] });
+  assert.equal(twoFormats.operations, 2, JSON.stringify(twoFormats).slice(0, 400));
+  // A struct naming a type from another page and a descriptive field name still makes a header that compiles.
+  await call(a, 'add_fact', { kind: 'struct', subject: `Format:E2E Track ${run}`, claim: 'The fictional track header starts with an object entry and a kind byte.', scope: { level: 'format', applies_to: 'all versions' },
+    data: { name: 'TrackHeader', size: '0x11', fields: [{ offset: '0x0', size: 16, type: 'ObjectEntry', name: 'entry' }, { offset: '0x10', size: 1, type: 'uint8_t', name: 'kind (0 = coaster, 1 = flat ride)' }] },
+    evidence: [{ type: 'documentation', detail: 'fictional test data' }], confidence: 'low' });
+  const header = (await call(anon, 'export_header', { subject: `Format:E2E Track ${run}` })).header;
+  assert.match(header, /uint8_t entry\[0x10\]; \/\* ObjectEntry \(defined on another page\)/, header);
+  assert.match(header, /uint8_t kind; \/\* kind \(0 = coaster, 1 = flat ride\)/, header);
+  // The dry-run quota follows the account's current trust, not the one it had when the session started.
+  {
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(new URL('../data-test/gateway.sqlite', import.meta.url));
+    const before = (db.prepare('select trust from operators where username = ?').get(nameA) as any).trust;
+    const other = before === 'trusted' ? 'established' : 'trusted';
+    db.prepare('update operators set trust = ? where username = ?').run(other, nameA);
+    const dryQuota = (await call(a, 'add_note', { subject: cave, body: 'Only checked: the quota must use the current trust.', confidence: 'low', dry_run: true })).quota;
+    assert.equal(dryQuota.limit, other === 'trusted' ? 1000 : 200, JSON.stringify(dryQuota));
+    db.prepare('update operators set trust = ? where username = ?').run(before, nameA);
+    db.close();
+  }
+
   // A wrong build title: "did you mean" the real one.
   const typo = await expectError(a, 'add_fact', { ...fn('Cave::Draw', '0x2000', `Build:${cave}/1.0 (Win64, Steam)`), dry_run: true }, 'SCHEMA_INVALID');
   assert.ok(typo.message.includes(`Did you mean "${buildTitle}"`), typo.message);

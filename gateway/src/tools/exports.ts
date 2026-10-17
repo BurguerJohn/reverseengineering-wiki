@@ -33,6 +33,15 @@ function hexNum(raw: unknown): number | null {
 }
 
 const C_TYPE = /^(?:const\s+)?(?:unsigned\s+|signed\s+)?[A-Za-z_][\w]*(?:\s*\*+)?$/;
+const BUILTIN = /^(?:const\s+)?(?:unsigned\s+|signed\s+)?(?:u?int(?:8|16|32|64)_t|u?intptr_t|size_t|char|short|int|long|long long|float|double|void|bool|_Bool|wchar_t|BYTE|WORD|DWORD|QWORD|BOOL)\b/;
+
+/** A field name that is a description ("type (0 = saved game)"): a short identifier, the rest as a comment. */
+function fieldName(raw: unknown): { name: string; rest?: string } {
+  const text = String(raw ?? '').trim();
+  if (/^[A-Za-z_]\w*$/.test(text)) return { name: text };
+  const first = /[A-Za-z_]\w*/.exec(text)?.[0] ?? '';
+  return { name: ident(first, ''), rest: text };
+}
 
 function cType(raw: unknown): string | null {
   const s = String(raw ?? '').trim();
@@ -60,6 +69,9 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
   const lines = [`/* ${HEADER_NOTE}`, ` * Subject: ${comment(subject)}${build ? `\n * Build: ${comment(build)}` : ''}`,
     ` * Generated: ${new Date().toISOString()} */`, '#pragma once', '#include <stdint.h>', ''];
   const skipped: string[] = [];
+  // Types defined in this header; others come from other pages and must still compile here.
+  const defined = new Set(facts.map((f) => { try { const d = JSON.parse(f.data); return ident(f.kind === 'vtable' ? `${d.class}_vtbl` : d.name, ''); } catch { return ''; } }));
+  const forward = new Set<string>();
   for (const f of facts) {
     const data = JSON.parse(f.data);
     lines.push(`/* [${f.status}] ${comment(f.title)} */`);
@@ -67,7 +79,10 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
       const name = ident(data.name, 'UnnamedStruct');
       const size = hexNum(data.size);
       const fields = (Array.isArray(data.fields) ? data.fields : [])
-        .map((x: any) => ({ offset: hexNum(x.offset), size: hexNum(x.size), type: cType(x.type), name: ident(x.name, ''), notes: x.notes }))
+        .map((x: any) => {
+          const named = fieldName(x.name);
+          return { offset: hexNum(x.offset), size: hexNum(x.size), type: cType(x.type), rawType: String(x.type ?? ''), name: named.name, notes: [named.rest, x.notes].filter(Boolean).join('; ') };
+        })
         .filter((x: any) => x.offset !== null)
         .sort((a: any, b: any) => a.offset - b.offset);
       lines.push(`typedef struct ${name} {`);
@@ -79,9 +94,20 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
           lines.push(`    /* overlapping field at 0x${field.offset.toString(16).toUpperCase()} skipped: ${comment(field.name)} */`);
           continue;
         }
-        const fieldName = field.name || `field_${field.offset.toString(16).toUpperCase()}`;
-        const decl = field.type ? `${field.type} ${fieldName};` : `uint8_t ${fieldName}[0x${(field.size ?? 1).toString(16).toUpperCase()}];`;
-        lines.push(`    /* 0x${field.offset.toString(16).toUpperCase().padStart(2, '0')} */ ${decl}${field.notes ? ` /* ${comment(field.notes)} */` : ''}`);
+        const fieldId = field.name || `field_${field.offset.toString(16).toUpperCase()}`;
+        let type = field.type;
+        let note = field.notes;
+        const base = type?.replace(/^const\s+/, '').replace(/\s*\*+$/, '');
+        if (type && base && !BUILTIN.test(type) && !defined.has(base)) {
+          if (type.includes('*')) forward.add(base);
+          else {
+            // A type from another page, by value: its bytes, with the type named in a comment.
+            note = [`${base} (defined on another page)`, note].filter(Boolean).join('; ');
+            type = null;
+          }
+        }
+        const decl = type ? `${type} ${fieldId};` : `uint8_t ${fieldId}[0x${(field.size ?? 1).toString(16).toUpperCase()}];`;
+        lines.push(`    /* 0x${field.offset.toString(16).toUpperCase().padStart(2, '0')} */ ${decl}${note ? ` /* ${comment(note)} */` : ''}`);
         cursor = field.offset + (field.size ?? (field.type ? 0 : 1));
       }
       if (size !== null && size > cursor) lines.push(`    uint8_t _pad_${cursor.toString(16).toUpperCase()}[0x${(size - cursor).toString(16).toUpperCase()}];`);
@@ -106,6 +132,8 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
     }
   }
   if (!facts.length) lines.push('/* No struct, enum or vtable facts for this subject yet. Add them with add_fact. */');
+  // Pointers to types from other pages: forward declarations right after the includes.
+  if (forward.size) lines.splice(6, 0, ...[...forward].map((t) => `typedef struct ${t} ${t}; /* defined on another page */`), '');
   return { subject, build, facts: facts.length, header: lines.join('\n') };
 }
 

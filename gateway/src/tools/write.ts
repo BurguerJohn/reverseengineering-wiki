@@ -117,6 +117,19 @@ function issueList(issues: Array<{ path: PropertyKey[]; message: string }>): str
   return issues.slice(0, 8).map((i) => `${i.path.map(String).join('.') || 'arguments'}: ${i.message}`).join('; ');
 }
 
+const LANGUAGE_NAMES: Record<string, string> = {
+  python: 'Python', py: 'Python', javascript: 'JavaScript', js: 'JavaScript', typescript: 'TypeScript', ts: 'TypeScript',
+  c: 'C', cpp: 'C++', 'c++': 'C++', cxx: 'C++', csharp: 'C#', 'c#': 'C#', cs: 'C#', rust: 'Rust', go: 'Go', lua: 'Lua',
+  java: 'Java', kotlin: 'Kotlin', ruby: 'Ruby', php: 'PHP', powershell: 'PowerShell', bash: 'Bash', shell: 'Shell',
+  asm: 'Assembly', assembly: 'Assembly', kaitai: 'Kaitai Struct', ksy: 'Kaitai Struct', idc: 'IDC', imhex: 'ImHex',
+};
+
+/** "python" → "Python": code page titles use the language's usual name. */
+function languageName(raw: string): string {
+  const known = LANGUAGE_NAMES[raw.trim().toLowerCase()];
+  return known ?? (raw.trim() ? raw.trim()[0].toUpperCase() + raw.trim().slice(1) : raw);
+}
+
 function result(s: Services, t: string, revision: number | undefined, extra: Record<string, unknown> = {}) {
   return { title: t, revision, url: link(s, t), ...extra };
 }
@@ -389,8 +402,12 @@ export async function createPage(s: Services, caller: Caller, args: {
   if (!args.confirm_new) {
     const name = baseName(t);
     const candidates = new Set<string>();
+    // Similar names only: a page that merely mentions this one a lot is not a duplicate, and pages
+    // made earlier in the same batch are the writer's own (the dry run cannot see them in the index).
+    const sameBatch = batchContext.getStore()?.created;
     for (const hit of s.index.search({ query: name, types: [args.type], limit: 8 }).hits) {
-      if (hit.score >= 15 || similarName(baseName(hit.title), name)) candidates.add(hit.title);
+      if (sameBatch?.has(hit.title)) continue;
+      if (hit.snippet === 'title match' || similarName(baseName(hit.title), name)) candidates.add(hit.title);
     }
     for (const alias of aliasTitles) {
       const target = s.index.page(alias);
@@ -671,7 +688,7 @@ export async function addCode(s: Services, caller: Caller, args: {
     baseRev = page.revid;
   } else {
     if (!args.name) throw new ToolError('BAD_REQUEST', 'name is required for a new Code page (e.g. "SGO parser").');
-    t = normalizeTitle(`Code:${baseName(subjects[0])}/${titleSegment(args.name, 80)} (${titleSegment(args.language, 20)})`);
+    t = normalizeTitle(`Code:${baseName(subjects[0])}/${titleSegment(args.name, 80)} (${titleSegment(languageName(args.language), 20)})`);
     if (await currentPage(s, t)) {
       throw new ToolError('DUPLICATE_SUSPECTED', `"${t}" already exists. Read it, then update it with title and base_revision.`, { existing: t, url: link(s, t) });
     }
@@ -712,7 +729,7 @@ export async function linkRepo(s: Services, caller: Caller, args: {
     `checked ${new Date().toISOString().slice(0, 10)}`,
     info.archived ? 'archived' : null,
     info.lastCommit ? `last activity ${info.lastCommit.slice(0, 10)}` : null,
-    info.binaryReleaseAssets ? 'WARNING: release has binary assets (not linked; review before use)' : null,
+    info.binaryReleaseAssets ? 'Note: the latest release ships binaries; the wiki links only the source, never the binaries' : null,
     info.license === 'none' ? 'no license: not reusable' : null,
   ].filter(Boolean).join('; ');
   const entry = renderRepo({ url: info.url, commit: info.commit, license: info.license, description: args.description, tested_on: args.tested_on, checked });

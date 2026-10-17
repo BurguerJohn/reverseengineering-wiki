@@ -26,7 +26,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.7.5';
+export const VERSION = '0.7.6';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -142,13 +142,45 @@ function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Ca
     const { dry_run: dryRun, review_id: reviewId, ...rest } = args ?? {};
     const mode = caller.operator ? s.db.operatorById(caller.operator.id)?.mode : undefined;
     const reviewed = !!review && mode === 'review';
-    if (dryRun) return dryRunOf(s, caller, fn, rest, reviewed);
+    if (dryRun) return compactPreview(await dryRunOf(s, caller, fn, rest, reviewed));
     if (!reviewed) return fn(caller, rest);
     const how = await approve(s, review!, caller.operator!.id, name, rest, await dryRunOf(s, caller, fn, rest, true), typeof reviewId === 'string' ? reviewId : undefined, extra);
     const out = await fn({ ...caller, approved: how }, rest);
     // The agent does not see the client's prompt: tell it the approval happened.
     return { ...out, review: how === 'client' ? 'Approved by your operator in their MCP client (that prompt is shown to them, not to you).' : 'Approved by your operator on the review page.' };
   });
+}
+
+const PREVIEW_PER_PAGE = 3000;
+const PREVIEW_TOTAL = 24000;
+
+/**
+ * Dry-run answers can be huge (a batch previews every page and alias). The agent gets each preview
+ * cut at a few thousand characters and alias redirects folded; the operator's review page and
+ * approval prompt use the whole text.
+ */
+function compactPreview(out: Record<string, unknown>): Record<string, unknown> {
+  const previews = (out.preview ?? []) as Preview[];
+  let budget = PREVIEW_TOTAL;
+  let cut = false;
+  const redirects = previews.filter((p) => /^#REDIRECT/i.test((p.content ?? '').trim()));
+  const kept = previews.filter((p) => !redirects.includes(p)).map((p) => {
+    const take = (text?: string) => {
+      if (text === undefined) return undefined;
+      const limit = Math.max(0, Math.min(PREVIEW_PER_PAGE, budget));
+      budget -= Math.min(text.length, limit);
+      if (text.length <= limit) return text;
+      cut = true;
+      return `${text.slice(0, limit)}\n… [${text.length - limit} more characters: everything is stored as previewed; your operator's review shows the whole text]`;
+    };
+    return { ...p, content: take(p.content), diff: take(p.diff) };
+  });
+  return {
+    ...out,
+    preview: kept,
+    aliases_previewed: redirects.length ? redirects.map((p) => p.title) : undefined,
+    preview_truncated: cut || undefined,
+  };
 }
 
 /** reviewed: review mode on a remote MCP client, where an approved call costs one write. */
@@ -158,7 +190,8 @@ async function dryRunOf(s: Services, caller: Caller, fn: (caller: Caller, args: 
     const out = await fn({ ...caller, dryRun: true, previews }, rest);
     // A dry run validates whatever the quota: it uses none. It only says whether publishing would fit now.
     const needed = reviewed ? 1 : typeof out.operations === 'number' ? out.operations : 1;
-    const q = caller.operator ? quota(s.db, caller.operator) : null;
+    const fresh = caller.operator ? s.db.operatorById(caller.operator.id) ?? caller.operator : null;
+    const q = fresh ? quota(s.db, fresh) : null;
     const fits = !q || q.left >= needed;
     return {
       dry_run: true, would_publish: fits,
@@ -357,7 +390,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       subject: z.string(),
       claim: z.string(),
       scope: z.object({
-        level: z.enum(['technique', 'platform', 'library', 'software', 'build']),
+        level: z.enum(['technique', 'platform', 'format', 'library', 'tool', 'software', 'build']).describe('The most general level where it holds: technique, platform, format, library, tool, software or build (addresses: build)'),
         applies_to: z.string().describe('What it holds for; for build-level facts a Build: title or the SHA-256 of one of its files (also one registered earlier in the same batch)'),
         observed_in: z.array(z.string()).optional(),
       }),

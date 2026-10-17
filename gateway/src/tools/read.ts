@@ -70,7 +70,7 @@ export function search(s: Services, args: { query: string; types?: string[]; sub
     total,
     hits: hits.map((h) => ({ ...h, score: Math.round(h.score * 100) / 100 })),
     next_cursor: offset + hits.length < total ? String(offset + hits.length) : undefined,
-    hint: total ? undefined : `Nothing found with all of these terms.${args.match === 'any' ? '' : ' Try fewer terms, other names, match="any",'} or identify with raw evidence; if you learn it, add it with add_note.`,
+    hint: total ? undefined : `${args.match === 'any' ? 'Nothing found with any of these terms.' : 'Nothing found with all of these terms. Try fewer terms, other names, match="any",'} or identify with raw evidence; if you learn it, add it with add_note.`,
   };
 }
 
