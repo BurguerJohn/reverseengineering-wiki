@@ -1,6 +1,6 @@
 {
   "name": "rewiki-gateway",
-  "version": "0.8.24",
+  "version": "0.8.25",
   "private": true,
   "description": "ReverseEngineering.wiki gateway: MCP server, accounts, policy scanner and search index in front of MediaWiki",
   "license": "MIT-0",

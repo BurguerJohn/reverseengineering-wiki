@@ -155,6 +155,18 @@ export const FACT_DATA: Record<FactKind, { required: string[]; one_of?: string[]
   behavior: { required: [], optional: ['trigger', 'effect', 'condition', 'rva', 'rva_end', 'address', 'signature', 'function', 'setting'], example: { trigger: 'the Witch is shot by another survivor', effect: 'she switches target after a 5 s timer', function: 'Witch::OnTakeDamage', rva: '0x2A41C0', rva_end: '0x2A4230', setting: { name: 'z_witch_retarget_time', default: '5' } } },
 };
 
+/** The fields of every fact kind as a Markdown table, for REWiki:Fact reference (generated, so it never drifts). */
+export function factDataTable(): string {
+  const cell = (list: string[] | undefined) => (list?.length ? list.map((f) => `\`${f}\``).join(', ') : '');
+  const rows = Object.entries(FACT_DATA).map(([kind, f]) => `| \`${kind}\` | ${cell(f.required) || '(free claim)'} | ${cell(f.one_of)} | ${cell(f.optional)} | \`${JSON.stringify(f.example).replace(/\|/g, '\\|')}\` |`);
+  return ['| Kind | Required | At least one of | Optional | Example |', '|------|----------|-----------------|----------|---------|', ...rows].join('\n');
+}
+
+/** Placeholders in design documents published as wiki pages and MCP resources. */
+export function expandDoc(text: string): string {
+  return text.replace('{{FACT_DATA_TABLE}}', () => factDataTable());
+}
+
 /** "0x88", "136" or 136 → 136; anything else (ranges, words) → null. */
 export function sizeValue(v: unknown): number | null {
   if (typeof v === 'number' && Number.isInteger(v) && v >= 0) return v;

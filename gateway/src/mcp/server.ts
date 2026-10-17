@@ -17,7 +17,7 @@ import * as read from '../tools/read.ts';
 import * as write from '../tools/write.ts';
 import { importSymbols, SYMBOL_FILE_FORMATS } from '../tools/symbolimport.ts';
 import { exportHeader, exportSymbols } from '../tools/exports.ts';
-import { FACT_KINDS, FACT_DATA, CODE_KINDS, SYMBOL_KINDS, SYMBOL_SOURCES, MAX_SYMBOLS_PER_CALL } from '../wiki/pages.ts';
+import { FACT_KINDS, FACT_DATA, CODE_KINDS, SYMBOL_KINDS, SYMBOL_SOURCES, MAX_SYMBOLS_PER_CALL, expandDoc } from '../wiki/pages.ts';
 
 /** "function: name, rva|address|signature (one at least), [prototype, …]" for every fact kind. */
 const FACT_DATA_SUMMARY = Object.entries(FACT_DATA).map(([kind, f]) => `${kind}: ${[...f.required, ...(f.one_of ? [`${f.one_of.join('|')} (at least one)`] : [])].join(', ') || '(free)'}${f.optional.length ? `, optional ${f.optional.join(', ')}` : ''}`).join('; ');
@@ -27,7 +27,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.24';
+export const VERSION = '0.8.25';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -66,14 +66,14 @@ const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: true
 
 const evidenceItem = z.object({
   type: z.enum(['string_xref', 'byte_pattern', 'rtti', 'symbol', 'xref', 'runtime_test', 'documentation', 'debugger', 'comparison', 'source', 'other']),
-  detail: z.string().describe('How you know: the string referenced, the pattern, the test you ran…'),
-  repo: z.string().optional().describe('For type source: the repository URL'),
-  commit: z.string().optional().describe('The commit hash it was read at (7-40 hex digits; a tag name goes in detail)'),
-  path: z.string().optional().describe('File path in the repository, e.g. "WinQuake/bspfile.h"'),
-  lines: z.string().optional().describe('Lines or ranges, e.g. "120-148" or "26-34, 98-101"'),
+  detail: z.string().describe('How you know (the test, the string, the source)'),
+  repo: z.string().optional(),
+  commit: z.string().optional().describe('Hash, not a tag'),
+  path: z.string().optional().describe('One file'),
+  lines: z.string().optional().describe('"120-148" or "26-34, 98-101"'),
 });
 
-const DRY_RUN = z.boolean().optional().describe('Check everything (titles, schema, duplicates, policy, conflicts) and report what would happen, without publishing or using quota');
+const DRY_RUN = z.boolean().optional().describe('Check everything and show what would be stored, without publishing or using quota');
 
 const REVIEW_ID = z.string().optional().describe('Review mode, when the server answered REVIEW_REQUIRED: the review_id it gave, repeated with the same arguments after your user approved at review_url')
 
@@ -278,7 +278,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('search', {
     title: 'Search the wiki',
-    description: 'Full-text + exact-identifier search over articles, topic pages, facts, code, builds, symbol maps and notes. query "*" with types lists every page of those types by title (browse what exists). Every term must match (match="any" to relax). Hex constants, symbol names, file names, RTTI names and hashes are matched exactly. One result per page, with the matching sections listed. Paged: pass next_cursor back as cursor.',
+    description: 'Full-text and exact-identifier search (hex constants, symbol, file and RTTI names, hashes) over articles, facts, code, builds, symbol maps and notes; every term must match (match "any" relaxes). query "*" with types lists every page of those types. Paged: pass next_cursor back as cursor.',
     inputSchema: {
       query: z.string().min(1),
       types: z.array(z.enum([...SUBJECT_TYPES, 'fact', 'code', 'build', 'symbols', 'notes'])).optional(),
@@ -404,7 +404,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('export_symbols', {
     title: 'Export a symbol script',
-    description: 'Ghidra or IDA script, JSON, or an RGBDS-style .sym file (bank:address name, for banked ROMs and emulators) naming every known function/global/vtable: of an exact build (facts plus its symbol map; get it from lookup_binary); of a platform\'s fixed hardware addresses (platform: "Platform:Game Boy"); or, for any subject (subject: "Software:Doom", a library or format), a script that searches YOUR binary for every published byte signature of that subject and names what it finds once (the binary never leaves your machine).',
+    description: 'Ghidra/IDA script (or JSON) naming known functions and globals, with types: build = an exact binary (from lookup_binary); subject = a script that finds the subject\'s byte signatures in YOUR binary (nothing leaves your machine); platform = its hardware addresses. tool "sym" for banked ROMs, "wasm-names" for WebAssembly. Details: REWiki:Fact reference.',
     inputSchema: {
       build: z.string().optional().describe('Build: page (or a file SHA-256 via lookup_binary)'),
       platform: z.string().optional().describe('Platform: page, for its hardware addresses (I/O registers, vectors, BIOS calls)'),
@@ -461,7 +461,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
         applies_to: z.string().describe('What it holds for; for build-level facts a Build: title or the SHA-256 of one of its files (also one registered earlier in the same batch)'),
         observed_in: z.array(z.string()).optional(),
       }),
-      data: z.record(z.string(), z.unknown()).describe(`Fields by kind (examples and schemas per kind: fact_data in /tools.json). ${FACT_DATA_SUMMARY}. Library types (FT_Long, DWORD, j_common_ptr): a typedef fact {name, type} each, so headers use them. Layouts that differ by ABI: data.abi ("win64", "lp64", "ilp32") on struct and typedef facts, one fact per ABI; export_header takes abi. magic relative_to: what offset counts from when not the file start (a table, a section). Struct fields: {offset, size, type, name, condition? (a field present only when a flag is set: "flags & 0x08"), notes?, bits?: [{bit: "0" or "4-5", name, notes?}]}; the last field may be "T[]" or "T[count_field]" (entries after a header, a trailing name: a C flexible array member; data.size is then the fixed part or "variable"). Addresses: rva (PE, "0x141230") or address {kind: va|file|segmented|banked, value: "0x80012345" | "0x1A2B0" | "1000:5AFA" | "03:8000"} on a build; fixed hardware addresses (I/O registers, vectors, BIOS calls) as address {kind: "hardware", value: "0xFF46"} at scope.level platform. struct with unknown exact size: size_min and/or size_max. Signatures (data.signature, or a signature fact's pattern): the name goes at match address + signature_offset (offset on a signature fact), negative when the pattern starts inside the object; multiple: true names every match (thunks); a variant (an optional endbr64 prefix) is a second signature fact with the same name; string facts may use * for a variable part ("Copyright (C) 1991-* The libjpeg-turbo Project"), and identify matches versions and years with other digits anyway; a signature fact takes a name for its label. One address per fact; many names: add_symbols. Any kind also takes test_vectors [{input, expected}] (hashes, ciphers, checksums) and samples [{url, sha256, note}] (public files others can rerun the check on) or [{code: "Code:…", file, args, sha256}] (a sample a published script generates; file names the script on a multi-file code page).`),
+      data: z.record(z.string(), z.unknown()).describe(`Fields by kind: ${FACT_DATA_SUMMARY}. Addresses, struct fields, enum values, signature offsets, test_vectors and samples: read REWiki:Fact reference (rewiki://guide/facts). A dry run names missing and unknown fields.`),
       key: z.string().min(2).max(60).optional().describe('Short title for the fact page, e.g. "RNG seed" (default: the name/value/bytes, else the first clause of the claim). MediaWiki shows "_" as a space in titles; data keeps identifiers as written.'),
       evidence: z.array(evidenceItem).min(1),
       confidence: z.enum(['low', 'medium', 'high']),
@@ -474,7 +474,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('edit_fact', {
     title: 'Correct a fact',
-    description: 'Correct a published fact in place: its claim, data, scope, confidence or related pages, or add evidence. The title (kind, subject, key) stays; for a different subject or kind, add_fact a new one and verify the old one as refuted. Changing the claim, data or scope makes it "claimed" again, keeping earlier verifications apart. Pass the revision you read as base_revision.',
+    description: 'Correct a published fact in place (claim, data, scope, evidence, confidence, related, topic); the title stays. Changing claim, data, scope or replacing evidence makes it "claimed" again. Pass the revision you read as base_revision.',
     inputSchema: { dry_run: DRY_RUN,
       target: z.string().describe('The Fact: page'),
       base_revision: z.number().int(),
@@ -506,7 +506,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('edit_section', {
     title: 'Edit one section',
-    description: 'Change one section (Markdown): the whole new body, or small changes with replace (each old text must occur exactly once in the section as read returns it), which is safer for fixing a sentence. Pass the revision you read as base_revision (revision ids count edits of the whole wiki); changes to other sections since then are merged (the answer says so), only a change to the same section is a conflict. Removing >30% needs a reason. Missing sections are created. The answer shows the diff of the section. Link a section as [[Page#Section]]. Unverified claims are welcome when marked as such ("Unverified:") with how to test them. When a section grows past ~1500 words the answer suggests split_section.',
+    description: 'Change one section (Markdown): the whole body, or replace [{old, new}] to fix a sentence. Pass the revision you read as base_revision; other sections changed since then are merged, only the same section conflicts. Removing >30% needs a reason; missing sections are created; the answer shows the diff. Mark unproven claims "Unverified:" with how to test them.',
     inputSchema: { dry_run: DRY_RUN,
       title: z.string(),
       section: z.string().describe('Heading, "Summary" for the lead, or "Infobox" with infobox'),
@@ -524,7 +524,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('create_page', {
     title: 'Create a subject or topic page',
-    description: 'New article for a software, library, format, platform, technique or tool (standard sections added, duplicates checked). A title with one slash, like "Earth Defense Force 5/Weapons", creates a topic subpage of an existing subject instead: no infobox, linked from the parent\'s Topics section; it lives in the parent\'s namespace (type must match the parent). Use topics when one subject has a lot to say about one area. summary: 1-3 sentences, at least 20 characters.',
+    description: 'New article for a software, library, format, platform, technique or tool (standard sections, duplicates checked). "<subject>/<topic>" creates a topic subpage of an existing subject (same type, no infobox). summary: 1-3 sentences.',
     inputSchema: { dry_run: DRY_RUN,
       type: z.enum(SUBJECT_TYPES),
       title: z.string().describe('Official full name, e.g. "Earth Defense Force 5"; or "<subject>/<topic>" for a topic subpage'),
@@ -553,7 +553,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('add_symbols', {
     title: 'Add symbols to a build\'s symbol map',
-    description: `Bulk names for one build (up to ${MAX_SYMBOLS_PER_CALL} per call), e.g. from your Ghidra/IDA project: functions, globals, vtables, labels at RVAs. Same name again = confirmation; a different name replaces the old one only with higher confidence, otherwise it is reported as a conflict. For a few important, explained names use add_fact instead (evidence, verification).`,
+    description: `Bulk names for one build (up to ${MAX_SYMBOLS_PER_CALL} per call) from your Ghidra/IDA project: rva, va or wasm_func each, with kind, confidence, source, and type/size when known. The same name again confirms it; a different name wins only with higher confidence (else a conflict is reported). Explained names deserve add_fact.`,
     inputSchema: { dry_run: DRY_RUN,
       build: z.string().describe('Build: page (register_build first)'),
       symbols: z.array(z.object({
@@ -576,7 +576,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('import_symbols', {
     title: 'Import a decompilation symbol file',
-    description: `A decompilation project's symbol file, read from its repository at a pinned commit and added to a build's symbol map (source "decompilation"; up to 50,000 names, ${MAX_SYMBOLS_PER_CALL} per write). Formats: linker lists and splat symbol_addrs.txt ("func_80012345 = 0x80012345; // type:func size:0x40"), nm output ("00401136 T main"), address/name pairs. Addresses are read as va (absolute; relative to the build's image_base when it declares one). The dry run reads the file and checks everything. Only names, addresses, sizes and data types are taken (never code or comments), so a repository without a license is accepted too; the build page records the repository, commit, path and license.`,
+    description: `A decompilation project's symbol file (splat symbol_addrs.txt and linker lists, nm output, address/name pairs) read from its repository at a pinned commit into a build's symbol map: names, addresses, sizes and types only, never code (repositories without a license too). Up to 50,000 names, ${MAX_SYMBOLS_PER_CALL} per write; the dry run reads and checks the file.`,
     inputSchema: { dry_run: DRY_RUN,
       build: z.string().describe('Build: page the names belong to (the exact binary the decompilation matches)'),
       url: z.string().describe('Repository URL (github.com, gitlab.com, codeberg.org)'),
@@ -592,7 +592,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('add_code', {
     title: 'Publish code',
-    description: 'Publish code you wrote (scripts, hooks, parsers, headers, format specs) as a Code page, licensed MIT-0. New pages are titled "Code:<first subject>/<name> (<Language>)" (the dry run lists the exact title). To update, pass title + base_revision.',
+    description: 'Publish code you wrote (scripts, parsers, headers, format specs) as a Code page, MIT-0, titled "Code:<first subject>/<name> (<Language>)" and listed on its subjects. To update: title + base_revision.',
     inputSchema: { dry_run: DRY_RUN,
       name: z.string().optional().describe('For new pages: what it does, e.g. "SGO parser"'),
       title: z.string().optional().describe('Existing Code: page to update'),
@@ -626,7 +626,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('register_build', {
     title: 'Register a build',
-    description: 'Create a Build: page, titled "Build:<software>/<version> (<platform>, <distribution>)" (the dry run lists it), from file hashes (for consoles: the ROM or executable hashes; SHA-1/MD5 accepted) so address facts can be attached to an exact binary. Hashes and metadata only, never the file. Facts can then refer to it by its title or by a file\'s SHA-256 (in a batch too). Without the file, a partial identity (size + PE timestamp or version text) is accepted and marked as such.',
+    description: 'Create a Build: page ("Build:<software>/<version> (<platform>, <distribution>)") from file hashes, never the file, so address facts and symbol maps attach to an exact binary. SHA-256 preferred; SHA-1/MD5/CRC32 as ROM databases publish them; without the file, size + PE timestamp or version text (partial identity). Facts can refer to it by title or by a file\'s SHA-256.',
     inputSchema: { dry_run: DRY_RUN,
       software: z.string().describe('Software: page; or a Library: page for a library binary on its own (a DLL)'),
       version: z.string(),
@@ -684,7 +684,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('batch', {
     title: 'Several writes at once',
-    description: 'Up to 50 writes in one call, e.g. a new page with its build, facts and code. They run in a safe order (pages, topics, builds, then facts/code/notes/symbols, then edits, then reviews), so later operations may refer to pages created earlier in the same batch (builds also by a file\'s SHA-256). With dry_run, all of them are checked and previewed together and every failing operation is reported at once; in review mode that means one approval for the whole batch. A real run stops at the first error; the error lists what was already published in completed (with titles and revisions). A real batch larger than the remaining hourly quota is refused whole before anything runs. Keep one call under ~20 KB of arguments: send large code pages with add_code on their own.',
+    description: 'Up to 50 writes in one call (a page with its build, facts and code), run in dependency order so later operations can use what earlier ones create. dry_run checks all of them and reports every failure at once (one approval in review mode); a real run stops at the first error and says what was published. Refused whole when over the hourly quota. Keep a call under ~20 KB.',
     inputSchema: {
       dry_run: DRY_RUN,
       quiet: z.boolean().optional().describe('With dry_run: list the pages that would be written without their contents (smaller answers for large batches)'),
@@ -703,7 +703,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('publish_checked', {
     title: 'Publish what a dry run checked',
-    description: 'Publish exactly what an earlier dry run (of any write tool or batch) checked, by the check_id it returned, without resending the arguments. Good for 30 minutes, for the same account. Small fixes (a line of a large code file, a sentence) go in amend, without resending anything. A batch dry run with failures also returns a check_id: pass replace with the corrected arguments of the failing operations (by number) and dry_run true to check again.',
+    description: 'Publish exactly what a dry run (of any write tool or batch) checked, by its check_id, without resending (30 minutes, same account). replace swaps whole operations of a batch; amend fixes small texts; with dry_run true it checks again.',
     inputSchema: { check_id: z.string(), dry_run: DRY_RUN,
       replace: z.record(z.string(), z.record(z.string(), z.unknown())).optional().describe('Batches only: {"3": {corrected arguments of operation 3}}; the tool stays the same'),
       quiet: z.boolean().optional().describe('With dry_run: list the pages without their contents'),
@@ -944,7 +944,7 @@ function registerAccountTools(s: Services, server: McpServer, caller: Caller, ac
 
 function docText(file: string): string {
   try {
-    return readFileSync(resolve(REPO_DIR, 'design', file), 'utf8');
+    return expandDoc(readFileSync(resolve(REPO_DIR, 'design', file), 'utf8'));
   } catch {
     return '';
   }
@@ -955,6 +955,7 @@ function withResources(server: McpServer): McpServer {
     ['content-policy', 'rewiki://policy/content', 'Content policy', () => docText('05-content-policy.md'), 'text/markdown'],
     ['contributing', 'rewiki://guide/contributing', 'Contributor guide for agents', () => docText('06-contributor-guide.md'), 'text/markdown'],
     ['knowledge-model', 'rewiki://guide/knowledge-model', 'Knowledge model: namespaces, the generality ladder, facts, code', () => docText('02-knowledge-model.md'), 'text/markdown'],
+    ['facts', 'rewiki://guide/facts', 'Fact reference: fields per kind, addresses, structs, enums, signatures, symbol maps, exports', () => docText('07-fact-reference.md'), 'text/markdown'],
   ];
   for (const [name, uri, title, load, mimeType] of resources) {
     server.registerResource(name, uri, { title, mimeType }, async () => ({ contents: [{ uri, mimeType, text: load() }] }));
