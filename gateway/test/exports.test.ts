@@ -74,3 +74,25 @@ test('wasm-names writes a valid name section', async () => {
   const section = Buffer.from(WebAssembly.Module.customSections(new WebAssembly.Module(named), 'name')[0]).toString('latin1');
   assert.ok(section.includes('run') && section.includes('Game::Tick'), section);
 });
+
+test('scan writes a standalone file scanner', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const facts = [
+    { title: 'Fact:N/signature/check', kind: 'signature', status: 'claimed', level: 'format', applies_to: 'all', data: JSON.stringify({ pattern: 'DE AD ?? EF', matches: 'header check', name: 'hdr_check' }) },
+    { title: 'Fact:N/magic/first', kind: 'magic', status: 'claimed', level: 'format', applies_to: 'all', data: JSON.stringify({ bytes: '4E 75 6C 6C', offset: 'firstheader+8', meaning: 'Null signature' }) },
+  ];
+  const sc = { index: { resolveRedirect: (t: string) => t, page: () => ({ type: 'format' }), factsForSubject: (_: string, kinds?: string[]) => facts.filter((f) => !kinds || kinds.includes(f.kind)), generalNeighbors: () => [] } } as unknown as Services;
+  const out = exportSymbols(sc, { subject: 'Format:N', tool: 'scan' }) as any;
+  const dir = mkdtempSync(join(tmpdir(), 'rewiki-scan-'));
+  writeFileSync(join(dir, 'scan.py'), out.script);
+  writeFileSync(join(dir, 'sample.bin'), Buffer.from([0, 0, 0xde, 0xad, 0x01, 0xef, 0, 0x4e, 0x75, 0x6c, 0x6c]));
+  const py = spawnSync('python', ['-I', join(dir, 'scan.py'), join(dir, 'sample.bin')], { encoding: 'utf8' });
+  if (py.error) return; // no Python here
+  assert.equal(py.status, 0, py.stderr);
+  assert.match(py.stdout, /hdr_check\s+0x2 /);
+  assert.match(py.stdout, /magic Null signature\s+0x7 /);
+  assert.match(py.stdout, /2 of 2 patterns found/);
+});

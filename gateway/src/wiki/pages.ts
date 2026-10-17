@@ -144,7 +144,7 @@ export interface FactDoc extends FactInput {
 export const FACT_DATA: Record<FactKind, { required: string[]; one_of?: string[]; optional: string[]; example: Record<string, unknown> }> = {
   function: { required: ['name'], one_of: ['rva', 'address', 'signature'], optional: ['prototype', 'calling_convention', 'size', 'rva_end', 'signature_offset', 'multiple'], example: { name: 'Player::TakeDamage', rva: '0x141230', signature: '48 89 5C 24 ?? 57 48 83 EC 20', prototype: 'void __fastcall(Player*, float)' } },
   global: { required: ['name', 'type'], one_of: ['rva', 'address', 'signature'], optional: ['size', 'signature_offset', 'multiple'], example: { name: 'g_GameState', type: 'GameState*', rva: '0x2F1A80' } },
-  struct: { required: ['name', 'fields'], one_of: ['size', 'size_min'], optional: ['size_max', 'alignment', 'abi'], example: { name: 'Weapon', size: '0x88', fields: [{ offset: '0x0', size: 8, type: 'void*', name: 'vtable' }, { offset: '0x8', size: 1, type: 'uint8_t', name: 'kind', notes: '0 = rifle, 1 = shotgun' }, { offset: '0x9', size: 1, type: 'uint8_t', name: 'flags', bits: [{ bit: '0', name: 'is_loaded' }, { bit: '4-5', name: 'palette', notes: 'CGB only' }] }] } },
+  struct: { required: ['name', 'fields'], one_of: ['size', 'size_min'], optional: ['size_max', 'alignment', 'abi', 'variant'], example: { name: 'Weapon', size: '0x88', fields: [{ offset: '0x0', size: 8, type: 'void*', name: 'vtable' }, { offset: '0x8', size: 1, type: 'uint8_t', name: 'kind', notes: '0 = rifle, 1 = shotgun' }, { offset: '0x9', size: 1, type: 'uint8_t', name: 'flags', bits: [{ bit: '0', name: 'is_loaded' }, { bit: '4-5', name: 'palette', notes: 'CGB only' }] }] } },
   vtable: { required: ['class', 'slots'], one_of: ['rva', 'address', 'rtti'], optional: [], example: { class: 'Weapon', rtti: '.?AVWeapon@@', rva: '0x1D3E00', slots: [{ index: 0, name: '~Weapon' }] } },
   enum: { required: ['name', 'values'], optional: ['underlying_type'], example: { name: 'WeaponClass', values: { 0: 'AssaultRifle', 1: 'Shotgun' } } },
   typedef: { required: ['name', 'type'], optional: ['abi'], example: { name: 'FT_Long', type: 'int32_t', abi: 'win64' } },
@@ -282,7 +282,8 @@ export function factKey(fact: FactInput): string {
   if (fact.key?.trim()) return fact.key.trim();
   const d = fact.data;
   const pick = KEY_FIELDS[fact.kind].map((f) => d[f]).find((v) => typeof v === 'string' && v.trim()) as string | undefined;
-  const abi = typeof d.abi === 'string' && d.abi.trim() && pick ? ` (${d.abi.trim()})` : '';
+  const layout = typeof d.abi === 'string' && d.abi.trim() ? d.abi : typeof d.variant === 'string' && d.variant.trim() ? d.variant : '';
+  const abi = layout && pick ? ` (${layout.trim()})` : '';
   return shortLabel(pick ? `${pick}${abi}` : fact.claim);
 }
 

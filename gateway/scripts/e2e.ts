@@ -1177,6 +1177,12 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const stamped = await call(anon, 'identify', { strings: [`z${run}: 2024-08-13 11:22:33 1e33`] });
   assert.equal(stamped.candidates[0]?.subject, `Library:E2E Lib ${run}`, JSON.stringify(stamped).slice(0, 400));
 
+  // PE section names as identify evidence.
+  const libNow = await call(anon, 'read', { title: `Library:E2E Lib ${run}` });
+  await call(a, 'edit_section', { title: `Library:E2E Lib ${run}`, section: 'Identification', body: `Its loader adds a \`.z${run}\` section.`, base_revision: libNow.revision, summary: 'fictional section name' });
+  const bySection = await call(anon, 'identify', { sections: [`.z${run}`] });
+  assert.equal(bySection.candidates[0]?.subject, `Library:E2E Lib ${run}`, JSON.stringify(bySection).slice(0, 400));
+
   // 64-bit enum values stay exact; value ranges; size_t compiles; amend fixes a sentence without resending.
   await call(a, 'add_fact', { kind: 'enum', subject: `Library:E2E Lib ${run}`, claim: 'Fictional 64-bit filter ids and a control-byte range.', scope: { level: 'library', applies_to: 'all versions' },
     data: { name: 'E2eFilter', values: { '0x4000000000000001': 'E2E_FILTER_A', '0x4000000000000002': 'E2E_FILTER_B', '0x80-0x9F': 'E2E_CHUNK_RUN' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });

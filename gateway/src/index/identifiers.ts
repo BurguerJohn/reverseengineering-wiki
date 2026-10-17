@@ -184,6 +184,7 @@ export interface Evidence {
   imports?: string[];
   exports?: string[];
   symbols?: string[];
+  sections?: string[];
   rtti?: string[];
   patterns?: string[];
 }
@@ -216,6 +217,11 @@ export function evidenceTokens(e: Evidence): Array<Identifier & { input: string;
       if (name) out.push({ kind: 'symbol', token: name, input: s, weight });
     }
   };
+  // Section names (".ndata", "UPX0") are written in prose as strings or names.
+  for (const n of e.sections ?? []) {
+    out.push({ kind: 'string', token: normalizeString(n), input: n, weight: 2.5 });
+    out.push({ kind: 'symbol', token: normalizeSymbol(n), input: n, weight: 2.5 });
+  }
   symbols(e.imports, 1);
   symbols(e.exports, 2);
   symbols(e.symbols, 2);

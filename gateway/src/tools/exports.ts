@@ -22,8 +22,12 @@ function qualifiedName(raw: unknown, fallback: string): string {
   return s && /[A-Za-z_]/.test(s) ? s : fallback;
 }
 
-function comment(text: unknown): string {
-  return String(text ?? '').replace(/[^\x20-\x7e]/g, '?').replace(/\*\//g, '* /').slice(0, 160);
+function comment(text: unknown, max = 400): string {
+  const t = String(text ?? '').replace(/[^\x20-\x7e]/g, '?').replace(/\*\//g, '* /');
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max - 3);
+  const space = cut.lastIndexOf(' ');
+  return `${space > max * 0.6 ? cut.slice(0, space) : cut}...`;
 }
 
 function hexNum(raw: unknown): number | null {
@@ -175,7 +179,7 @@ function cleanTitle(raw: string, allowed: readonly PageType[]): string {
   }
 }
 
-export function exportHeader(s: Services, args: { subject: string; build?: string; abi?: string; also?: string[] }) {
+export function exportHeader(s: Services, args: { subject: string; build?: string; abi?: string; variant?: string; also?: string[] }) {
   sIndex = s.index;
   const subject = s.index.resolveRedirect(cleanTitle(args.subject, SUBJECT_TYPES));
   const build = args.build ? normalizeTitle(args.build) : null;
@@ -186,9 +190,9 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
     .filter((f) => f.status !== 'rejected');
   const warnings: string[] = [];
   // One layout per name: the ABI asked for, else the one without an ABI, else the first (with a warning).
-  const abiOf = (f: { data: string }) => { try { const a = JSON.parse(f.data).abi; return typeof a === 'string' ? a.trim().toLowerCase() : ''; } catch { return ''; } };
+  const abiOf = (f: { data: string }) => { try { const d = JSON.parse(f.data); const a = d.abi ?? d.variant; return typeof a === 'string' ? a.trim().toLowerCase() : ''; } catch { return ''; } };
   const nameOf = (f: { kind: string; data: string }) => { try { const d = JSON.parse(f.data); return `${f.kind === 'typedef' ? 'typedef' : 'type'}:${d.name ?? d.class}`; } catch { return f.kind; } };
-  const wanted = args.abi?.trim().toLowerCase();
+  const wanted = (args.abi ?? args.variant)?.trim().toLowerCase();
   const abis = [...new Set(all.map(abiOf).filter(Boolean))].sort();
   const groups = new Map<string, typeof all>();
   for (const f of all) groups.set(nameOf(f), [...(groups.get(nameOf(f)) ?? []), f]);
@@ -395,7 +399,7 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
   return { subject, build, facts: facts.length, warnings: warnings.length ? warnings : undefined, header: lines.join('\n') };
 }
 
-type SymbolTool = 'ghidra' | 'ida' | 'json' | 'sym' | 'wasm-names';
+type SymbolTool = 'ghidra' | 'ida' | 'json' | 'sym' | 'wasm-names' | 'scan';
 
 /** A platform's fixed hardware addresses (memory-mapped I/O, vectors, BIOS calls), for every program on it. */
 function exportPlatformSymbols(s: Services, args: { platform: string; tool: SymbolTool }) {
@@ -479,7 +483,12 @@ function exportSignatureScan(s: Services, args: { subject: string; tool: SymbolT
   // Connected libraries and formats with signatures of their own (a fork's parent library).
   const connected = s.index.generalNeighbors(subject).filter((n) => !also.includes(n.title))
     .map((n) => ({ subject: n.title, signatures: signaturesOf(s, n.title).length })).filter((n) => n.signatures > 0);
-  return signatureScript(s, { subject, also, sigs, connected, tool: args.tool });
+  const magics = [subject, ...also].flatMap((x) => s.index.factsForSubject(x, ['magic']).filter((f) => f.status !== 'rejected').flatMap((f) => {
+    const d = JSON.parse(f.data);
+    const bytes = typeof d.bytes === 'string' && /^(?:[0-9A-Fa-f]{2}|\?\??)(?:\s+(?:[0-9A-Fa-f]{2}|\?\??))+$/.test(d.bytes.trim()) ? d.bytes.trim().toUpperCase().replace(/\?\??/g, '??') : null;
+    return bytes ? [{ meaning: String(d.meaning ?? f.title.split('/').pop()), pattern: bytes, where: String(d.offset ?? '?') + (d.relative_to ? ` of ${d.relative_to}` : ''), fact: f.title }] : [];
+  }));
+  return signatureScript(s, { subject, also, sigs, connected, tool: args.tool, magics });
 }
 
 function signaturesOf(s: Services, subject: string): Signature[] {
@@ -503,13 +512,48 @@ function signaturesOf(s: Services, subject: string): Signature[] {
   return sigs;
 }
 
-function signatureScript(s: Services, args: { subject: string; also: string[]; sigs: Signature[]; connected: Array<{ subject: string; signatures: number }>; tool: SymbolTool }) {
+function signatureScript(s: Services, args: { subject: string; also: string[]; sigs: Signature[]; connected: Array<{ subject: string; signatures: number }>; tool: SymbolTool; magics: Array<{ meaning: string; pattern: string; where: string; fact: string }> }) {
   const { subject, sigs } = args;
   const ascii = (x: string) => JSON.stringify(x.replace(/[^\x20-\x7e]/g, '?'));
   const list = sigs.map((x) => `    (${ascii(x.name)}, ${ascii(x.pattern)}, ${ascii(x.kind)}, ${ascii(x.status)}, ${ascii(x.fact)}, ${x.offset}, ${x.multiple ? 'True' : 'False'}),`).join('\n');
   const head = `# ${HEADER_NOTE}\n# Signatures of: ${[subject, ...args.also].map(comment).join(', ')}\n# Generated: ${new Date().toISOString()}\n`;
   let script: string;
-  if (args.tool === 'json' || args.tool === 'sym') script = JSON.stringify({ subject, also: args.also.length ? args.also : undefined, signatures: sigs }, null, 2);
+  const magicList = args.magics.map((m) => `    (${ascii(m.meaning)}, ${ascii(m.pattern)}, ${ascii(m.where)}, ${ascii(m.fact)}),`).join('\n');
+  if (args.tool === 'json' || args.tool === 'sym') script = JSON.stringify({ subject, also: args.also.length ? args.also : undefined, signatures: sigs, magics: args.magics.length ? args.magics : undefined }, null, 2);
+  else if (args.tool === 'scan') script = `${head}# Standalone: python scan.py <any file>. Lists where each published signature, string and file magic of the
+# subject occurs (file offsets), in executables, archives, installers, memory dumps or save files alike.
+import re, sys
+
+SIGNATURES = [
+${list}
+]
+MAGICS = [
+${magicList}
+]
+
+
+def to_regex(pattern):
+    return re.compile(b"".join(b"." if t == "??" else re.escape(bytes([int(t, 16)])) for t in pattern.split()), re.S)
+
+
+def offsets(pattern, data, limit=16):
+    return [m.start() for m, _ in zip(to_regex(pattern).finditer(data), range(limit))]
+
+
+data = open(sys.argv[1], "rb").read()
+found = 0
+for name, pattern, kind, status, fact, offset, multiple in SIGNATURES:
+    hits = offsets(pattern, data)
+    if hits:
+        found += 1
+        print("%-40s %s  [%s] %s" % (name, ", ".join("0x%X" % (h + offset) for h in hits), status, fact))
+for meaning, pattern, where, fact in MAGICS:
+    hits = offsets(pattern, data)
+    if hits:
+        found += 1
+        print("magic %-34s %s  (documented at %s)  %s" % (meaning[:34], ", ".join("0x%X" % h for h in hits), where, fact))
+print("ReverseEngineering.wiki: %d of %d patterns found" % (found, len(SIGNATURES) + len(MAGICS)))
+`;
   else if (args.tool === 'ghidra') {
     script = `${head}# Run in Ghidra's Script Manager (Jython or PyGhidra) with your program open. It searches the program
 # for each signature and names a match only when it is unique; data tables (kind "global") compiled in

@@ -27,7 +27,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.28';
+export const VERSION = '0.8.29';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -302,6 +302,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       imports: z.array(z.string()).optional(),
       exports: z.array(z.string()).optional(),
       symbols: z.array(z.string()).optional(),
+      sections: z.array(z.string()).optional().describe('Section or segment names, e.g. ".ndata", "UPX0", "__DATA"'),
       rtti: z.array(z.string()).optional().describe('MSVC RTTI type names like ".?AVFoo@@"'),
       patterns: z.array(z.string()).optional().describe('Byte signatures with ?? wildcards'),
       limit: z.number().int().min(1).max(20).optional(),
@@ -398,7 +399,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
   server.registerTool('export_header', {
     title: 'Export a C header',
     description: 'C header with every struct, enum, typedef and vtable fact of a subject (optionally one build, one ABI), ready to import into Ghidra/IDA. warnings lists what it could not express (types no fact defines, sizes that disagree).',
-    inputSchema: { subject: z.string(), build: z.string().optional(), also: z.array(z.string()).max(10).optional().describe('Other pages whose types it uses (a platform and the formats its globals are typed by)'), abi: z.string().optional().describe('For layouts that differ by ABI (data.abi on struct and typedef facts): "win64", "lp64", "ilp32"…') },
+    inputSchema: { subject: z.string(), build: z.string().optional(), also: z.array(z.string()).max(10).optional().describe('Other pages whose types it uses (a platform and the formats its globals are typed by)'), abi: z.string().optional().describe('For layouts that differ by ABI (data.abi on struct and typedef facts): "win64", "lp64", "ilp32"…'), variant: z.string().optional().describe('For other layout variants (data.variant: "32-bit target", "unicode")') },
     annotations: READ,
   }, handler((a: any) => exportHeader(s, a)));
 
@@ -410,7 +411,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       platform: z.string().optional().describe('Platform: page, for its hardware addresses (I/O registers, vectors, BIOS calls)'),
       subject: z.string().optional().describe('A software, library or format page: a script that finds its signature facts in your binary'),
       also: z.array(z.string()).max(10).optional().describe('With subject: more pages whose signatures to include (a fork\'s parent library); the answer lists connected pages that have some'),
-      tool: z.enum(['ghidra', 'ida', 'json', 'sym', 'wasm-names']).describe('wasm-names: a Python script that writes a WebAssembly build\'s function names into the module\'s name section (read by Ghidra\'s wasm loader, wabt, browsers)'),
+      tool: z.enum(['ghidra', 'ida', 'json', 'sym', 'wasm-names', 'scan']).describe('scan (with subject): a standalone Python script listing where the subject\'s signatures, strings and file magics occur in any file; wasm-names: writes a WebAssembly build\'s names into its name section'),
     },
     annotations: READ,
   }, handler((a: any) => exportSymbols(s, a)));
