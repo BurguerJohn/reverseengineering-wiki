@@ -219,7 +219,7 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   const unknown = unknownFactFields(fact.kind, fact.data);
   const enumNote = fact.kind === 'enum' && (() => {
     const values = fact.data.values;
-    const names = Array.isArray(values) ? values.map((v: any) => (typeof v === 'string' ? v : v?.name)) : values && typeof values === 'object' ? Object.entries(values).map(([k, v]) => (typeof v === 'string' && !/^\s*-?(?:0x[0-9a-f]+|\d+)\s*$/i.test(v) ? v : k)) : [];
+    const names = Array.isArray(values) ? values.map((v: any) => (typeof v === 'string' ? v : v?.name)) : values && typeof values === 'object' ? Object.entries(values).map(([k, v]) => (typeof v === 'string' && !/^\s*-?(?:0x[0-9a-f]+|\d+)\s*(?:(?:-|–|\.\.)\s*-?(?:0x[0-9a-f]+|\d+)\s*)?$/i.test(v) ? v : k)) : [];
     const odd = names.filter((n) => typeof n === 'string' && !/^[A-Za-z_]\w*$/.test(n));
     return odd.length ? `Enum value names that are not C identifiers (${odd.slice(0, 3).join('; ')}) export as their first word plus a comment; put explanations in the claim or notes and keep values as identifiers.` : undefined;
   })();

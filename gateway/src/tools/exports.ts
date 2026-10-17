@@ -111,22 +111,56 @@ function signedNum(raw: unknown): number | null {
   return hexNum(raw);
 }
 
-function enumValues(raw: unknown): Array<{ name: string; value: number | null; notes?: string }> {
+/** An enum value exactly, 64-bit included (a double rounds 0x4000000000000001 to 0x4000000000000000). */
+function enumNum(raw: unknown): bigint | null {
+  if (typeof raw === 'bigint') return raw;
+  if (typeof raw === 'number') return Number.isSafeInteger(raw) ? BigInt(raw) : null;
+  if (typeof raw !== 'string') return null;
+  const t = raw.trim();
+  if (/^-?\d+$/.test(t)) return BigInt(t);
+  if (/^-?0x[0-9a-f]+$/i.test(t)) return t.startsWith('-') ? -BigInt(t.slice(1)) : BigInt(t);
+  const n = signedNum(raw);
+  return n === null ? null : BigInt(n);
+}
+
+/** "0x80-0x9F", "128..159": a range of values sharing one name (control bytes, opcode classes). */
+const VALUE_RANGE = /^\s*(-?(?:0x[0-9a-f]+|\d+))\s*(?:-|–|\.\.)\s*(-?(?:0x[0-9a-f]+|\d+))\s*$/i;
+
+type EnumValue = { name: string; value: bigint | null; end?: bigint; notes?: string };
+
+function enumValues(raw: unknown): EnumValue[] {
   const notesOf = (v: any) => (v && typeof v === 'object' && typeof v.notes === 'string' ? v.notes : undefined);
+  const range = (text: unknown): { value: bigint; end: bigint } | null => {
+    const m = typeof text === 'string' ? VALUE_RANGE.exec(text) : null;
+    return m ? { value: enumNum(m[1])!, end: enumNum(m[2])! } : null;
+  };
+  let out: EnumValue[] = [];
   if (Array.isArray(raw)) {
-    return raw.map((v, i) => (typeof v === 'string' ? { name: v, value: i } : { name: String(v?.name ?? ''), value: signedNum(v?.value), notes: notesOf(v) }));
+    out = raw.map((v, i) => (typeof v === 'string' ? { name: v, value: BigInt(i) }
+      : { name: String(v?.name ?? ''), ...(range(v?.value) ?? { value: enumNum(v?.value) }), notes: notesOf(v) }));
+    return out;
   }
   if (raw && typeof raw === 'object') {
-    return Object.entries(raw as Record<string, unknown>).map(([k, v]) => {
-      const keyNumber = signedNum(k);
+    out = Object.entries(raw as Record<string, unknown>).map(([k, v]): EnumValue => {
+      const keyRange = range(k);
+      if (keyRange && typeof v === 'string') return { name: v, ...keyRange };
+      const keyNumber = enumNum(k);
       if (keyNumber !== null && typeof v === 'string') return { name: v, value: keyNumber };
-      const valueNumber = signedNum(v);
+      const valueRange = range(v);
+      if (valueRange) return { name: k, ...valueRange };
+      const valueNumber = enumNum(v);
       if (valueNumber !== null) return { name: k, value: valueNumber };
-      if (v && typeof v === 'object' && 'value' in v) return { name: k, value: signedNum((v as any).value), notes: notesOf(v) };
+      if (v && typeof v === 'object' && 'value' in v) return { name: k, ...(range((v as any).value) ?? { value: enumNum((v as any).value) }), notes: notesOf(v) };
       return { name: k, value: null };
-    }).sort((a, b) => (a.value ?? 0) - (b.value ?? 0));
+    });
+    return out.sort((a, b) => { const x = a.value ?? 0n; const y = b.value ?? 0n; return x < y ? -1 : x > y ? 1 : 0; });
   }
   return [];
+}
+
+function enumLiteral(v: bigint): string {
+  // Small negatives read best in decimal (-1, -2), error codes in hex (-0x7000).
+  return v < 0n ? (v > -256n ? String(v) : `-0x${(-v).toString(16).toUpperCase()}`) : `0x${v.toString(16).toUpperCase()}`;
 }
 
 let sIndex: Services['index'] | undefined;
@@ -167,7 +201,7 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
   try { endianness = String(JSON.parse(s.index.page(subject)?.json ?? '{}').infobox?.endianness ?? '').trim(); } catch { /* no infobox */ }
   const lines = [`/* ${HEADER_NOTE}`, ` * Subject: ${comment(subject)}${build ? `\n * Build: ${comment(build)}` : ''}${wanted ? `\n * ABI: ${comment(wanted)}` : abis.length ? `\n * ABIs with their own layouts: ${abis.map(comment).join(', ')} (pass abi)` : ''}`,
     ...(endianness ? [` * Byte order of the format: ${comment(endianness)}${/big/i.test(endianness) ? ' (swap multi-byte fields on little-endian machines)' : ''}`] : []),
-    ` * Generated: ${new Date().toISOString()} */`, '#pragma once', '#include <stdint.h>', ''];
+    ` * Generated: ${new Date().toISOString()} */`, '#pragma once', '#include <stddef.h>', '#include <stdint.h>', ''];
   const skipped: string[] = [];
   const unknownTypes = new Set<string>();
   // Types defined in this header; others come from other pages and must still compile here.
@@ -309,12 +343,12 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
       for (const v of values) {
         // "MF_SPECIAL (multiplayer only)": the identifier, and the rest as a comment.
         const named = v.named;
-        // Small negatives read best in decimal (-1, -2), error codes in hex (-0x7000).
-        const literal = v.value === null ? '' : v.value < 0 ? ` = ${v.value > -256 ? v.value : `-0x${(-v.value).toString(16).toUpperCase()}`}` : ` = 0x${v.value.toString(16).toUpperCase()}`;
+        const literal = v.value === null ? '' : ` = ${enumLiteral(v.value)}`;
         let id = prefixAll ? ident(`${name}_${named.name}`, 'VALUE') : ident(named.name, 'VALUE');
         for (let n = 2; enumConstants.has(id); n++) id = `${ident(`${name}_${named.name}`, 'VALUE')}_${n}`;
         enumConstants.add(id);
-        const notes = [named.rest, v.notes].filter(Boolean).join('; ');
+        // A range: the constant is its first value, the range in the comment.
+        const notes = [v.end !== undefined && v.value !== null ? `${enumLiteral(v.value)}-${enumLiteral(v.end)}` : '', named.rest, v.notes].filter(Boolean).join('; ');
         lines.push(`    ${id}${literal},${notes ? ` /* ${comment(notes)} */` : ''}`);
       }
       lines.push(`} ${name};`, '');

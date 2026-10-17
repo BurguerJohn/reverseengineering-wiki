@@ -77,7 +77,7 @@ function codeBlocks(text: string): Array<{ body: string; start: number }> {
 }
 
 /** "version 2.2.4.3", "patch 1.0.0.12", "section 11.3.6.2": dotted version or section numbers, not IP addresses. */
-const VERSION_BEFORE = /(?:\b(?:version|ver|v|patch|build|update|release|revision|rev|exe|game|engine|sdk|driver|firmware|section|sect|sec|clause|chapter|ch|appendix|table|figure|fig|paragraph|para|step)|§)\s*[:=#.]?\s*$/i;
+const VERSION_BEFORE = /(?:\b(?:version|ver|v|patch|build|update|release|revision|rev|exe|game|engine|sdk|driver|firmware|section|sect|sec|clause|chapter|ch|appendix|table|figure|fig|paragraph|para|step|spec|specification|rfc\s*\d+|iso\s*\d+|ecma-?\d+|standard|part)|§)\s*[:=#.]?\s*$/i;
 
 /**
  * "pairs from 1.2.0 to 1.3.0.1", "`1.2.11.1`", ["3.6.3", "3.6.3.1"]: a dotted quad next to two- or three-part version numbers,

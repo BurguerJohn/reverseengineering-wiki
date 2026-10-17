@@ -67,6 +67,7 @@ test('wasm-names writes a valid name section', async () => {
   const py = spawnSync('python', ['-I', join(dir, 'wasm_names.py'), join(dir, 'in.wasm'), join(dir, 'out.wasm')]);
   if (py.error) return; // no Python here
   assert.equal(py.status, 0, String(py.stderr));
+  const WebAssembly = (globalThis as any).WebAssembly;
   const named = readFileSync(join(dir, 'out.wasm'));
   assert.ok(WebAssembly.validate(named));
   const section = Buffer.from(WebAssembly.Module.customSections(new WebAssembly.Module(named), 'name')[0]).toString('latin1');

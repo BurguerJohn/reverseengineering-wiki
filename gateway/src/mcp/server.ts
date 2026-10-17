@@ -27,7 +27,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.20';
+export const VERSION = '0.8.21';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -702,10 +702,12 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('publish_checked', {
     title: 'Publish what a dry run checked',
-    description: 'Publish exactly what an earlier dry run (of any write tool or batch) checked, by the check_id it returned, without resending the arguments. Good for 30 minutes, for the same account. A batch dry run with failures also returns a check_id: pass replace with the corrected arguments of the failing operations (by number) and dry_run true to check again.',
+    description: 'Publish exactly what an earlier dry run (of any write tool or batch) checked, by the check_id it returned, without resending the arguments. Good for 30 minutes, for the same account. Small fixes (a line of a large code file, a sentence) go in amend, without resending anything. A batch dry run with failures also returns a check_id: pass replace with the corrected arguments of the failing operations (by number) and dry_run true to check again.',
     inputSchema: { check_id: z.string(), dry_run: DRY_RUN,
       replace: z.record(z.string(), z.record(z.string(), z.unknown())).optional().describe('Batches only: {"3": {corrected arguments of operation 3}}; the tool stays the same'),
       quiet: z.boolean().optional().describe('With dry_run: list the pages without their contents'),
+      amend: z.record(z.string(), z.array(z.object({ old: z.string().min(1), new: z.string() })).min(1).max(20)).optional()
+        .describe('Small text fixes without resending: {"3": [{old, new}]} for operation 3 of a batch ("1" for a single tool); each old must occur exactly once in that operation\'s text values (a line of a code file, a sentence)'),
       ...(review ? { review_id: REVIEW_ID } : {}) },
     annotations: WRITE,
   }, (async (a: any, extra: Extra) => {
@@ -724,12 +726,51 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       }
       args = { ...args, operations: ops };
     }
+    if (a.amend && Object.keys(a.amend).length) {
+      const ops = checked.tool === 'batch' && Array.isArray(args.operations) ? [...(args.operations as Array<{ tool: string; arguments: Record<string, unknown> }>)] : null;
+      for (const [k, edits] of Object.entries(a.amend as Record<string, Array<{ old: string; new: string }>>)) {
+        const n = Number(k);
+        const count = ops ? ops.length : 1;
+        if (!Number.isInteger(n) || n < 1 || n > count) return fail(new ToolError('BAD_REQUEST', `amend: operation ${k} does not exist (1-${count}).`));
+        try {
+          const target = ops ? ops[n - 1].arguments : args;
+          const amended = amendStrings(target, edits);
+          if (ops) ops[n - 1] = { ...ops[n - 1], arguments: amended as Record<string, unknown> };
+          else args = amended as Record<string, unknown>;
+        } catch (error) {
+          return fail(new ToolError('BAD_REQUEST', `amend of operation ${k}: ${(error as Error).message}`));
+        }
+      }
+      if (ops) args = { ...args, operations: ops };
+    }
     const result = await handlers.get(checked.tool)!({ ...args, ...(a.dry_run ? { dry_run: true, ...(a.quiet ? { quiet: true } : {}) } : {}), ...(a.review_id ? { review_id: a.review_id } : {}) }, extra);
     if (!result.isError && !a.dry_run) CHECKED.delete(String(a.check_id));
     return result;
   }) as any);
 
   return withResources(server);
+}
+
+/** Applies {old, new} edits to the string values of some arguments; each old must occur exactly once in them. */
+function amendStrings(value: unknown, edits: Array<{ old: string; new: string }>): unknown {
+  let out = value;
+  for (const edit of edits) {
+    let hits = 0;
+    const walk = (v: unknown): unknown => {
+      if (typeof v === 'string') {
+        const n = v.split(edit.old).length - 1;
+        hits += n;
+        return n ? v.split(edit.old).join(edit.new) : v;
+      }
+      if (Array.isArray(v)) return v.map(walk);
+      if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+      return v;
+    };
+    const next = walk(out);
+    if (hits !== 1) throw new Error(`"${edit.old.slice(0, 60)}" occurs ${hits} times (it must occur exactly once).`);
+    out = next;
+  }
+  return out;
 }
 
 const MAX_BATCH = 50;

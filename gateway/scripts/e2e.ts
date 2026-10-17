@@ -1125,6 +1125,18 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   assert.match(rootHeader.header, /E2eTable_E2eRoot = 0x0,/, rootHeader.header);
   assert.ok(rootHeader.warnings?.some((w: string) => /E2eRoot: 1 field/.test(w)), JSON.stringify(rootHeader.warnings));
 
+  // 64-bit enum values stay exact; value ranges; size_t compiles; amend fixes a sentence without resending.
+  await call(a, 'add_fact', { kind: 'enum', subject: `Library:E2E Lib ${run}`, claim: 'Fictional 64-bit filter ids and a control-byte range.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { name: 'E2eFilter', values: { '0x4000000000000001': 'E2E_FILTER_A', '0x4000000000000002': 'E2E_FILTER_B', '0x80-0x9F': 'E2E_CHUNK_RUN' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const bigHeader = (await call(anon, 'export_header', { subject: `Library:E2E Lib ${run}` })).header;
+  assert.match(bigHeader, /E2E_FILTER_A = 0x4000000000000001,\n {4}E2E_FILTER_B = 0x4000000000000002,/, bigHeader);
+  assert.match(bigHeader, /E2E_CHUNK_RUN = 0x80, \/\* 0x80-0x9F \*\//, bigHeader);
+  assert.match(bigHeader, /#include <stddef.h>/);
+  const typoNote = await call(a, 'add_note', { subject: `Format:E2E Track ${run}`, body: 'The fictional track header has a typo in this sentence.', confidence: 'low', dry_run: true });
+  const amended = await call(a, 'publish_checked', { check_id: typoNote.check_id, dry_run: true, amend: { 1: [{ old: 'has a typo in', new: 'is fixed in' }] } });
+  assert.ok(JSON.stringify(amended.preview ?? amended).includes('is fixed in'), JSON.stringify(amended).slice(0, 500));
+  await expectError(a, 'publish_checked', { check_id: typoNote.check_id, dry_run: true, amend: { 1: [{ old: 'not in the note', new: 'x' }] } }, 'BAD_REQUEST');
+
   // Library typedefs and per-ABI layouts; one file per evidence entry; a format's byte order in its header.
   const libFact = (kind: string, claim: string, data: Record<string, unknown>) => call(a, 'add_fact', { kind, subject: `Library:E2E Lib ${run}`, claim, scope: { level: 'library', applies_to: 'all versions' }, data, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
   const winLong = await libFact('typedef', 'The fictional E2eLong is 32-bit on Win64.', { name: 'E2eLong', type: 'int32_t', abi: 'win64' });
