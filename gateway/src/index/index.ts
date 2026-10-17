@@ -552,8 +552,10 @@ export class SearchIndex {
         rows = all.filter((r) => r.token === t.token || (r.token.length >= 8 && (bytesContain(r.token, t.token) || bytesContain(t.token, r.token))));
       } else if (t.kind === 'string') {
         rows = this.db.prepare(`select i.title, p.subject from identifiers i join pages p on p.title = i.title
-          where i.kind = 'string' and (i.token = ? or (length(i.token) >= 6 and instr(?, i.token) > 0)) limit 100`)
-          .all(t.token, t.token) as any[];
+          where i.kind = 'string' and (i.token = ?
+            or (length(i.token) >= 12 and instr(?, i.token) > 0)
+            or (length(?) >= 12 and instr(i.token, ?) > 0)) limit 100`)
+          .all(t.token, t.token, t.token, t.token) as any[];
       } else {
         rows = this.db.prepare(`select i.title, p.subject from identifiers i join pages p on p.title = i.title
           where i.kind = ? and i.token = ? limit 100`).all(t.kind, t.token) as any[];

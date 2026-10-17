@@ -85,8 +85,13 @@ export function checkAddress(address: unknown): string | null {
 }
 
 export const evidenceSchema = z.object({
-  type: z.enum(['string_xref', 'byte_pattern', 'rtti', 'symbol', 'xref', 'runtime_test', 'documentation', 'debugger', 'comparison', 'other']),
+  type: z.enum(['string_xref', 'byte_pattern', 'rtti', 'symbol', 'xref', 'runtime_test', 'documentation', 'debugger', 'comparison', 'source', 'other']),
   detail: z.string().min(3).max(1000),
+  // A source citation that can be checked again: repository, commit, file and lines.
+  repo: z.string().max(300).optional(),
+  commit: z.string().regex(/^[0-9a-fA-F]{7,40}$/).optional(),
+  path: z.string().max(300).optional(),
+  lines: z.string().regex(/^\d+(?:-\d+)?$/).optional(),
 });
 
 export const verificationSchema = z.object({

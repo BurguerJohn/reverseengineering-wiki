@@ -157,11 +157,14 @@ export function createHttpServer(s: Services, auth: AuthService, mailer: Mailer)
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
             sessions.set(id, { transport, operatorId, seen: Date.now() });
-            // Which clients connect, and whether they can show approval prompts (no personal data).
-            const info = server.server.getClientVersion();
-            console.log(`[${new Date().toISOString()}] MCP session: ${info?.name ?? '?'} ${info?.version ?? ''}, elicitation: ${server.server.getClientCapabilities()?.elicitation ? 'yes' : 'no'}`);
           },
         });
+        // Which clients connect, and whether they can show approval prompts (no personal data);
+        // only known once the client has introduced itself.
+        server.server.oninitialized = () => {
+          const info = server.server.getClientVersion();
+          console.log(`[${new Date().toISOString()}] MCP session: ${info?.name ?? '?'} ${info?.version ?? ''}, elicitation: ${server.server.getClientCapabilities()?.elicitation ? 'yes' : 'no'}`);
+        };
         transport.onclose = () => {
           if (transport.sessionId) sessions.delete(transport.sessionId);
           void server.close();

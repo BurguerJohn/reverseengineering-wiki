@@ -85,15 +85,22 @@ function cType(raw: unknown): string | null {
  * Enum values as agents write them: {"0": "Rifle"} (the documented form), {"Rifle": 0},
  * [{name, value}] or ["Rifle", "Shotgun"].
  */
+/** Enum values may be negative ("-1", -14): hexNum only reads unsigned numbers. */
+function signedNum(raw: unknown): number | null {
+  if (typeof raw === 'number' && Number.isInteger(raw)) return raw;
+  if (typeof raw === 'string' && /^-\d+$/.test(raw.trim())) return parseInt(raw.trim(), 10);
+  return hexNum(raw);
+}
+
 function enumValues(raw: unknown): Array<{ name: string; value: number | null }> {
   if (Array.isArray(raw)) {
-    return raw.map((v, i) => (typeof v === 'string' ? { name: v, value: i } : { name: String(v?.name ?? ''), value: hexNum(v?.value) }));
+    return raw.map((v, i) => (typeof v === 'string' ? { name: v, value: i } : { name: String(v?.name ?? ''), value: signedNum(v?.value) }));
   }
   if (raw && typeof raw === 'object') {
     return Object.entries(raw as Record<string, unknown>).map(([k, v]) => {
-      const keyNumber = hexNum(k);
+      const keyNumber = signedNum(k);
       if (keyNumber !== null && typeof v === 'string') return { name: v, value: keyNumber };
-      const valueNumber = hexNum(v);
+      const valueNumber = signedNum(v);
       if (valueNumber !== null) return { name: k, value: valueNumber };
       return { name: k, value: null };
     }).sort((a, b) => (a.value ?? 0) - (b.value ?? 0));
@@ -191,12 +198,13 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
       if (size !== null && size > cursor) lines.push(`    uint8_t _pad_${cursor.toString(16).toUpperCase()}[0x${(size - cursor).toString(16).toUpperCase()}];`);
       lines.push(`};${size !== null ? ` /* size 0x${size.toString(16).toUpperCase()} */` : data.size === 'variable' ? ' /* variable size */' : ''}`, '');
     } else if (f.kind === 'enum') {
-      const name = ident(fieldName(data.name).name, 'UnnamedEnum');
+      const name = ident(fieldName(data.name).name.replace(/_+$/, ''), 'UnnamedEnum');
       lines.push(`typedef enum ${name} {`);
       for (const v of enumValues(data.values)) {
         // "MF_SPECIAL (multiplayer only)": the identifier, and the rest as a comment.
         const named = fieldName(v.name);
-        lines.push(`    ${ident(named.name, 'VALUE')}${v.value !== null ? ` = 0x${v.value.toString(16).toUpperCase()}` : ''},${named.rest ? ` /* ${comment(named.rest)} */` : ''}`);
+        const literal = v.value === null ? '' : v.value < 0 ? ` = ${v.value}` : ` = 0x${v.value.toString(16).toUpperCase()}`;
+        lines.push(`    ${ident(named.name, 'VALUE')}${literal},${named.rest ? ` /* ${comment(named.rest)} */` : ''}`);
       }
       lines.push(`} ${name};`, '');
     } else if (f.kind === 'vtable') {

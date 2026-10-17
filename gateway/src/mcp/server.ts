@@ -26,7 +26,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.1';
+export const VERSION = '0.8.2';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -64,8 +64,12 @@ const READ = { readOnlyHint: true, openWorldHint: false } as const;
 const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: true } as const;
 
 const evidenceItem = z.object({
-  type: z.enum(['string_xref', 'byte_pattern', 'rtti', 'symbol', 'xref', 'runtime_test', 'documentation', 'debugger', 'comparison', 'other']),
+  type: z.enum(['string_xref', 'byte_pattern', 'rtti', 'symbol', 'xref', 'runtime_test', 'documentation', 'debugger', 'comparison', 'source', 'other']),
   detail: z.string().describe('How you know: the string referenced, the pattern, the test you ran…'),
+  repo: z.string().optional().describe('For type source: the repository URL'),
+  commit: z.string().optional().describe('The commit it was read at'),
+  path: z.string().optional().describe('File path in the repository, e.g. "WinQuake/bspfile.h"'),
+  lines: z.string().optional().describe('Line or range, e.g. "120-148"'),
 });
 
 const DRY_RUN = z.boolean().optional().describe('Check everything (titles, schema, duplicates, policy, conflicts) and report what would happen, without publishing or using quota');
@@ -564,7 +568,8 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       subjects: z.array(z.string()).min(1),
       description: z.string(),
       tested_on: z.string(),
-      page: z.string().optional().describe('Page to list it on (defaults to the first subject)'),
+      page: z.string().optional().describe('Another page to list it on too (a Code page, say); every subject gets it anyway'),
+      license: z.string().optional().describe('SPDX id, only when the license detector finds none but the repository states one (a text file, file headers)'),
     },
     annotations: WRITE,
   }, (c, a) => write.linkRepo(s, c, a));

@@ -518,7 +518,11 @@ export async function createPage(s: Services, caller: Caller, args: {
     }
   }
   await afterWrite(s, op, created);
-  return result(s, t, r.newrevid, { aliases: created.slice(1), aliases_skipped: skipped.length ? skipped : undefined, ...missingGeneralPages(s, text) });
+  const requested = args.title.trim().replace(/^[A-Za-z]+:/, '');
+  const stored = t.slice(t.indexOf(':') + 1);
+  const capitalized = requested && requested[0] !== stored[0] && requested.slice(1) === stored.slice(1)
+    ? `MediaWiki capitalizes the first letter of titles: the page is "${t}" (links in either case still work).` : undefined;
+  return result(s, t, r.newrevid, { aliases: created.slice(1), aliases_skipped: skipped.length ? skipped : undefined, ...missingGeneralPages(s, text), note: capitalized });
 }
 
 // ---- topic subpages --------------------------------------------------------------
@@ -816,14 +820,14 @@ export async function addCode(s: Services, caller: Caller, args: {
 }
 
 export async function linkRepo(s: Services, caller: Caller, args: {
-  url: string; commit?: string; subjects: string[]; description: string; tested_on: string; page?: string;
+  url: string; commit?: string; subjects: string[]; description: string; tested_on: string; page?: string; license?: string;
 }) {
   const op = requireWriter(s, caller);
   assertClean([...scanText(`${args.description}\n${args.tested_on}`, 'summary'), ...scanText(args.url, 'repo')]);
   const subjects = args.subjects.map((x) => subjectRoot(title(s, x, SUBJECTS)));
   if (!subjects.length) throw new ToolError('BAD_REQUEST', 'At least one subject is required.');
   // On the page given, or on every subject named (each gets the repository in Code & repositories).
-  const targets = args.page ? [title(s, args.page, [...SUBJECTS, 'code'])] : [...new Set(subjects)];
+  const targets = [...new Set([...(args.page ? [title(s, args.page, [...SUBJECTS, 'code'])] : []), ...subjects])];
   const pages = [];
   for (const t of targets) {
     const found = await currentPage(s, t);
@@ -832,6 +836,11 @@ export async function linkRepo(s: Services, caller: Caller, args: {
   }
 
   const info = await resolveRepo(args.url, args.commit);
+  // GitHub's detector misses licenses stated only in a text file or file headers: the contributor may declare it.
+  if (args.license && ['none', 'unknown', 'NOASSERTION'].includes(info.license)) {
+    if (!/^[A-Za-z0-9.+-]{2,40}$/.test(args.license)) throw new ToolError('BAD_REQUEST', 'license must be an SPDX id, e.g. GPL-2.0-only or MIT.');
+    info.license = `${args.license} (declared: the detector found none; check the repository)`;
+  }
   const checked = [
     `checked ${new Date().toISOString().slice(0, 10)}`,
     info.archived ? 'archived' : null,

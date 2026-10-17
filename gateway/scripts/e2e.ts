@@ -930,6 +930,17 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
     data: { name: 'StageId', values: { 0: 'STAGE_NO0', 1: 'hidden stage (beta only)' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low', dry_run: true });
   assert.match(oddEnum.warnings?.[0] ?? '', /not C identifiers/);
 
+  // Negative enum values, source citations, a lowercase title, a format without code.
+  await call(a, 'add_fact', { kind: 'enum', subject: `Format:E2E Track ${run}`, claim: 'Fictional leaf contents use negative values.', scope: { level: 'format', applies_to: 'all versions' },
+    data: { name: 'CONTENTS_*', values: { '-1': 'CONTENTS_EMPTY', '-2': 'CONTENTS_SOLID' } },
+    evidence: [{ type: 'source', detail: 'fictional header', repo: 'https://github.com/example/example', commit: 'bf4ac42', path: 'src/bspfile.h', lines: '120-148' }], confidence: 'low' });
+  const negative = (await call(anon, 'export_header', { subject: `Format:E2E Track ${run}` })).header;
+  assert.match(negative, /typedef enum CONTENTS \{\n {4}CONTENTS_SOLID = -2,\n {4}CONTENTS_EMPTY = -1,\n\} CONTENTS;/, negative);
+  const lower = await call(a, 'create_page', { type: 'format', title: `progs ${run}.dat`, summary: 'A fictional bytecode file with a lowercase name.', body: '## Layout\n\nA header.', dry_run: true });
+  assert.match(lower.note ?? '', /capitalizes the first letter/);
+  const noCode = await call(anon, 'read', { title: `Format:${chunk}` });
+  assert.match(noCode.code_hint ?? '', /No parser or tool published/);
+
   // A wrong build title: "did you mean" the real one.
   const typo = await expectError(a, 'add_fact', { ...fn('Cave::Draw', '0x2000', `Build:${cave}/1.0 (Win64, Steam)`), dry_run: true }, 'SCHEMA_INVALID');
   assert.ok(typo.message.includes(`Did you mean "${buildTitle}"`), typo.message);

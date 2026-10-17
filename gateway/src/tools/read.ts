@@ -391,6 +391,9 @@ export async function read(s: Services, args: { title: string; section?: string;
     truncated: truncated ? 'Content truncated: request one section from the outline, or raise max_tokens.' : undefined,
     facts: factRows.length ? { total: factRows.length, ...facts, list_with: `related title="${title}" relation=has_facts (filter by kind/status, paged)` } : undefined,
     general_pages: general.length ? general : undefined,
+    code_hint: type === 'format' && root === title && !s.index.related(title, { relation: 'has_code' }).length
+      ? 'No parser or tool published for this format yet. If you wrote one and tested it on a public sample, add_code it here.'
+      : undefined,
     open_questions: openQuestions && !/Nothing documented yet/.test(openQuestions.body) ? wikitextToMarkdown(openQuestions.body) : undefined,
   };
 }
