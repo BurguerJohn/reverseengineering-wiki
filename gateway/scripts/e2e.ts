@@ -900,6 +900,13 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const ib = await call(a, 'edit_section', { title: `Platform:${consoleName}`, section: 'Infobox', infobox: { vendor: 'Fictional Corp', release: '1996' }, base_revision: consoleRead.revision, summary: 'Set vendor and release' });
   assert.equal(ib.infobox?.vendor, 'Fictional Corp', JSON.stringify(ib).slice(0, 300));
   assert.equal((await call(anon, 'read', { title: `Platform:${consoleName}` })).infobox?.release, '1996');
+  // replace works on the summary and leaves the infobox alone.
+  const afterIb = await call(anon, 'read', { title: `Platform:${consoleName}` });
+  const lead = 'A fictional handheld console';
+  const sumEdit = await call(a, 'edit_section', { title: `Platform:${consoleName}`, section: 'Summary', replace: [{ old: lead, new: `${lead} (fictional)` }], base_revision: afterIb.revision, summary: 'Clarify the summary' });
+  assert.ok(!sumEdit.error, JSON.stringify(sumEdit).slice(0, 400));
+  const afterSum = await call(anon, 'read', { title: `Platform:${consoleName}` });
+  assert.ok(String(afterSum.content).includes('A fictional handheld console (fictional)') && afterSum.infobox?.vendor === 'Fictional Corp', JSON.stringify(afterSum).slice(0, 500));
 
   // Versioned magics (a mask), packed structs, byte-exact code files, replace that keeps whitespace.
   const versioned = await call(a, 'batch', { operations: [
@@ -1018,6 +1025,20 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const blankCode = await call(a, 'add_code', { name: 'Blank lines', summary: 'A fictional script with blank lines kept.', language: 'python', kind: 'parser',
     subjects: [`Format:E2E Track ${run}`], tested_on: 'fictional samples', usage: 'python blank.py <file>', files: [{ name: 'blank.py', content: 'a = 1\n\n\nb = 2\n' }], dry_run: true });
   assert.ok(blankCode.preview?.some((p: any) => (p.content ?? '').includes('a = 1\n\n\nb = 2')), JSON.stringify(blankCode.preview).slice(0, 600));
+
+  // Keys with a leading underscore are flagged; quiet dry runs; a failed batch names what ran and what did not.
+  const underscored = await call(a, 'add_fact', { kind: 'struct', subject: `Format:E2E Track ${run}`, claim: 'The fictional _func record.', key: '_trkfunc', scope: { level: 'format', applies_to: 'all versions' },
+    data: { name: '_trkfunc', size: 4, fields: [{ offset: 0, size: 4, type: 'uint32_t', name: 'entry' }] }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low', dry_run: true });
+  assert.ok(underscored.warnings?.some((w: string) => /cannot start or end with "_"/.test(w)), JSON.stringify(underscored).slice(0, 500));
+  const quietRun = await call(a, 'batch', { dry_run: true, quiet: true, operations: [
+    { tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A quiet fictional note whose text is not echoed back.', confidence: 'low' } },
+  ] });
+  assert.ok(quietRun.check_id && quietRun.preview?.length === 1 && quietRun.preview[0].content === undefined && quietRun.preview[0].characters > 0, JSON.stringify(quietRun).slice(0, 400));
+  const halfBatch = await call(a, 'batch', { operations: [
+    { tool: 'edit_fact', arguments: { target: `Fact:E2E Track ${run}/signature/does not exist`, base_revision: 1, summary: 'fictional correction', claim: 'Nothing at all to correct.' } },
+    { tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A fictional note published before the failing edit.', confidence: 'low' } },
+  ] });
+  assert.ok(halfBatch.error && /Published: operation 2\./.test(halfBatch.message), JSON.stringify(halfBatch).slice(0, 500));
 
   // A dry run hands back a check_id: publish_checked publishes exactly that, once.
   const checkedNote = await call(a, 'add_note', { subject: cave, key: 'Checked once', body: 'Published by check_id without resending the arguments.', confidence: 'low', dry_run: true });
@@ -1174,7 +1195,7 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   assert.equal(mid.error, 'NOT_FOUND', JSON.stringify(mid).slice(0, 300));
   assert.equal(mid.completed?.length, 1, 'the operation that ran is reported with the error');
   assert.match(mid.completed[0].title, /^Notes:/);
-  assert.match(mid.message, /were published/);
+  assert.match(mid.message, /Published: operation 1./);
   for (let i = 0; i < 30; i++) insert.run(String(opC.id), Date.now() - 60_000);
   const over = await call(c, 'batch', { dry_run: true, operations: [{ tool: 'add_note', arguments: { subject: game3, body: 'One more note, over the quota.', confidence: 'low' } }] });
   assert.equal(over.dry_run, true, 'a dry run still validates over the quota');

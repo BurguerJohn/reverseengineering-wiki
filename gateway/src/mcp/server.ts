@@ -26,7 +26,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.9';
+export const VERSION = '0.8.10';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -143,7 +143,7 @@ ${text}`,
  */
 function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Caller, args: any) => Promise<Record<string, unknown>> | Record<string, unknown>, review?: ServerReview) {
   return handler(async (args: any, extra: Extra) => {
-    const { dry_run: dryRun, review_id: reviewId, ...rest } = args ?? {};
+    const { dry_run: dryRun, review_id: reviewId, quiet, ...rest } = args ?? {};
     const mode = caller.operator ? s.db.operatorById(caller.operator.id)?.mode : undefined;
     const reviewed = !!review && mode === 'review';
     if (dryRun) {
@@ -160,7 +160,11 @@ function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Ca
         }
         throw error;
       }
-      const checked = compactPreview(ran);
+      const full = compactPreview(ran);
+      // quiet: what would be written, without echoing it (publish_checked still publishes exactly what was checked).
+      const checked = quiet && Array.isArray(full.preview)
+        ? { ...full, preview: (full.preview as Preview[]).map((p) => ({ title: p.title, action: p.action, characters: (p.content ?? p.diff ?? '').length })) }
+        : full;
       if (!caller.operator) return checked;
       return { ...checked, check_id: rememberCheck(name, rest, caller.operator.id), publish_with: 'publish_checked with this check_id publishes exactly what was checked, without resending it (valid 30 minutes).' };
     }
@@ -652,6 +656,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     description: 'Up to 50 writes in one call, e.g. a new page with its build, facts and code. They run in a safe order (pages, topics, builds, then facts/code/notes/symbols, then edits, then reviews), so later operations may refer to pages created earlier in the same batch (builds also by a file\'s SHA-256). With dry_run, all of them are checked and previewed together and every failing operation is reported at once; in review mode that means one approval for the whole batch. A real run stops at the first error; the error lists what was already published in completed (with titles and revisions). A real batch larger than the remaining hourly quota is refused whole before anything runs.',
     inputSchema: {
       dry_run: DRY_RUN,
+      quiet: z.boolean().optional().describe('With dry_run: list the pages that would be written without their contents (smaller answers for large batches)'),
       ...(review ? { review_id: REVIEW_ID } : {}),
       operations: z.array(z.object({
         tool: z.enum([...writeTools.keys()] as [string, ...string[]]),
@@ -713,7 +718,7 @@ function madeBy(tool: string, args: Record<string, unknown>): string[] {
 /** Order inside a batch: what others depend on first. */
 const BATCH_ORDER: Record<string, number> = {
   create_page: 0, register_build: 2, add_fact: 3, add_code: 3, add_note: 3, add_symbols: 3, link_repo: 3, ask: 3,
-  edit_section: 4, split_section: 4, verify: 5, patrol: 5, flag: 5, revert: 6,
+  edit_section: 4, split_section: 4, edit_fact: 4, verify: 5, patrol: 5, flag: 5, revert: 6,
 };
 
 async function runBatch(
@@ -762,8 +767,11 @@ async function runBatch(
             : { operation: p.index + 1, tool: p.tool, error: e.code, message: e.message, names: madeBy(p.tool, p.args) });
           continue;
         }
-        throw new ToolError(e.code, `Operation ${p.index + 1} (${p.tool}) failed: ${e.message}${done.length ? ` The ${done.length} operation(s) before it were published; fix this one and send the rest.` : ' Nothing was published.'}`, {
-          ...e.details, failed_operation: p.index + 1, tool: p.tool, completed: done,
+        // Operations run in dependency order, not as sent: name the ones published and the ones not run.
+        const published = done.map((d) => d.operation as number);
+        const notRun = planned.filter((x) => x !== p && !published.includes(x.index + 1)).map((x) => x.index + 1);
+        throw new ToolError(e.code, `Operation ${p.index + 1} (${p.tool}) failed: ${e.message}${published.length ? ` Published: operation${published.length > 1 ? 's' : ''} ${published.join(', ')}.` : ' Nothing was published.'}${notRun.length ? ` Not run: ${notRun.join(', ')}. Fix operation ${p.index + 1} and send it with the ones not run.` : ''}`, {
+          ...e.details, failed_operation: p.index + 1, tool: p.tool, completed: done, not_run: notRun,
         });
       }
     }

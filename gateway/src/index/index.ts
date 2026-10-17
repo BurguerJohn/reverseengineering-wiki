@@ -604,8 +604,12 @@ export class SearchIndex {
         const masked = maskDigits(t.token);
         const loose = this.db.prepare(`select i.title, i.token, p.subject from identifiers i join pages p on p.title = i.title
           where i.kind = 'string' and length(i.token) >= 12 limit 20000`).all() as Array<{ title: string; token: string; subject: string | null }>;
-        rows = [...rows, ...loose.filter((r) => (r.token.includes('*') && globMatch(r.token, t.token))
-          || (masked.length >= 12 && /\d/.test(t.token + r.token) && (maskDigits(r.token).includes(masked) || masked.includes(maskDigits(r.token)))))];
+        rows = [...rows, ...loose.filter((r) => {
+          if (r.token.includes('*') && globMatch(r.token, t.token)) return true;
+          // Both sides keep 12+ characters once masked ("1234567890..." test vectors mask to "#").
+          const other = maskDigits(r.token);
+          return masked.length >= 12 && other.length >= 12 && /\d/.test(t.token + r.token) && (other.includes(masked) || masked.includes(other));
+        })];
       } else {
         rows = this.db.prepare(`select i.title, p.subject from identifiers i join pages p on p.title = i.title
           where i.kind = ? and i.token = ? limit 100`).all(t.kind, t.token) as any[];
@@ -627,7 +631,8 @@ export class SearchIndex {
       const specificity = 1 / Math.sqrt(bySubject.size); // an input matching many subjects says little
       for (const [subject, titles] of bySubject) {
         const c = candidates.get(subject) ?? { subject, score: 0, matched: [] };
-        c.score += (weights.get(input) ?? 1) * specificity;
+        const onFact = [...titles].some((t) => t.startsWith('Fact:'));
+        c.score += (weights.get(input) ?? 1) * specificity * (onFact ? 1.5 : 1);
         c.matched.push({ input, pages: [...titles].slice(0, 5) });
         candidates.set(subject, c);
       }

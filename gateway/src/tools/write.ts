@@ -212,9 +212,10 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
     const odd = names.filter((n) => typeof n === 'string' && !/^[A-Za-z_]\w*$/.test(n));
     return odd.length ? `Enum value names that are not C identifiers (${odd.slice(0, 3).join('; ')}) export as their first word plus a comment; put explanations in the claim or notes and keep values as identifiers.` : undefined;
   })();
+  const underscoreNote = /^_|_$/.test(factKey(fact).trim()) ? `MediaWiki titles cannot start or end with "_": the title drops it (data.name keeps "${shortSummary(String(fact.data.name ?? factKey(fact)), 60)}", and exports use data.name).` : undefined;
   const subjectNote = askedSubject !== fact.subject ? `Stored on ${fact.subject}: facts attach to the subject page, not to its topic pages; mention the fact on ${askedSubject} with a link if useful.` : undefined;
-  const warnings = unknown.length || subjectNote || enumNote
-    ? [...(subjectNote ? [subjectNote] : []), ...(enumNote ? [enumNote] : []), ...(unknown.length ? [`data.${unknown.join(', data.')} ${unknown.length > 1 ? 'are' : 'is'} not standard for kind "${fact.kind}" (standard: ${[...FACT_DATA[fact.kind].required, ...(FACT_DATA[fact.kind].one_of ?? []), ...FACT_DATA[fact.kind].optional].join(', ')}). Kept, but tools like export_symbols and export_header only use standard fields. Several related addresses? One fact per address, or add_symbols for many names with their signatures.`] : [])]
+  const warnings = unknown.length || subjectNote || enumNote || underscoreNote
+    ? [...(subjectNote ? [subjectNote] : []), ...(enumNote ? [enumNote] : []), ...(underscoreNote ? [underscoreNote] : []), ...(unknown.length ? [`data.${unknown.join(', data.')} ${unknown.length > 1 ? 'are' : 'is'} not standard for kind "${fact.kind}" (standard: ${[...FACT_DATA[fact.kind].required, ...(FACT_DATA[fact.kind].one_of ?? []), ...FACT_DATA[fact.kind].optional].join(', ')}). Kept, but tools like export_symbols and export_header only use standard fields. Several related addresses? One fact per address, or add_symbols for many names with their signatures.`] : [])]
     : undefined;
   const partialBuild = fact.scope.level === 'build' ? buildIdentity(await currentPage(s, fact.scope.applies_to)) === 'partial' : false;
   assertClean(scanValue(fact, 'fact'));
@@ -375,8 +376,9 @@ export async function editSection(s: Services, caller: Caller, args: {
   const target = findSection(sections, args.section);
   if (args.replace) {
     // Small changes on the section as read returns it (Markdown); the rest stays as it is.
-    if (!target || target.level === 0) throw new ToolError('BAD_REQUEST', `replace works on an existing section other than the summary; for "${args.section}" send body.`);
-    let markdown = wikitextToMarkdown(target.body);
+    if (!target) throw new ToolError('BAD_REQUEST', `replace works on an existing section; "${args.section}" does not exist (send body to create it).`);
+    // The summary without its infobox (edit the infobox with section "Infobox").
+    let markdown = wikitextToMarkdown(target.level === 0 ? splitInfobox(target.text).rest : target.body);
     const problems: string[] = [];
     for (const [i, r] of args.replace.entries()) {
       const count = r.old ? markdown.split(r.old).length - 1 : 0;
@@ -407,7 +409,7 @@ export async function editSection(s: Services, caller: Caller, args: {
   // replace edits only what it names: the blank lines after the heading stay as they were.
   const keepLead = args.replace && target && target.level > 0 ? (/^\n*/.exec(target.body)?.[0] ?? '') : '';
   const newBody = keepLead + markdownToWikitext(body, { topLevel: target && target.level > 0 ? Math.min(target.level + 1, 6) : 3 });
-  const oldBody = target ? (target.level === 0 ? target.text : target.body) : '';
+  const oldBody = target ? (target.level === 0 ? splitInfobox(target.text).rest : target.body) : '';
   if (target && oldBody.trim().length > 200 && newBody.length < oldBody.trim().length * 0.7 && !args.reason) {
     throw new ToolError('REASON_REQUIRED', 'This removes more than 30% of the section. Resend with a reason (and evidence if you are correcting information).');
   }

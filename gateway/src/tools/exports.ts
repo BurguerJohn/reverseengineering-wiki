@@ -16,8 +16,9 @@ function ident(raw: unknown, fallback: string): string {
 }
 
 function qualifiedName(raw: unknown, fallback: string): string {
-  // Allows C++ scopes (Foo::Bar) for symbol names in disassemblers.
-  const s = String(raw ?? '').replace(/[^A-Za-z0-9_:~<>]/g, '_').slice(0, 200);
+  // C++ scopes (Foo::Bar), Go and Rust paths (runtime.main, net/http.(*Client).Do): Ghidra and IDA (SN_NOCHECK)
+  // accept them; only whitespace, quotes and control characters become "_".
+  const s = String(raw ?? '').replace(/[^A-Za-z0-9_:~<>.$@?/*()[\],\-]/g, '_').slice(0, 200);
   return s && /[A-Za-z_]/.test(s) ? s : fallback;
 }
 

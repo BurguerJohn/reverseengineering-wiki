@@ -130,7 +130,8 @@ export function lookupBinary(s: Services, args: { sha256?: string; sha1?: string
     distribution: doc.distribution,
     facts_for_this_build: facts.length,
     facts_by_kind: byKind,
-    code: [software, ...s.index.generalNeighbors(software).map((g) => g.title)].flatMap((t) => codeFor(s, t)).slice(0, 8),
+    code: [software, ...s.index.generalNeighbors(software).map((g) => g.title)].flatMap((t) => codeFor(s, t))
+      .filter((c, i, all) => all.findIndex((x) => x.title === c.title) === i).slice(0, 8),
     symbol_map: s.index.symbolCount(build),
     other_builds: s.index.buildsOf(software).filter((b) => b.title !== build).map((b) => b.title),
     open_questions: softwarePage ? s.index.sectionText(software, 'Open questions') : null,
