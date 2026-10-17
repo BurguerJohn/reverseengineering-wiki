@@ -1125,6 +1125,17 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   assert.match(rootHeader.header, /E2eTable_E2eRoot = 0x0,/, rootHeader.header);
   assert.ok(rootHeader.warnings?.some((w: string) => /E2eRoot: 1 field/.test(w)), JSON.stringify(rootHeader.warnings));
 
+  // Plain C builtins in fields; aliases differing in the first letter's case are one; a word inside a subject's name is found.
+  await call(a, 'add_fact', { kind: 'struct', subject: `Library:E2E Lib ${run}`, claim: 'The fictional counter record uses plain C types.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { name: 'E2eCounter', size: 8, fields: [{ offset: 0, size: 4, type: 'unsigned', name: 'count' }, { offset: 4, size: 2, type: 'unsigned short', name: 'flags' }] }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const plain = await call(anon, 'export_header', { subject: `Library:E2E Lib ${run}` });
+  assert.match(plain.header, /\/\* 0x00 \*\/ unsigned count;\n {4}\/\* 0x04 \*\/ unsigned short flags;/, plain.header);
+  assert.ok(!(plain.warnings ?? []).some((w: string) => /\bunsigned\b/.test(w)), JSON.stringify(plain.warnings));
+  const dupAlias = await call(a, 'create_page', { type: 'library', title: `E2E Libzz${run}`, summary: 'A fictional library found by a word inside its name.', body: '## Overview\n\nFictional.', aliases: [`zzalias ${run}`, `Zzalias ${run}`] });
+  assert.equal(dupAlias.aliases?.length, 1, JSON.stringify(dupAlias).slice(0, 400));
+  const inside = await call(anon, 'search', { query: `zz${run}` });
+  assert.ok(inside.hits.some((h: any) => h.title === `Library:E2E Libzz${run}`), JSON.stringify(inside).slice(0, 500));
+
   // 64-bit enum values stay exact; value ranges; size_t compiles; amend fixes a sentence without resending.
   await call(a, 'add_fact', { kind: 'enum', subject: `Library:E2E Lib ${run}`, claim: 'Fictional 64-bit filter ids and a control-byte range.', scope: { level: 'library', applies_to: 'all versions' },
     data: { name: 'E2eFilter', values: { '0x4000000000000001': 'E2E_FILTER_A', '0x4000000000000002': 'E2E_FILTER_B', '0x80-0x9F': 'E2E_CHUNK_RUN' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });

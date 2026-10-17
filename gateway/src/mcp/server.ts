@@ -27,7 +27,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.22';
+export const VERSION = '0.8.23';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -618,7 +618,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       description: z.string(),
       tested_on: z.string(),
       page: z.string().optional().describe('Another page to list it on too (a Code page, say); every subject gets it anyway'),
-      license: z.string().optional().describe('SPDX id, only when the license detector finds none but the repository states one (a text file, file headers)'),
+      license: z.string().optional().describe('SPDX id or expression the repository states ("BSD-3-Clause OR GPL-2.0-only"): used when GitHub\'s detector finds none (dual licenses, COPYING files), so pass it on the first call when you know it'),
     },
     annotations: WRITE,
   }, (c, a) => write.linkRepo(s, c, a));

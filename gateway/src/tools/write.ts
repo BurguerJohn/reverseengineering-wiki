@@ -578,7 +578,7 @@ export async function createPage(s: Services, caller: Caller, args: {
   const aliasTitles = (args.aliases ?? []).map((a) => {
     if (a.includes('/')) throw new ToolError('BAD_TITLE', `Alias "${a}": "/" makes a subpage title; write it with a space or "-" ("${a.replace(/\//g, '-')}").`);
     try { return makeTitle(args.type, nameOf(a)); } catch (e) { throw e instanceof ToolError ? e : new ToolError('BAD_TITLE', `Alias "${a}": ${(e as Error).message}`); }
-  }).filter((a) => a !== t);
+  }).filter((a, i, all) => a !== t && all.indexOf(a) === i);
 
   if (!args.confirm_new) {
     const name = baseName(t);

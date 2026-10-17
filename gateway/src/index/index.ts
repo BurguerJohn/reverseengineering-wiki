@@ -523,6 +523,14 @@ export class SearchIndex {
       }
     }
 
+    // One word inside a subject's name ("zstd" in Library:Libzstd, "jpeg" in Libjpeg-turbo).
+    if (/^[a-z0-9][\w+.-]{3,}$/i.test(q) && !q.includes(':')) {
+      const rows = this.db.prepare(`select title, type, summary, status, revision from pages where redirect_to is null
+        and type in ('software', 'library', 'format', 'platform', 'technique', 'tool')
+        and instr(lower(substr(title, instr(title, ':') + 1)), ?) > 0 limit 10`).all(q) as any[];
+      for (const r of rows) consider({ title: r.title, section: '', type: r.type as PageType, snippet: 'title match', summary: r.summary, status: r.status, revision: r.revision, score: 8 });
+    }
+
     // A page whose title holds every term beats one that only mentions them.
     for (const m of this.titleMatches(opts.query, 20)) {
       const page = this.page(m.title);
@@ -573,6 +581,7 @@ export class SearchIndex {
     // input → subject → titles that matched
     const perInput = new Map<string, Map<string, Set<string>>>();
     const weights = new Map<string, number>();
+    const magicInputs = new Set<string>();
     for (const t of tokens) {
       let rows: Array<{ title: string; subject: string | null }>;
       if (t.kind === 'bytes' && t.prefix) {
@@ -625,6 +634,7 @@ export class SearchIndex {
       }
       perInput.set(t.input, bySubject);
       weights.set(t.input, Math.max(weights.get(t.input) ?? 0, t.weight));
+      if (t.prefix) magicInputs.add(t.input);
     }
 
     const candidates = new Map<string, { subject: string; score: number; matched: Array<{ input: string; pages: string[] }> }>();
@@ -633,7 +643,9 @@ export class SearchIndex {
       for (const [subject, titles] of bySubject) {
         const c = candidates.get(subject) ?? { subject, score: 0, matched: [] };
         const onFact = [...titles].some((t) => t.startsWith('Fact:'));
-        c.score += (weights.get(input) ?? 1) * specificity * (onFact ? 1.5 : 1);
+        // File magic matched by the subject's own magic fact: as telling as a unique string.
+        const onMagicFact = magicInputs.has(input) && [...titles].some((t) => /^Fact:[^/]+\/magic\//.test(t));
+        c.score += (weights.get(input) ?? 1) * specificity * (onMagicFact ? 2 : onFact ? 1.5 : 1);
         c.matched.push({ input, pages: [...titles].slice(0, 5) });
         candidates.set(subject, c);
       }

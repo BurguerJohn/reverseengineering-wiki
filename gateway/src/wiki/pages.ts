@@ -205,7 +205,7 @@ export function checkFactData(kind: FactKind, data: Record<string, unknown>): st
       const ranged = data.size_min !== undefined || data.size_max !== undefined;
       if (data.size === 'variable') {
         // Variable-length records (a count field followed by entries): fine, say how long in notes.
-        if (ranged) problems.push('give either data.size "variable" or data.size_min + data.size_max, not both');
+        if (ranged) problems.push('data.size "variable" and data.size_min/size_max are alternatives: give one of them');
       } else if (data.size !== undefined) {
         if (sizeValue(data.size) === null) problems.push('data.size must be a number or hex string (136 or "0x88"), or "variable" for records whose length depends on a count field; if the exact size is unknown, leave size out and give both size_min and size_max');
         if (ranged) problems.push('give either data.size or data.size_min + data.size_max, not both');

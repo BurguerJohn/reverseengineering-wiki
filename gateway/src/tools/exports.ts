@@ -67,7 +67,7 @@ function dependencyOrder<T extends { kind: string; data: string }>(facts: T[], n
   for (const f of structs) visit(f);
   return [...facts.filter((f) => f.kind === 'enum'), ...out, ...facts.filter((f) => f.kind !== 'enum' && f.kind !== 'struct')];
 }
-const BUILTIN = /^(?:const\s+)?(?:unsigned\s+|signed\s+)?(?:u?int(?:8|16|32|64)_t|u?intptr_t|size_t|char|short|int|long|long long|float|double|void|bool|_Bool|wchar_t|BYTE|WORD|DWORD|QWORD|BOOL)\b/;
+const BUILTIN = /^(?:const\s+)?(?:(?:unsigned|signed)\b(?:\s+(?:char|short|int|long(?:\s+long)?))?|(?:unsigned\s+|signed\s+)?(?:u?int(?:8|16|32|64)_t|u?intptr_t|size_t|ptrdiff_t|char|short|int|long|long long|float|double|void|bool|_Bool|wchar_t|BYTE|WORD|DWORD|QWORD|BOOL)\b)/;
 
 /** A field name that is a description ("type (0 = saved game)"): a short identifier, the rest as a comment. */
 function fieldName(raw: unknown): { name: string; rest?: string } {
@@ -259,7 +259,7 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
         });
       const fields = allFields.filter((x: any) => x.offset !== null).sort((a: any, b: any) => a.offset - b.offset);
       const floating = allFields.filter((x: any) => x.offset === null);
-      const NATURAL: Record<string, number> = { int16_t: 2, uint16_t: 2, int32_t: 4, uint32_t: 4, float: 4, int64_t: 8, uint64_t: 8, double: 8 };
+      const NATURAL: Record<string, number> = { int16_t: 2, uint16_t: 2, int32_t: 4, uint32_t: 4, float: 4, int64_t: 8, uint64_t: 8, double: 8, short: 2, 'unsigned short': 2, int: 4, unsigned: 4, 'unsigned int': 4, 'long long': 8, 'unsigned long long': 8 };
       const misaligned = fields.some((x: any) => {
         const n = x.type ? NATURAL[x.type.replace(/^const\s+/, '')] : undefined;
         return n !== undefined && x.offset % n !== 0;
