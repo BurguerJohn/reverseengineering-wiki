@@ -1201,6 +1201,16 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const both = await call(a, 'publish_checked', { check_id: twice.check_id, dry_run: true, amend: { 1: [{ old: '0x1234', new: '0x4321', all: true }] } });
   assert.ok(!JSON.stringify(both.preview ?? both).includes('0x1234'), JSON.stringify(both).slice(0, 400));
 
+  // What a file only imports is a dependency, not its identity; name patterns ("_ZTV*") in identification facts;
+  // runtime names (free, GetProcAddress) and standard sections are no evidence.
+  const usesIt = await call(anon, 'identify', { imports: [`e2e${run}_start_main`, 'free', 'GetProcAddress'], sections: ['.text', '.data'] });
+  assert.ok(usesIt.candidates[0]?.subject === `Format:E2E Track ${run}` && /dependency/.test(usesIt.candidates[0]?.relation ?? ''), JSON.stringify(usesIt).slice(0, 500));
+  assert.ok(!usesIt.candidates.some((c: any) => c.matched.some((m: any) => ['free', 'GetProcAddress', '.text', '.data'].includes(m.input))), JSON.stringify(usesIt).slice(0, 500));
+  await call(a, 'add_fact', { kind: 'identification', subject: `Library:E2E Lib ${run}`, claim: 'Fictional mangled names of the library share a prefix.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { method: 'symbol names', indicator: `_ZN${run}e2e*` }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const byPattern = await call(anon, 'identify', { exports: [`_ZN${run}e2e5Codec4openEv`] });
+  assert.equal(byPattern.candidates[0]?.subject, `Library:E2E Lib ${run}`, JSON.stringify(byPattern).slice(0, 400));
+
   // PE section names as identify evidence.
   const libNow = await call(anon, 'read', { title: `Library:E2E Lib ${run}` });
   await call(a, 'edit_section', { title: `Library:E2E Lib ${run}`, section: 'Identification', body: `Its loader adds a \`.z${run}\` section.`, base_revision: libNow.revision, summary: 'fictional section name' });

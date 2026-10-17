@@ -208,13 +208,13 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
   const facts = [...groups.values()].flatMap((g) => {
     if (g.length === 1 && (!wanted || !abiOf(g[0]) || abiOf(g[0]) === wanted)) return g;
     const pick = (wanted ? g.find((f) => abiOf(f) === wanted) : undefined) ?? g.find((f) => !abiOf(f)) ?? (wanted ? undefined : [...g].sort((a, b) => abiOf(a).localeCompare(abiOf(b)))[0]);
-    if (!wanted && g.length > 1 && pick && abiOf(pick)) warnings.push(`${nameOf(pick).split(':')[1]} has layouts for ${g.map(abiOf).join(', ')}: this header uses ${abiOf(pick)} (pass abi to choose).`);
+    if (!wanted && g.length > 1 && pick && abiOf(pick)) warnings.push(`${nameOf(pick).split(':')[1]} has layouts for ${g.map(abiOf).join(', ')}: this header uses ${abiOf(pick)} (pass abi or variant to choose).`);
     return pick ? [pick] : [];
   }).sort((a, b) => all.indexOf(a) - all.indexOf(b));
   // A format's byte order (its infobox): fields are stored that way, whatever the machine reading them.
   let endianness = '';
   try { endianness = String(JSON.parse(s.index.page(subject)?.json ?? '{}').infobox?.endianness ?? '').trim(); } catch { /* no infobox */ }
-  const lines = [`/* ${HEADER_NOTE}`, ` * Subject: ${comment(subject)}${also.length ? `\n * Also: ${also.map(comment).join(', ')}` : ''}${build ? `\n * Build: ${comment(build)}` : ''}${wanted ? `\n * ABI: ${comment(wanted)}` : abis.length ? `\n * ABIs with their own layouts: ${abis.map(comment).join(', ')} (pass abi)` : ''}`,
+  const lines = [`/* ${HEADER_NOTE}`, ` * Subject: ${comment(subject)}${also.length ? `\n * Also: ${also.map((x) => comment(x)).join(', ')}` : ''}${build ? `\n * Build: ${comment(build)}` : ''}${wanted ? `\n * ABI: ${comment(wanted)}` : abis.length ? `\n * Layout variants (data.abi or data.variant): ${abis.map((x) => comment(x)).join(', ')} (pass abi or variant)` : ''}`,
     ...(endianness ? [` * Byte order of the format: ${comment(endianness)}${/big/i.test(endianness) ? ' (swap multi-byte fields on little-endian machines)' : ''}`] : []),
     ` * Generated: ${new Date().toISOString()} */`, '#pragma once', '#include <stddef.h>', '#include <stdint.h>', ''];
   const skipped: string[] = [];
@@ -507,7 +507,7 @@ function signaturesOf(s: Services, subject: string): Signature[] {
     const fixed = typeof d.value === 'string' ? d.value.split(/[*?]/).sort((x: string, y: string) => y.length - x.length)[0] : '';
     if (f.kind === 'string' && fixed.length >= 8 && !/utf-?16|wide|ucs/i.test(String(d.encoding ?? '')) && /^[\x20-\x7e]+$/.test(fixed)) {
       const bytes = [...fixed.slice(0, 64)].map((c) => c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join(' ');
-      sigs.push({ name: qualifiedName(d.name ?? `str_${ident(f.title.split('/').pop(), 'string')}`, 'rewiki_string'), pattern: bytes, kind: 'global', status: f.status, fact: f.title, offset: 0, multiple: false });
+      sigs.push({ name: qualifiedName(d.name ?? `str_${ident(f.title.split('/').pop(), 'string')}`, 'rewiki_string'), pattern: bytes, kind: 'string', status: f.status, fact: f.title, offset: 0, multiple: false });
       continue;
     }
     const pattern = typeof d.signature === 'string' ? d.signature : typeof d.pattern === 'string' ? d.pattern : null;
@@ -526,7 +526,7 @@ function signatureScript(s: Services, args: { subject: string; also: string[]; s
   const { subject, sigs } = args;
   const ascii = (x: string) => JSON.stringify(x.replace(/[^\x20-\x7e]/g, '?'));
   const list = sigs.map((x) => `    (${ascii(x.name)}, ${ascii(x.pattern)}, ${ascii(x.kind)}, ${ascii(x.status)}, ${ascii(x.fact)}, ${x.offset}, ${x.multiple ? 'True' : 'False'}),`).join('\n');
-  const head = `# ${HEADER_NOTE}\n# Signatures of: ${[subject, ...args.also].map(comment).join(', ')}\n# Generated: ${new Date().toISOString()}\n`;
+  const head = `# ${HEADER_NOTE}\n# Signatures of: ${[subject, ...args.also].map((x) => comment(x)).join(', ')}\n# Generated: ${new Date().toISOString()}\n`;
   let script: string;
   const magicList = args.magics.map((m) => `    (${ascii(m.meaning)}, ${ascii(m.pattern)}, ${ascii(m.where)}, ${ascii(m.fact)}),`).join('\n');
   if (args.tool === 'json' || args.tool === 'sym') script = JSON.stringify({ subject, also: args.also.length ? args.also : undefined, signatures: sigs, magics: args.magics.length ? args.magics : undefined }, null, 2);
@@ -552,8 +552,16 @@ def offsets(pattern, data, limit=16):
 
 data = open(sys.argv[1], "rb").read()
 found = 0
+def inside_name(pattern, at):
+    end = at + len(pattern.split())
+    ident = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$@"
+    return (at > 0 and data[at - 1] in ident) or (end < len(data) and data[end] in ident)
+
+
 for name, pattern, kind, status, fact, offset, multiple in SIGNATURES:
     hits = offsets(pattern, data)
+    if kind == "string":
+        hits = [h for h in hits if not inside_name(pattern, h)]
     if hits:
         found += 1
         print("%-40s %s  [%s] %s" % (name, ", ".join("0x%X" % (h + offset) for h in hits), status, fact))
@@ -646,7 +654,7 @@ print("ReverseEngineering.wiki: named %d of %d signatures" % (named, len(SIGNATU
   return {
     subject, also: args.also.length ? args.also : undefined, tool: args.tool, signatures: sigs.length, script,
     connected: args.connected.length
-      ? { pages: args.connected, how: `Pages connected to ${subject} with signatures of their own: add them with also=[...] (a fork and its parent library).` } : undefined,
+      ? { pages: args.connected, how: `Pages linked to or from ${subject} that have signatures of their own. Add one with also=[...] only when its code is in the same binary (a bundled library, a fork's parent).` } : undefined,
     hint: sigs.length ? undefined : 'No signature facts on this subject yet: add_fact with data.signature (bytes with ?? wildcards).',
     warning: 'Review generated scripts before running. A function signature that matches more than once is reported, not applied; data tables name every copy.',
   };

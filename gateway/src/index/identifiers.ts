@@ -140,7 +140,7 @@ export function extractFromFactData(data: Record<string, unknown>): Identifier[]
     if (v) add(out, 'string', normalizeString(v));
   }
   if (typeof data.indicator === 'string' && /export|import|symbol|name/i.test(String(data.method ?? ''))) {
-    for (const name of data.indicator.split(/[\s,;]+/)) if (/^[A-Za-z_?@][\w:@?$<>~.]{2,}$/.test(name)) add(out, 'symbol', normalizeSymbol(name));
+    for (const name of data.indicator.split(/[\s,;]+/)) if (/^[A-Za-z_?@][\w:@?$<>~.*]{1,}$/.test(name) && name.replace(/\*/g, '').length >= 2) add(out, 'symbol', normalizeSymbol(name));
   }
   const address = data.address as { value?: unknown } | undefined;
   if (address && typeof address.value === 'string') {
@@ -190,8 +190,18 @@ export interface Evidence {
 }
 
 /** Turns identify() inputs into lookup tokens, remembering which input each came from. */
-export function evidenceTokens(e: Evidence): Array<Identifier & { input: string; weight: number; prefix?: boolean }> {
-  const out: Array<Identifier & { input: string; weight: number; prefix?: boolean }> = [];
+/** Section and segment names every executable has: no evidence of what the file contains. */
+const STANDARD_SECTIONS = new Set(['.text', '.data', '.rdata', '.bss', '.idata', '.edata', '.pdata', '.xdata', '.reloc', '.rsrc', '.tls', '.crt', '.gfids', '.00cfg', '.didat', '.rodata', '.init', '.fini', '.plt', '.got', '.got.plt', '.dynamic', '.dynsym', '.dynstr', '.symtab', '.strtab', '.shstrtab', '.eh_frame', '.eh_frame_hdr', '.comment', '.init_array', '.fini_array', '.ctors', '.dtors', '.interp', '.hash', '.gnu.hash', '.note', '.debug', '__text', '__data', '__const', '__bss', '__text__', '__data__']);
+
+/** C runtime and core OS names nearly every program imports or contains: no evidence of what it is. */
+export const RUNTIME_NAMES = new Set(`abort abs acos asin atan atan2 atexit atof atoi atol bsearch calloc ceil cos cosh exit exp fabs fclose feof ferror fflush fgetc fgets floor fmod fopen fprintf fputc fputs fread free freopen frexp fscanf fseek ftell fwrite getc getchar getenv gmtime isalnum isalpha isdigit isspace isupper islower isxdigit labs ldexp localtime log log10 longjmp malloc memchr memcmp memcpy memmove memset mktime modf perror pow printf putc putchar puts qsort raise rand realloc remove rename rewind scanf setjmp setlocale setvbuf signal sin sinh snprintf sprintf sqrt srand sscanf strcat strchr strcmp strcoll strcpy strcspn strerror strftime strlen strncat strncmp strncpy strpbrk strrchr strspn strstr strtod strtok strtol strtoul strxfrm system tan tanh time tmpfile tolower toupper ungetc vfprintf vprintf vsnprintf vsprintf wcslen wcscmp wcscpy _errno __errno_location __acrt_iob_func __stdio_common_vfprintf __stdio_common_vsprintf _initterm _initterm_e _cexit _exit _amsg_exit __getmainargs __set_app_type __p___argc __p___argv _onexit __dllonexit __iob_func _lock _unlock __C_specific_handler __cxa_atexit __cxa_finalize __libc_start_main __stack_chk_fail __stack_chk_guard __gmon_start__ _ITM_registerTMCloneTable _ITM_deregisterTMCloneTable GetProcAddress LoadLibraryA LoadLibraryW LoadLibraryExW GetModuleHandleA GetModuleHandleW GetModuleFileNameA GetModuleFileNameW FreeLibrary GetLastError SetLastError GetCurrentProcess GetCurrentProcessId GetCurrentThreadId GetTickCount QueryPerformanceCounter GetSystemTimeAsFileTime Sleep ExitProcess TerminateProcess VirtualAlloc VirtualFree VirtualProtect VirtualQuery HeapAlloc HeapFree HeapReAlloc GetProcessHeap CloseHandle CreateFileA CreateFileW ReadFile WriteFile SetFilePointer GetFileSize InitializeCriticalSection InitializeCriticalSectionAndSpinCount EnterCriticalSection LeaveCriticalSection DeleteCriticalSection TlsAlloc TlsGetValue TlsSetValue TlsFree IsDebuggerPresent UnhandledExceptionFilter SetUnhandledExceptionFilter RtlCaptureContext RtlLookupFunctionEntry RtlVirtualUnwind IsProcessorFeaturePresent GetStartupInfoW MultiByteToWideChar WideCharToMultiByte OutputDebugStringA GetEnvironmentVariableA GetEnvironmentVariableW`.split(/\s+/).map((n) => n.toLowerCase()));
+
+export function isStandardSection(name: string): boolean {
+  return STANDARD_SECTIONS.has(name.trim().toLowerCase());
+}
+
+export function evidenceTokens(e: Evidence): Array<Identifier & { input: string; weight: number; prefix?: boolean; source?: string }> {
+  const out: Array<Identifier & { input: string; weight: number; prefix?: boolean; source?: string }> = [];
   for (const s of e.strings ?? []) {
     out.push({ kind: 'string', token: normalizeString(s), input: s, weight: 2 });
     // An identifier-like string ("GLIBC_2.34", a version node or a name) is also looked up as a symbol.
@@ -209,22 +219,24 @@ export function evidenceTokens(e: Evidence): Array<Identifier & { input: string;
     if (token) out.push({ kind: 'bytes', token, input: p, weight: 3 });
   }
   // A versioned name also matches the bare name ("__libc_start_main@GLIBC_2.34" and "__libc_start_main").
-  const symbols = (list: string[] | undefined, weight: number) => {
+  const symbols = (list: string[] | undefined, weight: number, source: string) => {
     for (const s of list ?? []) {
       const token = normalizeSymbol(s);
-      out.push({ kind: 'symbol', token, input: s, weight });
       const [name] = versionedParts(token);
-      if (name) out.push({ kind: 'symbol', token: name, input: s, weight });
+      if (RUNTIME_NAMES.has(name ?? token)) continue; // free, memcpy, GetProcAddress: every program has them
+      out.push({ kind: 'symbol', token, input: s, weight, source });
+      if (name) out.push({ kind: 'symbol', token: name, input: s, weight, source });
     }
   };
-  // Section names (".ndata", "UPX0") are written in prose as strings or names.
+  // Section names (".ndata", "UPX0") are written in prose as strings or names; .text and .data say nothing.
   for (const n of e.sections ?? []) {
-    out.push({ kind: 'string', token: normalizeString(n), input: n, weight: 2.5 });
-    out.push({ kind: 'symbol', token: normalizeSymbol(n), input: n, weight: 2.5 });
+    if (isStandardSection(n)) continue;
+    out.push({ kind: 'string', token: normalizeString(n), input: n, weight: 2.5, source: 'sections' });
+    out.push({ kind: 'symbol', token: normalizeSymbol(n), input: n, weight: 2.5, source: 'sections' });
   }
-  symbols(e.imports, 1);
-  symbols(e.exports, 2);
-  symbols(e.symbols, 2);
+  symbols(e.imports, 1, 'imports');
+  symbols(e.exports, 2, 'exports');
+  symbols(e.symbols, 2, 'symbols');
   for (const s of e.rtti ?? []) out.push({ kind: 'rtti', token: s.trim().toLowerCase(), input: s, weight: 3 });
   return out.filter((t) => t.token);
 }

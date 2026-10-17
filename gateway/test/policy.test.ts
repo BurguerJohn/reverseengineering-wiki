@@ -105,7 +105,7 @@ test('identifiers', () => {
   // ELF symbol versions: the name and the version node are found on their own.
   const versioned = extractFromText('Calls `__libc_start_main@GLIBC_2.34` since 2.34').map((i) => `${i.kind}:${i.token}`);
   assert.ok(versioned.includes('symbol:__libc_start_main') && versioned.includes('symbol:glibc_2.34'), versioned.join(' '));
-  assert.ok(evidenceTokens({ imports: ['memcpy@@GLIBC_2.14'] }).some((t) => t.token === 'memcpy'));
+  assert.ok(evidenceTokens({ imports: ['png_read_info@@PNG16_0'] }).some((t) => t.token === 'png_read_info') && !evidenceTokens({ imports: ['memcpy@@GLIBC_2.14', 'GetProcAddress'] }).length);
   assert.ok(evidenceTokens({ strings: ['GLIBC_2.34'] }).some((t) => t.kind === 'symbol' && t.token === 'glibc_2.34'));
   const enumIds = extractFromFactData({ name: 'Err', values: { '-0x7000': 'ERR_FEATURE', '-1': 'ERR_GENERIC' } }).map((i) => `${i.kind}:${i.token}`);
   assert.ok(enumIds.includes('hex:7000') && enumIds.includes('symbol:err_feature') && !enumIds.includes('hex:1'), enumIds.join(' '));

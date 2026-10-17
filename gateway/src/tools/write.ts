@@ -1026,6 +1026,10 @@ export async function linkRepo(s: Services, caller: Caller, args: {
     }
     const file = /^unrecognized \(([^)]+)\)/.exec(info.license)?.[1];
     info.license = `${args.license} (declared by the contributor; GitHub's detector did not recognize ${file ?? 'a license file'})`;
+  } else if (args.license && args.license.trim() !== info.license) {
+    // The files used may be under another license than the repository's root (libstdc++ in GCC).
+    if (!SPDX_EXPRESSION.test(args.license.trim())) throw new ToolError('BAD_REQUEST', 'license must be an SPDX id or expression, e.g. MIT, GPL-2.0-only, "Apache-2.0 WITH LLVM-exception".');
+    info.license = `${args.license.trim()} (declared by the contributor for the files used; GitHub reports ${info.license} for the repository)`;
   }
   const checked = [
     `checked ${new Date().toISOString().slice(0, 10)}`,

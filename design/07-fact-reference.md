@@ -33,7 +33,7 @@ Every kind also takes `test_vectors` and `samples` (below). Every fact needs `ev
 
 - Struct fields: `{offset, size, type, name, notes?, bits?, condition?}`. Types as C spells them (`uint32_t`, `unsigned short`, `const char *`, `Foo *`); `uint8`, `u32`, `int16_le`, `uint32_be`, `f32` are read as stdint types with the byte order noted.
 - `bits: [{bit: "0" or "4-5", name, notes?}]` for flags; `condition: "flags & 0x08"` for a field present only when a flag is set.
-- Exact size unknown: `size_min` and/or `size_max`. Entries after a header or a trailing name: the last field typed `T[]` or `T[count_field]` (a C flexible array member; `size` is then the fixed part or `"variable"`). A field after a variable part can have an offset like `"4+length"`: it is written as a comment.
+- Exact size unknown: `size_min` and/or `size_max`. Entries after a header or a trailing name: the last field typed `T[]` or `T[count_field]` (a C flexible array member; `size` is then the fixed part, or `"variable"` without `size_min`/`size_max`). A field after a variable part can have an offset like `"4+length"`: it is written as a comment.
 - Library types (`FT_Long`, `DWORD`, `j_common_ptr`): one `typedef` fact each (`{name, type}`), so headers use them instead of bytes.
 - Layouts that differ by ABI: `data.abi` (`"win64"`, `"lp64"`, `"ilp32"`) on struct and typedef facts, one fact per ABI; `export_header` takes `abi`. Other variants of one layout (a 32- or 64-bit target of a file format, ANSI or Unicode): `data.variant`, and `export_header` takes `variant`.
 - Enum values: `{"0": "NAME"}`, `{"NAME": "0x10"}`, `[{name, value, notes}]`, negative (`"-0x7000"`), 64-bit (`"0x4000000000000001"`, kept exact), character codes (`"'A'"`), ranges (`"0x80-0x9F"`: exported as the first value, with the range in a comment) and sums (`"0xEFFE0000 + 19970605"`, computed for you). Values written in decimal stay decimal in headers. Keep names C identifiers; explanations go in `notes`.
@@ -45,7 +45,7 @@ Every kind also takes `test_vectors` and `samples` (below). Every fact needs `ev
 - `multiple: true` names every match (thunks, inlined helpers); data tables compiled in several times get every copy named. A variant (an optional `endbr64` prefix) is a second fact with the same name.
 - Make a pattern unique: test it on several builds and on unrelated binaries. The server warns when it overlaps another subject's facts (a bundled copy: say so in the claim; otherwise lengthen it).
 - Magic: `bytes`, `offset`, `meaning`, optional `mask`; `relative_to` when the offset counts from a table or section, not the file start.
-- Identification by exports or imports: list the names in `indicator` (comma-separated) with `method: "exports"`; `identify` also finds names in builds' symbol maps and code-like names in article text.
+- Identification by exports or imports: list the names in `indicator` (comma-separated, `*` for a name pattern such as `_ZTV*`) with `method: "exports"`; `identify` also finds names in builds' symbol maps and code-like names in article text.
 - String facts (ASCII) are byte signatures too: subject scripts name where the string sits (for a string with `*`, its longest fixed part of 8+ characters).
 - Strings: `*` for a variable part and `?` for one character (`"fts5: ????-??-?? *"`) (`"Copyright (C) 1991-* The libjpeg-turbo Project"`); `identify` also matches versions and years with other digits.
 

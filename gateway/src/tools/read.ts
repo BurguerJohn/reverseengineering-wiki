@@ -89,16 +89,36 @@ function codeFor(s: Services, subject: string): Array<{ title: string; status: s
     .map((t) => { const p = s.index.page(t); return { title: t, status: p?.status ?? null, summary: (p?.summary ?? '').slice(0, 160) }; });
 }
 
+/** Magic of executable containers (MZ, ELF, Mach-O): it says what kind of file it is, not what it contains. */
+const CONTAINER_MAGIC = /^\s*(?:4d\s*5a|7f\s*45\s*4c\s*46|c[ef]\s*fa\s*ed\s*fe|fe\s*ed\s*fa\s*c[ef]|ca\s*fe\s*ba\s*be)/i;
+
 export function identify(s: Services, evidence: Evidence & { limit?: number }) {
-  const candidates = s.index.identify(evidence, evidence.limit ?? 5).map((c: any) => {
+  const imported = new Set(evidence.imports ?? []);
+  // A distinctive section (".ndata", "UPX0") is content evidence; only the executable magic says "container".
+  const containerInputs = new Set((evidence.magic ?? []).filter((m) => CONTAINER_MAGIC.test(m)));
+  const all = s.index.identify(evidence, (evidence.limit ?? 5) + 4).map((c: any) => {
     const code = c.subject ? codeFor(s, c.subject) : [];
-    return code.length ? { ...c, code } : c;
+    const inputs = (c.matched ?? []).map((m: any) => m.input);
+    // Only imported names matched: the file uses this library (a DLL it loads), it is not that library.
+    const usesOnly = inputs.length > 0 && inputs.every((i: string) => imported.has(i));
+    return {
+      ...c,
+      ...(usesOnly ? { relation: 'imports it (a dependency of this file, not the file itself)', confidence: c.confidence === 'high' ? 'medium' : c.confidence } : {}),
+      ...(code.length ? { code } : {}),
+      _container: inputs.length > 0 && inputs.every((i: string) => containerInputs.has(i)),
+    };
   });
+  const container = all.filter((c: any) => c._container).map(({ _container: _, ...c }: any) => ({ subject: c.subject, matched: c.matched }));
+  const candidates = all.filter((c: any) => !c._container).map(({ _container: _, ...c }: any) => c)
+    .sort((a: any, b: any) => Number(!!a.relation) - Number(!!b.relation) || b.score - a.score).slice(0, evidence.limit ?? 5);
   return {
     candidates,
+    container: container.length ? container : undefined,
     hint: candidates.length
-      ? 'Read the top candidate\'s Identification section to confirm.'
-      : 'No match. If you identify it yourself, add an identification fact so the next agent gets a match.',
+      ? 'Read the top candidate\'s Identification section to confirm; then export_symbols with that subject (tool "scan", or ghidra/ida) finds its signatures in your file.'
+      : container.length
+        ? 'Only the container format matched: the wiki has nothing yet on what this file contains. Try more distinctive strings (banners, error messages, version text), or search; once you know what it is, its general page (library, format) is worth creating.'
+        : 'No match. If you identify it yourself, add an identification fact so the next agent gets a match.',
   };
 }
 

@@ -630,10 +630,15 @@ export class SearchIndex {
       } else {
         rows = this.db.prepare(`select i.title, p.subject from identifiers i join pages p on p.title = i.title
           where i.kind = ? and i.token = ? limit 100`).all(t.kind, t.token) as any[];
-        if (t.kind === 'symbol') {
+        if (t.kind === 'symbol' && t.source !== 'imports') {
           const mapped = this.db.prepare(`select distinct s.title, b.software as subject from symbols s join builds b on b.title = s.build
             where lower(s.name) = ? limit 50`).all(t.token) as any[];
           rows = [...rows, ...mapped];
+        }
+        if (t.kind === 'symbol') {
+          const globs = this.db.prepare(`select i.title, i.token, p.subject from identifiers i join pages p on p.title = i.title
+            where i.kind = 'symbol' and instr(i.token, '*') > 0 limit 2000`).all() as Array<{ title: string; token: string; subject: string | null }>;
+          rows = [...rows, ...globs.filter((g) => globMatch(g.token, t.token))];
         }
       }
       if (!rows.length) continue;
