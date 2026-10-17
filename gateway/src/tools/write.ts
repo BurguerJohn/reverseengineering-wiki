@@ -779,9 +779,14 @@ export async function linkRepo(s: Services, caller: Caller, args: {
   assertClean([...scanText(`${args.description}\n${args.tested_on}`, 'summary'), ...scanText(args.url, 'repo')]);
   const subjects = args.subjects.map((x) => subjectRoot(title(s, x, SUBJECTS)));
   if (!subjects.length) throw new ToolError('BAD_REQUEST', 'At least one subject is required.');
-  const target = args.page ? title(s, args.page, [...SUBJECTS, 'code']) : subjects[0];
-  const page = await currentPage(s, target);
-  if (!page) throw new ToolError('NOT_FOUND', `"${target}" does not exist. Create the subject page first.`);
+  // On the page given, or on every subject named (each gets the repository in Code & repositories).
+  const targets = args.page ? [title(s, args.page, [...SUBJECTS, 'code'])] : [...new Set(subjects)];
+  const pages = [];
+  for (const t of targets) {
+    const found = await currentPage(s, t);
+    if (!found) throw new ToolError('NOT_FOUND', `"${t}" does not exist. Create the subject page first.`);
+    pages.push({ target: t, page: found });
+  }
 
   const info = await resolveRepo(args.url, args.commit);
   const checked = [
@@ -793,19 +798,25 @@ export async function linkRepo(s: Services, caller: Caller, args: {
   ].filter(Boolean).join('; ');
   const entry = renderRepo({ url: info.url, commit: info.commit, license: info.license, description: args.description, tested_on: args.tested_on, checked });
 
-  let sections = parseSections(page.content);
-  const section = findSection(sections, 'Code & repositories');
-  const lines = (section?.body ?? '').split('\n').filter((l) => !l.startsWith(`{{Repo|url=${info.url}|`));
-  const replaced = parseRepos(section?.body ?? '').some((r) => r.url === info.url);
-  const body = [...lines.filter((l) => l.trim() && !/Nothing documented yet/.test(l)), `* ${entry}`]
-    .map((l) => (l.startsWith('{{Repo|') ? `* ${l}` : l)).join('\n');
-  sections = section ? replaceSectionBody(sections, 'Code & repositories', body) : insertSection(sections, 'Code & repositories', body, ['Pitfalls', 'Open questions', 'Evidence & references', 'See also']);
-  const r = await mwEdit(s, op, {
-    title: target, text: joinSections(sections), baserevid: page.revid, nocreate: true, tags: ['rewiki-code'],
-    summary: `${replaced ? 'Update pinned commit of' : 'Link repository'} ${info.url} @ ${info.commit.slice(0, 10)}`,
-  });
-  await afterWrite(s, op, [target]);
+  let r: { newrevid?: number } = {};
+  for (const { target, page } of pages) {
+    let sections = parseSections(page.content);
+    const section = findSection(sections, 'Code & repositories');
+    const lines = (section?.body ?? '').split('\n').filter((l) => !l.startsWith(`{{Repo|url=${info.url}|`));
+    const replaced = parseRepos(section?.body ?? '').some((x) => x.url === info.url);
+    const body = [...lines.filter((l) => l.trim() && !/Nothing documented yet/.test(l)), `* ${entry}`]
+      .map((l) => (l.startsWith('{{Repo|') ? `* ${l}` : l)).join('\n');
+    sections = section ? replaceSectionBody(sections, 'Code & repositories', body) : insertSection(sections, 'Code & repositories', body, ['Pitfalls', 'Open questions', 'Evidence & references', 'See also']);
+    const edit = await mwEdit(s, op, {
+      title: target, text: joinSections(sections), baserevid: page.revid, nocreate: true, tags: ['rewiki-code'],
+      summary: `${replaced ? 'Update pinned commit of' : 'Link repository'} ${info.url} @ ${info.commit.slice(0, 10)}`,
+    });
+    if (target === pages[0].target) r = edit;
+    await afterWrite(s, op, [target]);
+  }
+  const target = pages[0].target;
   return result(s, target, r.newrevid, {
+    listed_on: pages.length > 1 ? pages.map((p) => p.target) : undefined,
     repository: info, warnings: [info.license === 'none' ? 'Repository has no license; agents cannot legally reuse it.' : null,
       info.binaryReleaseAssets ? 'Release contains binaries; they are flagged, not linked.' : null].filter(Boolean),
   });

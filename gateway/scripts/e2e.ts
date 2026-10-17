@@ -792,6 +792,15 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const header = (await call(anon, 'export_header', { subject: `Format:E2E Track ${run}` })).header;
   assert.match(header, /uint8_t entry\[0x10\]; \/\* ObjectEntry \(defined on another page\)/, header);
   assert.match(header, /uint8_t kind; \/\* kind \(0 = coaster, 1 = flat ride\)/, header);
+  // Enum values in the documented {"0": "Name"} form become enumerators.
+  await call(a, 'add_fact', { kind: 'enum', subject: `Format:E2E Track ${run}`, claim: 'The fictional track kind byte selects coaster or flat ride.', scope: { level: 'format', applies_to: 'all versions' },
+    data: { name: 'TrackKind', values: { 0: 'Coaster', 1: 'FlatRide' } }, evidence: [{ type: 'documentation', detail: 'fictional test data' }], confidence: 'low' });
+  const withEnum = (await call(anon, 'export_header', { subject: `Format:E2E Track ${run}` })).header;
+  assert.match(withEnum, /typedef enum TrackKind \{\n {4}Coaster = 0x0,\n {4}FlatRide = 0x1,\n\} TrackKind;/, withEnum);
+  // read with format wikitext returns only the section asked for.
+  const rawSection = await call(anon, 'read', { title: `Format:${chunk}`, section: 'Users', format: 'wikitext' });
+  assert.match(rawSection.content, /== Users ==/);
+  assert.doesNotMatch(rawSection.content, /\{\{Infobox/);
   // The dry-run quota follows the account's current trust, not the one it had when the session started.
   {
     const { DatabaseSync } = await import('node:sqlite');
@@ -825,7 +834,7 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const track = await call(anon, 'read', { title: `Format:E2E Track ${run}` });
   assert.ok(track.general_pages?.some((g: any) => g.title === `Format:${chunk}`), JSON.stringify(track.general_pages));
   const chunked = await call(anon, 'read', { title: `Format:${chunk}` });
-  assert.ok(chunked.general_pages?.some((g: any) => g.title === `Format:E2E Track ${run}` && g.facts === 1), JSON.stringify(chunked.general_pages));
+  assert.ok(chunked.general_pages?.some((g: any) => g.title === `Format:E2E Track ${run}` && g.facts === 2), JSON.stringify(chunked.general_pages));
   const browse = await call(anon, 'search', { query: '*', types: ['format'], limit: 50 });
   assert.ok(browse.total >= 2 && browse.hits.some((h: any) => h.title === `Format:${chunk}`), JSON.stringify(browse).slice(0, 300));
 

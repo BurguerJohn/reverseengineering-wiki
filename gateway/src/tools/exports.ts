@@ -48,6 +48,26 @@ function cType(raw: unknown): string | null {
   return C_TYPE.test(s) ? s : null;
 }
 
+/**
+ * Enum values as agents write them: {"0": "Rifle"} (the documented form), {"Rifle": 0},
+ * [{name, value}] or ["Rifle", "Shotgun"].
+ */
+function enumValues(raw: unknown): Array<{ name: string; value: number | null }> {
+  if (Array.isArray(raw)) {
+    return raw.map((v, i) => (typeof v === 'string' ? { name: v, value: i } : { name: String(v?.name ?? ''), value: hexNum(v?.value) }));
+  }
+  if (raw && typeof raw === 'object') {
+    return Object.entries(raw as Record<string, unknown>).map(([k, v]) => {
+      const keyNumber = hexNum(k);
+      if (keyNumber !== null && typeof v === 'string') return { name: v, value: keyNumber };
+      const valueNumber = hexNum(v);
+      if (valueNumber !== null) return { name: k, value: valueNumber };
+      return { name: k, value: null };
+    }).sort((a, b) => (a.value ?? 0) - (b.value ?? 0));
+  }
+  return [];
+}
+
 let sIndex: Services['index'] | undefined;
 
 function cleanTitle(raw: string, allowed: readonly PageType[]): string {
@@ -115,9 +135,8 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
     } else if (f.kind === 'enum') {
       const name = ident(data.name, 'UnnamedEnum');
       lines.push(`typedef enum ${name} {`);
-      for (const v of Array.isArray(data.values) ? data.values : []) {
-        const value = hexNum(v.value);
-        lines.push(`    ${ident(v.name, 'VALUE')}${value !== null ? ` = 0x${value.toString(16).toUpperCase()}` : ''},`);
+      for (const v of enumValues(data.values)) {
+        lines.push(`    ${ident(v.name, 'VALUE')}${v.value !== null ? ` = 0x${v.value.toString(16).toUpperCase()}` : ''},`);
       }
       lines.push(`} ${name};`, '');
     } else if (f.kind === 'vtable') {

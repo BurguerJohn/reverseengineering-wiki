@@ -152,7 +152,8 @@ export function sizeValue(v: unknown): number | null {
 /** Fields of data that are not standard for the kind: published with a warning, not refused. */
 export function unknownFactFields(kind: FactKind, data: Record<string, unknown>): string[] {
   const spec = FACT_DATA[kind];
-  const known = new Set([...spec.required, ...(spec.one_of ?? []), ...spec.optional, 'notes']);
+  // On every kind: test vectors (input → expected output) and public sample files (url + sha256).
+  const known = new Set([...spec.required, ...(spec.one_of ?? []), ...spec.optional, 'notes', 'test_vectors', 'samples']);
   return Object.keys(data).filter((k) => !known.has(k));
 }
 

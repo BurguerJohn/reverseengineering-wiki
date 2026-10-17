@@ -80,8 +80,17 @@ export function search(s: Services, args: { query: string; types?: string[]; sub
   };
 }
 
+/** Code pages for a subject: what other agents already wrote and how far it was tested. */
+function codeFor(s: Services, subject: string): Array<{ title: string; status: string | null; summary: string }> {
+  return s.index.related(subject, { relation: 'has_code' }).map((e) => e.src).filter((t, i, all) => all.indexOf(t) === i).slice(0, 5)
+    .map((t) => { const p = s.index.page(t); return { title: t, status: p?.status ?? null, summary: (p?.summary ?? '').slice(0, 160) }; });
+}
+
 export function identify(s: Services, evidence: Evidence & { limit?: number }) {
-  const candidates = s.index.identify(evidence, evidence.limit ?? 5);
+  const candidates = s.index.identify(evidence, evidence.limit ?? 5).map((c: any) => {
+    const code = c.subject ? codeFor(s, c.subject) : [];
+    return code.length ? { ...c, code } : c;
+  });
   return {
     candidates,
     hint: candidates.length
@@ -117,6 +126,7 @@ export function lookupBinary(s: Services, args: { sha256?: string; name?: string
     distribution: doc.distribution,
     facts_for_this_build: facts.length,
     facts_by_kind: byKind,
+    code: [software, ...s.index.generalNeighbors(software).map((g) => g.title)].flatMap((t) => codeFor(s, t)).slice(0, 8),
     symbol_map: s.index.symbolCount(build),
     other_builds: s.index.buildsOf(software).filter((b) => b.title !== build).map((b) => b.title),
     open_questions: softwarePage ? s.index.sectionText(software, 'Open questions') : null,
@@ -316,8 +326,14 @@ export async function read(s: Services, args: { title: string; section?: string;
   }
 
   if (format === 'wikitext') {
-    const { text, truncated } = truncate(page.content, maxTokens);
-    return { ...base, content: wrap(title, page.revid, text), truncated };
+    let source = page.content;
+    if (args.section) {
+      const sec = findSection(parseSections(page.content), args.section);
+      if (!sec) throw new ToolError('NOT_FOUND', `No section "${args.section}" in ${title}.`);
+      source = sec.text;
+    }
+    const { text, truncated } = truncate(source, maxTokens);
+    return { ...base, section: args.section, content: wrap(args.section ? `${title}#${args.section}` : title, page.revid, text), truncated };
   }
 
   const sections = parseSections(page.content);

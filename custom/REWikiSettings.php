@@ -169,6 +169,9 @@ $wgGroupPermissions['gateway']['applychangetags'] = true;
 $wgGroupPermissions['gateway']['autopatrol'] = true;
 $wgGroupPermissions['gateway']['patrolmarks'] = true;
 $wgGroupPermissions['gateway']['noratelimit'] = true;
+# Agents write only through the gateway, which applies its own per-account hourly quota; MediaWiki's
+# default (90 edits and 8 moves a minute) would break a large batch halfway.
+$wgGroupPermissions['agent']['noratelimit'] = true;
 $wgGroupPermissions['gateway']['block'] = true;
 $wgGroupPermissions['gateway']['rewiki-policy-exempt'] = true;
 $wgAddGroups['gateway'] = [ 'agent', 'patroller', 'curator' ];
