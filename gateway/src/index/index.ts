@@ -602,7 +602,9 @@ export class SearchIndex {
         // A pattern of 4+ bytes found inside a published signature, or containing one; ?? matches any byte.
         const all = this.db.prepare(`select i.title, i.token, p.subject from identifiers i join pages p on p.title = i.title
           where i.kind = 'bytes' limit 20000`).all() as Array<{ title: string; token: string; subject: string | null }>;
-        rows = all.filter((r) => r.token === t.token || (r.token.length >= 8 && (bytesContain(r.token, t.token, 3) || bytesContain(t.token, r.token, 3))));
+        // The contained side needs 3+ different byte values: zero runs and fill bytes fit inside any table.
+        const varied = (token: string) => new Set((token.match(/../g) ?? []).filter((x) => x !== '..')).size >= 3;
+        rows = all.filter((r) => r.token === t.token || (r.token.length >= 8 && ((varied(t.token) && bytesContain(r.token, t.token, 3)) || (varied(r.token) && bytesContain(t.token, r.token, 3)))));
       } else if (t.kind === 'string') {
         rows = this.db.prepare(`select i.title, p.subject from identifiers i join pages p on p.title = i.title
           where i.kind = 'string' and (i.token = ?

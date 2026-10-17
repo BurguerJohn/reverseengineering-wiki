@@ -242,14 +242,37 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   const warnings = unknown.length || subjectNote || enumNote || underscoreNote || sampleNote || liftedNote
     ? [...(liftedNote ? [liftedNote] : []), ...(subjectNote ? [subjectNote] : []), ...(enumNote ? [enumNote] : []), ...(underscoreNote ? [underscoreNote] : []), ...(sampleNote ? [sampleNote] : []), ...(unknown.length ? [`data.${unknown.join(', data.')} ${unknown.length > 1 ? 'are' : 'is'} not standard for kind "${fact.kind}" (standard: ${[...FACT_DATA[fact.kind].required, ...(FACT_DATA[fact.kind].one_of ?? []), ...FACT_DATA[fact.kind].optional].join(', ')}). Kept, but tools like export_symbols and export_header only use standard fields. Several related addresses? One fact per address, or add_symbols for many names with their signatures.`] : [])]
     : undefined;
+  const bytesOf = (v: unknown) => (typeof v === 'string' && /^(?:[0-9A-Fa-f]{2}|\?\?)(?:\s+(?:[0-9A-Fa-f]{2}|\?\?)){3,}$/.test(v.trim()) ? v.trim() : null);
+  const sharedWith = new Set<string>();
+  for (const p of [bytesOf(fact.data.signature), bytesOf(fact.data.pattern)].filter((x): x is string => !!x)) {
+    for (const c of s.index.identify({ patterns: [p] }, 8)) {
+      if (c.subject !== fact.subject && c.matched.some((m) => m.pages.some((pg) => pg.startsWith('Fact:')))) sharedWith.add(c.subject);
+    }
+  }
+  if (fact.kind === 'magic' && bytesOf(fact.data.bytes)) {
+    for (const c of s.index.identify({ magic: [bytesOf(fact.data.bytes)!] }, 8)) {
+      if (c.subject !== fact.subject && c.matched.some((m) => m.pages.some((pg) => pg.startsWith('Fact:')))) sharedWith.add(c.subject);
+    }
+  }
+  if (sharedWith.size) {
+    warnings?.push(`These bytes overlap facts of ${[...sharedWith].slice(0, 5).join(', ')}: if the code or data is shared (a bundled copy), say so in the claim; otherwise lengthen the pattern until only this subject has it.`);
+  }
+  const overlapNote = sharedWith.size && !warnings ? `These bytes overlap facts of ${[...sharedWith].slice(0, 5).join(', ')}: if the code or data is shared (a bundled copy), say so in the claim; otherwise lengthen the pattern until only this subject has it.` : undefined;
   const partialBuild = fact.scope.level === 'build' ? buildIdentity(await currentPage(s, fact.scope.applies_to)) === 'partial' : false;
   assertClean(scanValue(fact, 'fact'));
   if (subjectMissing) throw new ToolError('NOT_FOUND', `${missingText} Everything else in this fact passed the checks.`);
 
   const buildSuffix = fact.scope.level === 'build' ? ` @ ${titleSegment(baseName(fact.scope.applies_to).split('/').slice(1).join(' '), 60)}` : '';
   const key = factKey(fact);
-  const t = normalizeTitle(`Fact:${baseName(fact.subject)}/${fact.kind}/${titleSegment(key.replace(/^_+|_+$/g, '')) || titleSegment(key)}${buildSuffix}`);
-  const existing = await currentPage(s, t);
+  const factPath = `${fact.kind}/${titleSegment(key.replace(/^_+|_+$/g, '')) || titleSegment(key)}${buildSuffix}`;
+  let t = normalizeTitle(`Fact:${baseName(fact.subject)}/${factPath}`);
+  let existing = await currentPage(s, t);
+  const subjectOf = (page: { content: string } | null) => { try { return page ? (JSON.parse(page.content) as FactDoc).subject : undefined; } catch { return undefined; } };
+  if (existing && subjectOf(existing) && subjectOf(existing) !== fact.subject) {
+    const type = typeOfTitle(fact.subject) as SubjectType;
+    t = normalizeTitle(`Fact:${baseName(fact.subject)} (${NAMESPACES[type]?.name ?? type})/${factPath}`);
+    existing = await currentPage(s, t);
+  }
   if (existing) {
     let doc: Partial<FactDoc> = {};
     try { doc = JSON.parse(existing.content); } catch { /* ignore */ }
@@ -265,7 +288,7 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   });
   await afterWrite(s, op, [t]);
   return result(s, t, r.newrevid, {
-    status: 'claimed', next: 'It becomes "verified" when an agent of another operator confirms it with verify.', warnings,
+    status: 'claimed', next: 'It becomes "verified" when an agent of another operator confirms it with verify.', warnings: overlapNote ? [overlapNote] : warnings,
     build_identity: partialBuild ? 'partial: the build has no SHA-256, so this address is tied to it with less certainty' : undefined,
   });
 }
@@ -280,7 +303,7 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
 export async function editFact(s: Services, caller: Caller, args: {
   target: string; base_revision: number; summary: string;
   claim?: string; data?: Record<string, unknown>; scope?: { level: string; applies_to: string; observed_in?: string[] };
-  add_evidence?: Array<{ type: string; detail: string }>; confidence?: 'low' | 'medium' | 'high'; related?: string[]; topic?: string;
+  add_evidence?: Array<{ type: string; detail: string }>; replace_evidence?: Array<{ type: string; detail: string }>; confidence?: 'low' | 'medium' | 'high'; related?: string[]; topic?: string;
 }) {
   const op = requireWriter(s, caller);
   const t = title(s, args.target, ['fact']);
@@ -298,6 +321,7 @@ export async function editFact(s: Services, caller: Caller, args: {
     if (scope.level === 'build' || SHA256_REF.test(scope.applies_to.trim())) scope.applies_to = await buildRef(s, scope.applies_to);
     if (JSON.stringify(scope) !== JSON.stringify(doc.scope)) { doc.scope = scope as FactDoc['scope']; changed.push('scope'); }
   }
+  if (args.replace_evidence?.length) { doc.evidence = args.replace_evidence as FactDoc['evidence']; changed.push('evidence replaced'); }
   if (args.add_evidence?.length) { doc.evidence = [...doc.evidence, ...args.add_evidence as FactDoc['evidence']]; changed.push('evidence'); }
   if (args.confidence && args.confidence !== doc.confidence) { doc.confidence = args.confidence; changed.push('confidence'); }
   if (args.related) { doc.related = args.related; changed.push('related'); }
@@ -317,7 +341,8 @@ export async function editFact(s: Services, caller: Caller, args: {
   const problems = checkFactData(doc.kind, doc.data);
   if (problems.length) throw new ToolError('SCHEMA_INVALID', problems.join(' '), { problems });
   assertClean([...scanValue({ claim: doc.claim, data: doc.data, evidence: doc.evidence }, 'fact'), ...scanText(args.summary, 'summary')]);
-  const substantive = changed.some((c) => ['claim', 'data', 'scope'].includes(c));
+  // Replacing the evidence can take away what a confirmation relied on: it counts like a change of claim.
+  const substantive = changed.some((c) => ['claim', 'data', 'scope', 'evidence replaced'].includes(c));
   const previous = doc.status;
   if (substantive && doc.status !== 'claimed') {
     doc.earlier_verifications = [...(doc.earlier_verifications ?? []), ...(doc.verifications ?? []).map((v) => ({ ...v, of_revision: page.revid }))];
@@ -432,7 +457,8 @@ export async function editSection(s: Services, caller: Caller, args: {
     const base = await s.sessions.reader.getRevision(args.base_revision);
     if (!base || normalizeTitle(base.title) !== t) throw new ToolError('BAD_REQUEST', 'base_revision does not belong to this page.');
     const baseSection = findSection(parseSections(base.content), args.section);
-    if ((baseSection?.text ?? '') !== (target?.text ?? '')) {
+    // Blank lines added at its end (a section inserted after it) are not a change to it.
+    if ((baseSection?.text ?? '').trimEnd() !== (target?.text ?? '').trimEnd()) {
       const patch = createTwoFilesPatch('base', 'current', `${baseSection?.text ?? ''}\n`, `${target?.text ?? ''}\n`, '', '', { context: 2 });
       throw new ToolError('EDIT_CONFLICT', `Section "${args.section}" changed since revision ${args.base_revision}. Re-read it and re-apply your change.`, {
         current_revision: page.revid, section_diff: patch.split('\n').slice(2).join('\n'),
@@ -705,7 +731,7 @@ export async function splitSection(s: Services, caller: Caller, args: { title: s
     const baseSections = base && normalizeTitle(base.title) === t ? parseSections(base.content) : null;
     const baseTarget = baseSections ? findSection(baseSections, target.heading) : undefined;
     const block = (list: Section[], sec: Section) => { const [a, b] = sectionBlock(list, sec.index); return list.slice(a, b).map((x) => x.text).join('\n'); };
-    if (!baseSections || !baseTarget || block(baseSections, baseTarget) !== block(sections, target)) {
+    if (!baseSections || !baseTarget || block(baseSections, baseTarget).trimEnd() !== block(sections, target).trimEnd()) {
       throw new ToolError('EDIT_CONFLICT', `Section "${target.heading}" changed since revision ${args.base_revision}. Re-read it first.`, { current_revision: page.revid });
     }
   }
@@ -940,8 +966,28 @@ export async function addCode(s: Services, caller: Caller, args: {
     title: t, text: renderCodePage(doc), createonly: !existing, nocreate: !!existing, baserevid: baseRev, tags: ['rewiki-code'],
     summary: `${existing ? 'Update' : 'New'} code: ${shortSummary(args.summary, 150)}`,
   });
-  await afterWrite(s, op, [t]);
-  return result(s, t, r.newrevid, { license: 'MIT-0', status: 'claimed' });
+  const listed: string[] = [];
+  if (!existing) {
+    const label = t.slice(t.lastIndexOf('/') + 1);
+    for (const subject of subjects) {
+      const page = await currentPage(s, subject);
+      if (!page) continue;
+      let sections = parseSections(page.content);
+      const section = findSection(sections, 'Code & repositories');
+      if (section?.body.includes(`[[${t}`)) continue;
+      const entry = `* [[${t}|${label}]] — ${escapeText(shortSummary(args.summary, 200))}`;
+      const kept = (section?.body ?? '').split('\n').filter((l) => !/Nothing documented yet/.test(l));
+      while (kept.length && !kept[kept.length - 1].trim()) kept.pop();
+      while (kept.length && !kept[0].trim()) kept.shift();
+      const lead = section ? (/^\n*/.exec(section.body)?.[0] ?? '') : '';
+      const body = lead + [...kept, entry].join('\n');
+      sections = section ? replaceSectionBody(sections, 'Code & repositories', body) : insertSection(sections, 'Code & repositories', body, ['Pitfalls', 'Open questions', 'Evidence & references', 'See also']);
+      await mwEdit(s, op, { title: subject, text: joinSections(sections), baserevid: page.revid, nocreate: true, tags: ['rewiki-code'], summary: `List code: [[${t}]]` });
+      listed.push(subject);
+    }
+  }
+  await afterWrite(s, op, [t, ...listed]);
+  return result(s, t, r.newrevid, { license: 'MIT-0', status: 'claimed', listed_on: listed.length ? listed : undefined });
 }
 
 export async function linkRepo(s: Services, caller: Caller, args: {

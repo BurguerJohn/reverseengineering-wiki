@@ -33,7 +33,7 @@ function hexNum(raw: unknown): number | null {
   return null;
 }
 
-const C_TYPE = /^(?:const\s+)?(?:(?:struct|enum|union)\s+)?(?:unsigned\s+|signed\s+)?[A-Za-z_][\w]*(?:\s*\*+(?:\s*const\b)?)*\s*$/;
+const C_TYPE = /^(?:const\s+)?(?:(?:struct|enum|union)\s+)?(?:unsigned\s+|signed\s+)?(?:long\s+long(?:\s+int)?|long\s+double|long\s+int|short\s+int|[A-Za-z_][\w]*)(?:\s*\*+(?:\s*const\b)?)*\s*$/;
 /** "void (*)(void)", "int (*)(Entity *, int)": a function pointer type. */
 const FN_POINTER = /^[A-Za-z_][\w\s*]*\(\s*\*\s*\)\s*\([\w\s*,.]*\)$/;
 
@@ -255,7 +255,8 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
           const arrayPart = /((?:\[[^\]]*\])+)$/.exec(rawType)?.[1] ?? '';
           const std = stdType(rawType.slice(0, rawType.length - arrayPart.length));
           const typeText = std ? `${std.type}${arrayPart}` : rawType;
-          return { offset: hexNum(x.offset), rawOffset: x.offset, size: hexNum(x.size), type: cType(typeText), rawType: typeText, name: named.name, notes: [named.rest, std?.order, x.notes].filter(Boolean).join('; '), bits: Array.isArray(x.bits) ? x.bits : [] };
+          const condition = typeof x.condition === 'string' && x.condition.trim() ? `present only if ${x.condition.trim()}` : '';
+          return { offset: hexNum(x.offset), rawOffset: x.offset, size: hexNum(x.size), type: cType(typeText), rawType: typeText, name: named.name, notes: [condition, named.rest, std?.order, x.notes].filter(Boolean).join('; '), bits: Array.isArray(x.bits) ? x.bits : [] };
         });
       const fields = allFields.filter((x: any) => x.offset !== null).sort((a: any, b: any) => a.offset - b.offset);
       const floating = allFields.filter((x: any) => x.offset === null);
@@ -679,6 +680,9 @@ export function exportSymbols(s: Services, args: { build?: string; platform?: st
   const wasmList = [...wasmFuncs].sort((a, b) => a[0] - b[0]).map(([index, x]) => `    ${index}: ${ascii(x.name)},`).join('\n');
   const wasmNote = wasmFuncs.size ? `\n# ${wasmFuncs.size} WebAssembly functions are named by index: export_symbols with tool "wasm-names" writes them into the module's name section.\n` : '';
   let script: string;
+  if (args.tool === 'sym' && !otherAddresses.some((x) => x.kind === 'banked')) {
+    throw new ToolError('BAD_REQUEST', `tool "sym" writes bank:address names for banked ROMs; ${build} has none (${symbols.length} symbols at ${symbols.some((x) => x.absolute) ? 'absolute' : 'relative'} addresses): use ghidra, ida or json.`);
+  }
   if (args.tool === 'wasm-names') {
     script = `${head}# Writes the function names into the module's "name" custom section (names already there are kept
 # unless the wiki names the same index). Ghidra's wasm loader, wabt (wasm2wat), browsers and V8 stack traces read it.

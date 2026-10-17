@@ -1136,6 +1136,25 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const inside = await call(anon, 'search', { query: `zz${run}` });
   assert.ok(inside.hits.some((h: any) => h.title === `Library:E2E Libzz${run}`), JSON.stringify(inside).slice(0, 500));
 
+  // Multi-word C types and conditional fields; facts of a Format:X and a Library:X do not collide; replaced evidence;
+  // bytes another subject already has are pointed out; new code is listed on its subjects; sym needs banked addresses.
+  await call(a, 'add_fact', { kind: 'struct', subject: `Library:E2E Lib ${run}`, claim: 'The fictional frame info has an optional content size.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { name: 'E2eFrameInfo', size: 16, fields: [{ offset: 0, size: 4, type: 'unsigned', name: 'flags' }, { offset: 8, size: 8, type: 'unsigned long long', name: 'contentSize', condition: 'flags & 0x08' }] }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  assert.match((await call(anon, 'export_header', { subject: `Library:E2E Lib ${run}` })).header, /\/\* 0x08 \*\/ unsigned long long contentSize; \/\* present only if flags & 0x08 \*\//);
+  await call(a, 'add_fact', { kind: 'typedef', subject: `Format:E2E Track ${run}`, claim: 'The fictional track word is 16-bit.', scope: { level: 'format', applies_to: 'all versions' }, data: { name: 'E2eSame', type: 'uint16_t' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  await call(a, 'create_page', { type: 'library', title: `E2E Track ${run}`, summary: 'A fictional library named like the track format.', body: '## Overview\n\nFictional.', confirm_new: true, justification: 'a library, not the format' });
+  const sameName = await call(a, 'add_fact', { kind: 'typedef', subject: `Library:E2E Track ${run}`, claim: 'The fictional library word is 32-bit.', scope: { level: 'library', applies_to: 'all versions' }, data: { name: 'E2eSame', type: 'uint32_t' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  assert.equal(sameName.title, `Fact:E2E Track ${run} (Library)/typedef/E2eSame`, JSON.stringify(sameName).slice(0, 400));
+  const fixedEvidence = await call(a, 'edit_fact', { target: sameName.title, base_revision: sameName.revision, summary: 'fictional: the first entry was wrong', replace_evidence: [{ type: 'documentation', detail: 'fictional, corrected' }] });
+  assert.deepEqual(fixedEvidence.changed, ['evidence replaced'], JSON.stringify(fixedEvidence).slice(0, 300));
+  const overlap = await call(a, 'add_fact', { kind: 'signature', subject: `Library:E2E Lib ${run}`, claim: 'A fictional table that is also the track gamma table.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { pattern: '00 00 0D 0D 1A 1A 27 27', matches: 'e2e_lib_gamma' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low', dry_run: true });
+  assert.ok(overlap.warnings?.some((w: string) => w.includes(`Format:E2E Track ${run}`)), JSON.stringify(overlap).slice(0, 500));
+  const listedCode = await call(a, 'add_code', { name: 'Listed tool', summary: 'A fictional tool listed on its subject page.', language: 'python', kind: 'parser',
+    subjects: [`Library:E2E Lib ${run}`], tested_on: 'fictional samples', usage: 'python listed.py', files: [{ name: 'listed.py', content: 'print("listed")\n' }] });
+  assert.deepEqual(listedCode.listed_on, [`Library:E2E Lib ${run}`], JSON.stringify(listedCode).slice(0, 300));
+  assert.ok((await call(anon, 'read', { title: `Library:E2E Lib ${run}`, section: 'Code & repositories' })).content.includes('Listed tool'));
+
   // 64-bit enum values stay exact; value ranges; size_t compiles; amend fixes a sentence without resending.
   await call(a, 'add_fact', { kind: 'enum', subject: `Library:E2E Lib ${run}`, claim: 'Fictional 64-bit filter ids and a control-byte range.', scope: { level: 'library', applies_to: 'all versions' },
     data: { name: 'E2eFilter', values: { '0x4000000000000001': 'E2E_FILTER_A', '0x4000000000000002': 'E2E_FILTER_B', '0x80-0x9F': 'E2E_CHUNK_RUN' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
@@ -1211,6 +1230,7 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   assert.match(psxScript.script, /addr = toAddr\(rva\) if absolute else base\.add\(rva\)/);
   writeFileSync(join(tmpdir(), `rewiki-build-${run}.py`), psxScript.script);
   assert.match((await call(anon, 'export_symbols', { build: psx.title, tool: 'json' })).script, /"va": "0x80010DF4"/);
+  await expectError(anon, 'export_symbols', { build: psx.title, tool: 'sym' }, 'BAD_REQUEST');
   // An address carried to another release: the same name there.
   const jp = await call(a, 'register_build', { software: cave, version: 'JP', platform: 'playstation', distribution: 'cd',
     files: [{ name: `SLPS_${run}.EXE`, sha1: createHash('sha1').update(`psx-jp-${run}`).digest('hex') }] });
