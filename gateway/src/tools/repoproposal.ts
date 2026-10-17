@@ -6,7 +6,6 @@
  */
 import { ToolError, type Services } from './context.ts';
 import { parseRepoUrl, resolveRepo } from './repos.ts';
-import { SUBJECT_TYPES } from '../wiki/titles.ts';
 
 const SOURCE = /\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|inl|cs|py|rs|go|lua|asm|s|ini|cfg|toml|json|ya?ml|txt|md|ts|js|java|kt|zig|nim|d)$/i;
 const SKIP_DIR = /(?:^|\/)(?:third[_-]?party|vendor|external|extern|deps|node_modules|\.git|\.github|tests?\/data|testdata|assets?|docs?\/images)\//i;
@@ -75,9 +74,9 @@ export async function proposeFromRepo(s: Services, args: { url: string; commit?:
   const named = new Map<string, string>();
   const lower = readmeText.toLowerCase();
   if (lower) {
-    for (const p of s.index.listPages([...SUBJECT_TYPES], 0, 5000).hits) {
-      const base = p.title.slice(p.title.indexOf(':') + 1).replace(/\s*\([^)]*\)$/, '');
-      if (base.length >= 4 && !p.title.includes('/') && new RegExp(`(?<![\\w-])${base.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`).test(lower)) named.set(p.title, base);
+    // Titles and aliases ("EDF5" for Software:Earth Defense Force 5).
+    for (const { name, title } of s.index.subjectNames()) {
+      if (name.length >= 4 && !named.has(title) && new RegExp(`(?<![\\w-])${name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`).test(lower)) named.set(title, name);
     }
   }
   const mentioned = [...named.keys()].slice(0, 15);

@@ -810,6 +810,13 @@ export class SearchIndex {
     return out.sort((a, b) => ['title', 'short name', 'similar title'].indexOf(a.via) - ['title', 'short name', 'similar title'].indexOf(b.via)).slice(0, 5);
   }
 
+  /** Every subject page and alias name ("EDF5" for Software:Earth Defense Force 5), to find them in free text. */
+  subjectNames(): Array<{ name: string; title: string }> {
+    const rows = this.db.prepare(`select title, redirect_to from pages where type in ('software', 'library', 'format', 'platform', 'technique', 'tool')
+      and instr(title, '/') = 0`).all() as Array<{ title: string; redirect_to: string | null }>;
+    return rows.map((r) => ({ name: r.title.slice(r.title.indexOf(':') + 1).replace(/\s*\([^)]*\)$/, ''), title: r.redirect_to ?? r.title }));
+  }
+
   /** Pages whose text contains a string (a repository URL), for "already listed on". */
   pagesMentioning(text: string, limit = 20): string[] {
     return (this.db.prepare('select distinct title from docs where instr(body, ?) > 0 limit ?').all(text, limit) as Array<{ title: string }>).map((r) => r.title);
