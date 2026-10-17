@@ -46,7 +46,7 @@ Every kind also takes `test_vectors` and `samples` (below). Every fact needs `ev
 - Make a pattern unique: test it on several builds and on unrelated binaries. The server warns when it overlaps another subject's facts (a bundled copy: say so in the claim; otherwise lengthen it).
 - Magic: `bytes`, `offset`, `meaning`, optional `mask`; `relative_to` when the offset counts from a table or section, not the file start.
 - Identification by exports or imports: list the names in `indicator` (comma-separated) with `method: "exports"`; `identify` also finds names in builds' symbol maps and code-like names in article text.
-- String facts (ASCII, 8+ characters, no `*`) are byte signatures too: subject scripts name where the string sits.
+- String facts (ASCII) are byte signatures too: subject scripts name where the string sits (for a string with `*`, its longest fixed part of 8+ characters).
 - Strings: `*` for a variable part and `?` for one character (`"fts5: ????-??-?? *"`) (`"Copyright (C) 1991-* The libjpeg-turbo Project"`); `identify` also matches versions and years with other digits.
 
 ## Test vectors and samples
@@ -73,5 +73,5 @@ Names are identifiers: write what MSVC prints as ``Foo::`vftable'{for `Bar'}`` a
 ## Batches and dry runs
 
 - `batch`: up to 50 writes in dependency order (pages, topics, builds, facts/code/notes/symbols, edits, reviews); later operations may refer to what earlier ones create. A real run stops at the first error and says what was published and what did not run. A later `edit_section` with `replace` applies on top of what earlier operations of the same batch wrote on that page. Keep one call under ~20 KB of arguments.
-- A dry run returns a `check_id`: `publish_checked` publishes exactly that. Pass `replace: {"3": {arguments}}` to swap an operation, or `amend: {"3": [{old, new}]}` for a small text fix; `quiet: true` lists pages without their contents.
+- A dry run returns a `check_id`: `publish_checked` publishes exactly that. Pass `replace: {"3": {arguments}}` to correct an operation (`{"3": {tool, arguments}}` swaps its tool, `{"3": null}` drops it), or `amend: {"3": [{old, new}]}` for a small text fix; `quiet: true` lists pages without their contents.
 - Each write counts against the hourly quota (`account_status`); a batch over it is refused whole, and a dry run says how many operations fit now.

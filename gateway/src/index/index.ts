@@ -586,6 +586,7 @@ export class SearchIndex {
     const perInput = new Map<string, Map<string, Set<string>>>();
     const weights = new Map<string, number>();
     const magicInputs = new Set<string>();
+    const symbolInputs = new Set<string>();
     for (const t of tokens) {
       let rows: Array<{ title: string; subject: string | null }>;
       if (t.kind === 'bytes' && t.prefix) {
@@ -646,6 +647,7 @@ export class SearchIndex {
       perInput.set(t.input, bySubject);
       weights.set(t.input, Math.max(weights.get(t.input) ?? 0, t.weight));
       if (t.prefix) magicInputs.add(t.input);
+      if (t.kind === 'symbol') symbolInputs.add(t.input);
     }
 
     const candidates = new Map<string, { subject: string; score: number; matched: Array<{ input: string; pages: string[] }> }>();
@@ -656,7 +658,10 @@ export class SearchIndex {
         const onFact = [...titles].some((t) => t.startsWith('Fact:'));
         // File magic matched by the subject's own magic fact: as telling as a unique string.
         const onMagicFact = magicInputs.has(input) && [...titles].some((t) => /^Fact:[^/]+\/magic\//.test(t));
-        c.score += (weights.get(input) ?? 1) * specificity * (onMagicFact ? 2 : onFact ? 1.5 : 1);
+        // A name found in a build's symbol map or a fact is evidence; the same name in prose is a mention.
+        const onMap = [...titles].some((t) => t.startsWith('Build:') && t.includes('/symbols/'));
+        const proseOnly = symbolInputs.has(input) && !onFact && !onMap;
+        c.score += (weights.get(input) ?? 1) * specificity * (onMagicFact ? 2 : onMap ? 2 : onFact ? 1.5 : proseOnly ? 0.6 : 1);
         c.matched.push({ input, pages: [...titles].slice(0, 5) });
         candidates.set(subject, c);
       }

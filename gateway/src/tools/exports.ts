@@ -495,8 +495,9 @@ function signaturesOf(s: Services, subject: string): Signature[] {
   const sigs: Signature[] = [];
   for (const f of s.index.factsForSubject(subject).filter((x) => x.status !== 'rejected')) {
     const d = JSON.parse(f.data);
-    if (f.kind === 'string' && typeof d.value === 'string' && d.value.length >= 8 && !d.value.includes('*') && !/utf-?16|wide|ucs/i.test(String(d.encoding ?? '')) && /^[\x20-\x7e]+$/.test(d.value)) {
-      const bytes = [...d.value.slice(0, 64)].map((c) => c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join(' ');
+    const fixed = typeof d.value === 'string' ? d.value.split(/[*?]/).sort((x: string, y: string) => y.length - x.length)[0] : '';
+    if (f.kind === 'string' && fixed.length >= 8 && !/utf-?16|wide|ucs/i.test(String(d.encoding ?? '')) && /^[\x20-\x7e]+$/.test(fixed)) {
+      const bytes = [...fixed.slice(0, 64)].map((c) => c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join(' ');
       sigs.push({ name: qualifiedName(d.name ?? `str_${ident(f.title.split('/').pop(), 'string')}`, 'rewiki_string'), pattern: bytes, kind: 'global', status: f.status, fact: f.title, offset: 0, multiple: false });
       continue;
     }

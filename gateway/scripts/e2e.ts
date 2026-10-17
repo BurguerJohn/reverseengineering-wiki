@@ -1177,6 +1177,17 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const stamped = await call(anon, 'identify', { strings: [`z${run}: 2024-08-13 11:22:33 1e33`] });
   assert.equal(stamped.candidates[0]?.subject, `Library:E2E Lib ${run}`, JSON.stringify(stamped).slice(0, 400));
 
+  // A wildcard string's longest fixed part is a signature; publish_checked replace can drop or swap an operation.
+  assert.ok((await call(anon, 'export_symbols', { subject: `Library:E2E Lib ${run}`, tool: 'json' })).script.includes(`"pattern": "${[...`z${run}: `].map((c) => c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join(' ')}"`));
+  const twoNotes = await call(a, 'batch', { dry_run: true, operations: [
+    { tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A fictional note that stays in the batch.', confidence: 'low' } },
+    { tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A fictional note that is dropped again.', confidence: 'low' } },
+  ] });
+  const oneLeft = await call(a, 'publish_checked', { check_id: twoNotes.check_id, dry_run: true, replace: { 2: null } });
+  assert.equal(oneLeft.operations, 1, JSON.stringify(oneLeft).slice(0, 300));
+  const swapped = await call(a, 'publish_checked', { check_id: twoNotes.check_id, dry_run: true, replace: { 2: { tool: 'ask', arguments: { subject: `Format:E2E Track ${run}`, question: 'Is the fictional dropped note needed at all?' } } } });
+  assert.ok(!swapped.error && swapped.operations === 2 && JSON.stringify(swapped).includes('"ask"'), JSON.stringify(swapped).slice(0, 400));
+
   // PE section names as identify evidence.
   const libNow = await call(anon, 'read', { title: `Library:E2E Lib ${run}` });
   await call(a, 'edit_section', { title: `Library:E2E Lib ${run}`, section: 'Identification', body: `Its loader adds a \`.z${run}\` section.`, base_revision: libNow.revision, summary: 'fictional section name' });

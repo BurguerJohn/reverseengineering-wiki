@@ -250,12 +250,12 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   const sharedWith = new Set<string>();
   for (const p of [bytesOf(fact.data.signature), bytesOf(fact.data.pattern)].filter((x): x is string => !!x)) {
     for (const c of s.index.identify({ patterns: [p] }, 8)) {
-      if (c.subject !== fact.subject && c.matched.some((m) => m.pages.some((pg) => pg.startsWith('Fact:')))) sharedWith.add(c.subject);
+      if (c.subject !== fact.subject && c.matched.some((m) => m.pages.some((pg) => pg.startsWith('Fact:') && !pg.includes('/identification/')))) sharedWith.add(c.subject);
     }
   }
   if (fact.kind === 'magic' && bytesOf(fact.data.bytes)) {
     for (const c of s.index.identify({ magic: [bytesOf(fact.data.bytes)!] }, 8)) {
-      if (c.subject !== fact.subject && c.matched.some((m) => m.pages.some((pg) => pg.startsWith('Fact:')))) sharedWith.add(c.subject);
+      if (c.subject !== fact.subject && c.matched.some((m) => m.pages.some((pg) => pg.startsWith('Fact:') && !pg.includes('/identification/')))) sharedWith.add(c.subject);
     }
   }
   if (sharedWith.size) {

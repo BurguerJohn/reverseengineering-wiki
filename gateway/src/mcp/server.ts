@@ -27,7 +27,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.30';
+export const VERSION = '0.8.31';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -706,7 +706,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     title: 'Publish what a dry run checked',
     description: 'Publish exactly what a dry run (of any write tool or batch) checked, by its check_id, without resending (30 minutes, same account). replace swaps whole operations of a batch; amend fixes small texts; with dry_run true it checks again.',
     inputSchema: { check_id: z.string(), dry_run: DRY_RUN,
-      replace: z.record(z.string(), z.record(z.string(), z.unknown())).optional().describe('Batches only: {"3": {corrected arguments of operation 3}}; the tool stays the same'),
+      replace: z.record(z.string(), z.union([z.record(z.string(), z.unknown()), z.null()])).optional().describe('Batches only: {"3": {corrected arguments}} keeps the tool, {"3": {tool, arguments}} swaps it, {"3": null} drops the operation'),
       quiet: z.boolean().optional().describe('With dry_run: list the pages without their contents'),
       amend: z.record(z.string(), z.array(z.object({ old: z.string().min(1), new: z.string() })).min(1).max(20)).optional()
         .describe('Small text fixes without resending: {"3": [{old, new}]} for operation 3 of a batch ("1" for a single tool); each old must occur exactly once in that operation\'s text values (a line of a code file, a sentence)'),
@@ -729,12 +729,17 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     if (a.replace && Object.keys(a.replace).length) {
       const ops = Array.isArray(args.operations) ? [...(args.operations as Array<{ tool: string; arguments: Record<string, unknown> }>)] : null;
       if (checked.tool !== 'batch' || !ops) return fail(new ToolError('BAD_REQUEST', 'replace works on batch checks only.'));
-      for (const [k, v] of Object.entries(a.replace as Record<string, Record<string, unknown>>)) {
+      const dropped = new Set<number>();
+      for (const [k, v] of Object.entries(a.replace as Record<string, Record<string, unknown> | null>)) {
         const n = Number(k);
         if (!Number.isInteger(n) || n < 1 || n > ops.length) return fail(new ToolError('BAD_REQUEST', `replace: operation ${k} does not exist (1-${ops.length}).`));
-        ops[n - 1] = { tool: ops[n - 1].tool, arguments: v };
+        // null drops the operation; {tool, arguments} swaps the tool; anything else is the new arguments of the same tool.
+        if (v === null) { dropped.add(n - 1); continue; }
+        const swap = typeof v.tool === 'string' && v.arguments && typeof v.arguments === 'object' && Object.keys(v).length === 2;
+        if (swap && !handlers.has(String(v.tool))) return fail(new ToolError('BAD_REQUEST', `replace: "${v.tool}" is not a write tool.`));
+        ops[n - 1] = swap ? { tool: String(v.tool), arguments: v.arguments as Record<string, unknown> } : { tool: ops[n - 1].tool, arguments: v };
       }
-      args = { ...args, operations: ops };
+      args = { ...args, operations: ops.filter((_, i) => !dropped.has(i)) };
     }
     if (a.amend && Object.keys(a.amend).length) {
       const ops = checked.tool === 'batch' && Array.isArray(args.operations) ? [...(args.operations as Array<{ tool: string; arguments: Record<string, unknown> }>)] : null;
