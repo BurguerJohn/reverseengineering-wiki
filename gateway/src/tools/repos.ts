@@ -28,7 +28,14 @@ export function licenseHint(text: string): string | undefined {
   const tagged = /SPDX-License-Identifier:\s*([^\n*]+?)\s*(?:\*\/|-->|$)/im.exec(plain)?.[1];
   const joined = new RegExp(String.raw`\(?${id}\)?(?:\s+(?:OR|AND|WITH)\s+\(?${id}\)?)+`).exec(plain)?.[0];
   const hint = (tagged ?? joined)?.replace(/\s+/g, ' ').trim();
-  return hint && hint.length <= 120 && SPDX_EXPRESSION.test(hint) ? hint : undefined;
+  if (hint && hint.length <= 120 && SPDX_EXPRESSION.test(hint)) return hint;
+  // Whole license texts GitHub sometimes misses (reformatted or with a header added).
+  const flat = plain.replace(/\s+/g, ' ');
+  const KNOWN_TEXTS: Array<[RegExp, string]> = [
+    [/This is free and unencumbered software released into the public domain/i, 'Unlicense'],
+    [/Boost Software License - Version 1\.0/i, 'BSL-1.0'],
+    [/Permission is granted to anyone to use this software for any purpose, including commercial applications, and to alter it and redistribute it freely/i, 'Zlib'],  ];
+  return KNOWN_TEXTS.find(([re]) => re.test(flat))?.[1];
 }
 
 const BINARY_ASSET = /\.(exe|dll|msi|scr|zip|7z|rar|bin|so|dylib|apk|jar)$/i;

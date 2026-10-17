@@ -26,7 +26,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.11';
+export const VERSION = '0.8.12';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -141,8 +141,8 @@ ${text}`,
  * Wraps a write tool so that dry_run=true runs the same code with edits and side effects skipped.
  * With review (OAuth clients), a real run in review mode needs the operator's approval first.
  */
-function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Caller, args: any) => Promise<Record<string, unknown>> | Record<string, unknown>, review?: ServerReview) {
-  return handler(async (args: any, extra: Extra) => {
+function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Caller, args: any) => Promise<Record<string, unknown>> | Record<string, unknown>, review?: ServerReview, known?: Set<string>) {
+  const body = async (args: any, extra: Extra): Promise<Record<string, unknown>> => {
     const { dry_run: dryRun, review_id: reviewId, quiet, ...rest } = args ?? {};
     const mode = caller.operator ? s.db.operatorById(caller.operator.id)?.mode : undefined;
     const reviewed = !!review && mode === 'review';
@@ -173,6 +173,12 @@ function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Ca
     const out = await fn({ ...caller, approved: how }, rest);
     // The agent does not see the client's prompt: tell it the approval happened.
     return { ...out, review: how === 'client' ? 'Approved by your operator in their MCP client (that prompt is shown to them, not to you).' : 'Approved by your operator on the review page.' };
+  };
+  return handler(async (args: any, extra: Extra) => {
+    const ignored = known ? Object.keys(args ?? {}).filter((k) => !known.has(k)) : [];
+    if (!ignored.length) return body(args, extra);
+    const out = await body(Object.fromEntries(Object.entries(args).filter(([k]) => known!.has(k))), extra);
+    return { ...out, ignored_arguments: `${ignored.join(', ')}: not parameters of ${name}, ignored (a typo, or a field that belongs inside data?).` };
   });
 }
 
@@ -417,9 +423,10 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     const { dry_run: _unused, ...shape } = config.inputSchema;
     writeTools.set(name, { schema: z.object(shape), run });
     const inputSchema = review ? { ...config.inputSchema, review_id: REVIEW_ID } : config.inputSchema;
-    const wrapped = writeHandler(s, caller, name, run, review);
+    // Loose: unknown arguments reach the handler, which names them in the answer instead of dropping them unseen.
+    const wrapped = writeHandler(s, caller, name, run, review, new Set([...Object.keys(inputSchema), 'review_id', 'quiet']));
     handlers.set(name, wrapped);
-    server.registerTool(name, { ...config, inputSchema } as any, wrapped as any);
+    server.registerTool(name, { ...config, inputSchema: z.looseObject(inputSchema) } as any, wrapped as any);
   };
 
   if (review) registerAccountTools(s, server, caller, opts.accounts);
@@ -451,7 +458,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
         applies_to: z.string().describe('What it holds for; for build-level facts a Build: title or the SHA-256 of one of its files (also one registered earlier in the same batch)'),
         observed_in: z.array(z.string()).optional(),
       }),
-      data: z.record(z.string(), z.unknown()).describe(`Fields by kind (examples and schemas per kind: fact_data in /tools.json). ${FACT_DATA_SUMMARY}. Struct fields: {offset, size, type, name, notes?, bits?: [{bit: "0" or "4-5", name, notes?}]}; the last field may be "T[]" or "T[count_field]" (entries after a header, a trailing name: a C flexible array member; data.size is then the fixed part or "variable"). Addresses: rva (PE, "0x141230") or address {kind: va|file|segmented|banked, value: "0x80012345" | "0x1A2B0" | "1000:5AFA" | "03:8000"} on a build; fixed hardware addresses (I/O registers, vectors, BIOS calls) as address {kind: "hardware", value: "0xFF46"} at scope.level platform. struct with unknown exact size: size_min and/or size_max. Signatures (data.signature, or a signature fact's pattern): the name goes at match address + signature_offset (offset on a signature fact), negative when the pattern starts inside the object; multiple: true names every match (thunks); a signature fact takes a name for its label. One address per fact; many names: add_symbols. Any kind also takes test_vectors [{input, expected}] (hashes, ciphers, checksums) and samples [{url, sha256, note}] (public files others can rerun the check on) or [{code: "Code:…", args, sha256}] (a sample a published script generates).`),
+      data: z.record(z.string(), z.unknown()).describe(`Fields by kind (examples and schemas per kind: fact_data in /tools.json). ${FACT_DATA_SUMMARY}. Struct fields: {offset, size, type, name, notes?, bits?: [{bit: "0" or "4-5", name, notes?}]}; the last field may be "T[]" or "T[count_field]" (entries after a header, a trailing name: a C flexible array member; data.size is then the fixed part or "variable"). Addresses: rva (PE, "0x141230") or address {kind: va|file|segmented|banked, value: "0x80012345" | "0x1A2B0" | "1000:5AFA" | "03:8000"} on a build; fixed hardware addresses (I/O registers, vectors, BIOS calls) as address {kind: "hardware", value: "0xFF46"} at scope.level platform. struct with unknown exact size: size_min and/or size_max. Signatures (data.signature, or a signature fact's pattern): the name goes at match address + signature_offset (offset on a signature fact), negative when the pattern starts inside the object; multiple: true names every match (thunks); a variant (an optional endbr64 prefix) is a second signature fact with the same name; a signature fact takes a name for its label. One address per fact; many names: add_symbols. Any kind also takes test_vectors [{input, expected}] (hashes, ciphers, checksums) and samples [{url, sha256, note}] (public files others can rerun the check on) or [{code: "Code:…", args, sha256}] (a sample a published script generates).`),
       key: z.string().min(2).max(60).optional().describe('Short title for the fact page, e.g. "RNG seed" (default: the name/value/bytes, else the first clause of the claim). MediaWiki shows "_" as a space in titles; data keeps identifiers as written.'),
       evidence: z.array(evidenceItem).min(1),
       confidence: z.enum(['low', 'medium', 'high']),
@@ -734,8 +741,12 @@ async function runBatch(
   }).sort((a, b) => a.rank - b.rank || a.index - b.index);
 
   const problems: string[] = [];
+  const ignoredArgs = new Map<number, string[]>();
   for (const p of planned) {
-    const parsed = tools.get(p.tool)!.schema.safeParse(p.args);
+    const schema = tools.get(p.tool)!.schema;
+    const parsed = schema.safeParse(p.args);
+    const shape = (schema as z.ZodObject<any>).shape as Record<string, unknown> | undefined;
+    if (shape) ignoredArgs.set(p.index, Object.keys(p.args).filter((k) => !(k in shape)));
     if (!parsed.success) problems.push(`operation ${p.index + 1} (${p.tool}): ${parsed.error.issues.map((i) => `${i.path.join('.') || 'arguments'}: ${i.message}`).join('; ')}`);
     else p.args = parsed.data as Record<string, unknown>;
   }
@@ -754,9 +765,11 @@ async function runBatch(
     for (const p of planned) {
       try {
         const r = await tools.get(p.tool)!.run(caller, p.args);
+        const ignored = ignoredArgs.get(p.index) ?? [];
         done.push({
           operation: p.index + 1, tool: p.tool,
-          ...Object.fromEntries(Object.entries(r).filter(([k]) => ['title', 'revision', 'topic', 'status', 'added', 'updated', 'conflicts_total', 'url', 'flag', 'warnings'].includes(k))),
+          ...Object.fromEntries(Object.entries(r).filter(([k]) => ['title', 'revision', 'topic', 'status', 'added', 'updated', 'conflicts_total', 'url', 'flag', 'warnings', 'merged'].includes(k))),
+          ...(ignored.length ? { ignored_arguments: `${ignored.join(', ')}: not parameters of ${p.tool}, ignored (a typo, or a field that belongs inside data?).` } : {}),
         });
       } catch (error) {
         const e = error instanceof ToolError ? error : new ToolError('INTERNAL', (error as Error).message);

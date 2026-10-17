@@ -1068,6 +1068,23 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const second = await call(a, 'edit_section', { title: chunkTopic, section: 'Variants', body: 'Fictional variants, edited.', base_revision: topicRev, summary: 'fictional edit two' });
   assert.match(second.merged ?? '', /other sections only/, JSON.stringify(second).slice(0, 400));
 
+  // A section and the infobox of one page in one batch, both from the revision read; unknown arguments are named.
+  const trackRead = await call(anon, 'read', { title: `Format:E2E Track ${run}` });
+  const sameBase = await call(a, 'batch', { operations: [
+    { tool: 'edit_section', arguments: { title: `Format:E2E Track ${run}`, section: 'Tools', body: 'Fictional tools.', base_revision: trackRead.revision, summary: 'fictional tools' } },
+    { tool: 'edit_section', arguments: { title: `Format:E2E Track ${run}`, section: 'Infobox', infobox: { extensions: '.trk' }, base_revision: trackRead.revision, summary: 'fictional extension' } },
+    { tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A fictional note with a stray argument.', confidence: 'low', notes_extra: 'typo' } },
+  ] });
+  assert.ok(!sameBase.error && sameBase.operations === 3, JSON.stringify(sameBase).slice(0, 600));
+  assert.ok(sameBase.results.some((r: any) => /notes_extra/.test(r.ignored_arguments ?? '')), JSON.stringify(sameBase.results).slice(0, 600));
+  const stray = await call(a, 'add_note', { subject: `Format:E2E Track ${run}`, body: 'Another fictional note with a stray argument.', confidence: 'low', data_samples_note: 'x', dry_run: true });
+  assert.match(stray.ignored_arguments ?? '', /data_samples_note/, JSON.stringify(stray).slice(0, 400));
+  // A versioned ELF import is found by its bare name and its version node.
+  await call(a, 'add_fact', { kind: 'identification', subject: `Format:E2E Track ${run}`, claim: `Fictional track players import \`e2e${run}_start_main@E2ETRK_2.34\` since 2.34.`, scope: { level: 'format', applies_to: 'all versions' },
+    data: { method: 'import', indicator: `e2e${run}_start_main@E2ETRK_2.34` }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const byImport = await call(anon, 'identify', { imports: [`e2e${run}_start_main`] });
+  assert.equal(byImport.candidates[0]?.subject, `Format:E2E Track ${run}`, JSON.stringify(byImport).slice(0, 400));
+
   // A dry run hands back a check_id: publish_checked publishes exactly that, once.
   const checkedNote = await call(a, 'add_note', { subject: cave, key: 'Checked once', body: 'Published by check_id without resending the arguments.', confidence: 'low', dry_run: true });
   assert.ok(checkedNote.check_id, JSON.stringify(checkedNote).slice(0, 200));

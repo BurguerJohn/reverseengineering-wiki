@@ -472,7 +472,14 @@ async function editInfobox(s: Services, op: Writer, t: string, args: { infobox?:
   }
   const page = await currentPage(s, t);
   if (!page) throw new ToolError('NOT_FOUND', `"${t}" does not exist.`);
-  if (page.revid !== args.base_revision) throw new ToolError('EDIT_CONFLICT', `The page changed since revision ${args.base_revision}. Re-read it and resend.`, { current_revision: page.revid });
+  // Changes elsewhere on the page since base_revision (another section, an earlier operation of the batch) are fine.
+  if (page.revid !== args.base_revision) {
+    const base = await s.sessions.reader.getRevision(args.base_revision);
+    if (!base || normalizeTitle(base.title) !== t) throw new ToolError('BAD_REQUEST', 'base_revision does not belong to this page.');
+    if (JSON.stringify(parseInfobox(base.content)) !== JSON.stringify(parseInfobox(page.content))) {
+      throw new ToolError('EDIT_CONFLICT', `The infobox changed since revision ${args.base_revision}. Re-read it and resend.`, { current_revision: page.revid });
+    }
+  }
   const sections = parseSections(page.content);
   const { infobox, rest } = splitInfobox(sections[0]?.text ?? '');
   if (!infobox) throw new ToolError('BAD_REQUEST', `${t} has no infobox (topic subpages have none: it lives on the subject page).`);
@@ -496,7 +503,10 @@ async function editInfobox(s: Services, op: Writer, t: string, args: { infobox?:
     summary: `/* Infobox */ ${shortSummary(args.summary, 150)}`,
   });
   await afterWrite(s, op, [t]);
-  return result(s, t, r.newrevid, { section: 'Infobox', nochange: r.nochange || undefined, infobox: parseInfobox(`${lead}\n`) });
+  return result(s, t, r.newrevid, {
+    section: 'Infobox', nochange: r.nochange || undefined, infobox: parseInfobox(`${lead}\n`),
+    merged: page.revid !== args.base_revision ? `The page changed since revision ${args.base_revision} (now ${page.revid}) outside the infobox, so your edit applied on top of those changes.` : undefined,
+  });
 }
 
 const STANDARD_SECTIONS = new Set([...LEADING_SECTIONS, ...TRAILING_SECTIONS, 'Topics'].map(headingKey));

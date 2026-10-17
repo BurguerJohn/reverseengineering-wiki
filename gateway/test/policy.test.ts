@@ -91,6 +91,11 @@ test('identifiers', () => {
   assert.deepEqual(constantTokens('-0x6900'), ['6900']);
   assert.deepEqual(constantTokens('0xFFFF9700'), ['ffff9700', '6900']);
   assert.deepEqual(constantTokens('0xFFFFFFFFFFFF9700'), ['ffffffffffff9700', '6900']);
+  // ELF symbol versions: the name and the version node are found on their own.
+  const versioned = extractFromText('Calls `__libc_start_main@GLIBC_2.34` since 2.34').map((i) => `${i.kind}:${i.token}`);
+  assert.ok(versioned.includes('symbol:__libc_start_main') && versioned.includes('symbol:glibc_2.34'), versioned.join(' '));
+  assert.ok(evidenceTokens({ imports: ['memcpy@@GLIBC_2.14'] }).some((t) => t.token === 'memcpy'));
+  assert.ok(evidenceTokens({ strings: ['GLIBC_2.34'] }).some((t) => t.kind === 'symbol' && t.token === 'glibc_2.34'));
   const enumIds = extractFromFactData({ name: 'Err', values: { '-0x7000': 'ERR_FEATURE', '-1': 'ERR_GENERIC' } }).map((i) => `${i.kind}:${i.token}`);
   assert.ok(enumIds.includes('hex:7000') && enumIds.includes('symbol:err_feature') && !enumIds.includes('hex:1'), enumIds.join(' '));
 });
@@ -99,4 +104,5 @@ test('license hints', () => {
   assert.equal(licenseHint('Mbed TLS files are provided under a dual [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html)\nOR [GPL-2.0-or-later](https://spdx.org/licenses/GPL-2.0-or-later.html) license.'), 'Apache-2.0 OR GPL-2.0-or-later');
   assert.equal(licenseHint('/* SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception */'), 'Apache-2.0 WITH LLVM-exception');
   assert.equal(licenseHint('Permission is hereby granted, free of charge, to any person'), undefined);
+  assert.equal(licenseHint('pyelftools is in the public domain.\n\nThis is free and unencumbered software\nreleased into the public domain.'), 'Unlicense');
 });

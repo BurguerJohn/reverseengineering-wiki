@@ -77,10 +77,17 @@ export function normalizeString(raw: string): string {
   return raw.trim().toLowerCase().slice(0, 200);
 }
 
+/** ELF symbol versions ("__libc_start_main@GLIBC_2.34", "memcpy@@GLIBC_2.14"): the name and the version node. */
+export function versionedParts(token: string): string[] {
+  const m = /^([a-z_][\w.$]*?)@@?([a-z_][\w.]*)$/i.exec(token);
+  return m && !token.startsWith('?') ? [m[1], m[2]] : [];
+}
+
 const add = (out: Map<string, Identifier>, kind: IdKind, token: string | null) => {
   if (!token || token.length < 2) return;
   if (kind === 'hex' && token.length < 3) return; // 0x10, 0xff… are too common to be useful
   out.set(`${kind}:${token}`, { kind, token });
+  if (kind === 'symbol') for (const part of versionedParts(token)) if (part.length >= 3) out.set(`symbol:${part}`, { kind, token: part });
 };
 
 export function extractFromText(text: string): Identifier[] {
@@ -178,7 +185,11 @@ export interface Evidence {
 /** Turns identify() inputs into lookup tokens, remembering which input each came from. */
 export function evidenceTokens(e: Evidence): Array<Identifier & { input: string; weight: number; prefix?: boolean }> {
   const out: Array<Identifier & { input: string; weight: number; prefix?: boolean }> = [];
-  for (const s of e.strings ?? []) out.push({ kind: 'string', token: normalizeString(s), input: s, weight: 2 });
+  for (const s of e.strings ?? []) {
+    out.push({ kind: 'string', token: normalizeString(s), input: s, weight: 2 });
+    // An identifier-like string ("GLIBC_2.34", a version node or a name) is also looked up as a symbol.
+    if (/^[A-Za-z_][\w.$@]{3,}$/.test(s.trim())) out.push({ kind: 'symbol', token: normalizeSymbol(s), input: s, weight: 1.5 });
+  }
   for (const c of e.constants ?? []) {
     for (const token of constantTokens(c)) out.push({ kind: 'hex', token, input: String(c), weight: 1.5 });
   }
@@ -190,9 +201,18 @@ export function evidenceTokens(e: Evidence): Array<Identifier & { input: string;
     const token = normalizeBytes(p);
     if (token) out.push({ kind: 'bytes', token, input: p, weight: 3 });
   }
-  for (const s of e.imports ?? []) out.push({ kind: 'symbol', token: normalizeSymbol(s), input: s, weight: 1 });
-  for (const s of e.exports ?? []) out.push({ kind: 'symbol', token: normalizeSymbol(s), input: s, weight: 2 });
-  for (const s of e.symbols ?? []) out.push({ kind: 'symbol', token: normalizeSymbol(s), input: s, weight: 2 });
+  // A versioned name also matches the bare name ("__libc_start_main@GLIBC_2.34" and "__libc_start_main").
+  const symbols = (list: string[] | undefined, weight: number) => {
+    for (const s of list ?? []) {
+      const token = normalizeSymbol(s);
+      out.push({ kind: 'symbol', token, input: s, weight });
+      const [name] = versionedParts(token);
+      if (name) out.push({ kind: 'symbol', token: name, input: s, weight });
+    }
+  };
+  symbols(e.imports, 1);
+  symbols(e.exports, 2);
+  symbols(e.symbols, 2);
   for (const s of e.rtti ?? []) out.push({ kind: 'rtti', token: s.trim().toLowerCase(), input: s, weight: 3 });
   return out.filter((t) => t.token);
 }
