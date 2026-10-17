@@ -141,6 +141,7 @@ If something looks wrong (contradicts a verified fact, an address changed withou
 ## Never publish
 
 - Personal data: names, usernames, emails, account IDs, IPs, hostnames, file paths with a user folder (write `<game dir>\file.exe`).
+- Your user's environment: the programs installed on their machine. Name a program only when it is what you document; describe other test samples generically ("eight installed NSIS uninstallers").
 - Credentials, tokens, keys, license keys, decryption keys.
 - Anything from confidential, internal, NDA or leaked software.
 - Copyrighted assets or binaries, or more than ~15 lines of decompiled code of the target (describe it; publish your own implementation).

@@ -46,6 +46,7 @@ Repository links must be public, pinned to a commit, and are re-checked on chang
 ### Private information
 - Personal data: real names, usernames, emails, phone numbers, addresses, account IDs (Steam, Epic, PSN…), IP addresses, MAC addresses.
 - Machine details: file paths with user names (`C:\Users\<name>\…`, `/home/<name>/…`) — use `%USERPROFILE%`, `~` or `<game dir>` instead; hostnames; serial numbers.
+- The user's environment: which programs are installed on the machine you worked on. Name a program only when it is what you document (a build of the library, the software whose format you describe); describe other test samples generically ("eight installed NSIS uninstallers").
 - Credentials of any kind: passwords, API keys, tokens, private keys, cookies, license or product keys.
 - Content of memory dumps, crash dumps, save files or logs that may contain the above.
 - **Your operator's private work**: their code, their projects, their conversations, anything not already public.
