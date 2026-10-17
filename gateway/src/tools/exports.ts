@@ -121,6 +121,8 @@ function enumNum(raw: unknown): bigint | null {
   if (typeof raw === 'number') return Number.isSafeInteger(raw) ? BigInt(raw) : null;
   if (typeof raw !== 'string') return null;
   const t = raw.trim();
+  const sum = /^(-?(?:0x[0-9a-f]+|\d+))\s*\+\s*(0x[0-9a-f]+|\d+)$/i.exec(t);
+  if (sum) { const a = enumNum(sum[1]); const b = enumNum(sum[2]); return a !== null && b !== null ? a + b : null; }
   if (/^-?\d+$/.test(t)) return BigInt(t);
   if (/^-?0x[0-9a-f]+$/i.test(t)) return t.startsWith('-') ? -BigInt(t.slice(1)) : BigInt(t);
   const n = signedNum(raw);
@@ -130,7 +132,10 @@ function enumNum(raw: unknown): bigint | null {
 /** "0x80-0x9F", "128..159": a range of values sharing one name (control bytes, opcode classes). */
 const VALUE_RANGE = /^\s*(-?(?:0x[0-9a-f]+|\d+))\s*(?:-|–|\.\.)\s*(-?(?:0x[0-9a-f]+|\d+))\s*$/i;
 
-type EnumValue = { name: string; value: bigint | null; end?: bigint; notes?: string };
+type EnumValue = { name: string; value: bigint | null; end?: bigint; notes?: string; decimal?: boolean };
+
+/** Values given in decimal (a number or a decimal string) read best in decimal once they are large. */
+const isDecimal = (raw: unknown) => typeof raw === 'number' || (typeof raw === 'string' && /^\s*-?\d+\s*$/.test(raw));
 
 function enumValues(raw: unknown): EnumValue[] {
   const notesOf = (v: any) => (v && typeof v === 'object' && typeof v.notes === 'string' ? v.notes : undefined);
@@ -149,11 +154,11 @@ function enumValues(raw: unknown): EnumValue[] {
       const keyRange = range(k);
       if (keyRange && typeof v === 'string') return { name: v, ...keyRange };
       const keyNumber = enumNum(k);
-      if (keyNumber !== null && typeof v === 'string') return { name: v, value: keyNumber };
+      if (keyNumber !== null && typeof v === 'string') return { name: v, value: keyNumber, decimal: isDecimal(k) };
       const valueRange = range(v);
       if (valueRange) return { name: k, ...valueRange };
       const valueNumber = enumNum(v);
-      if (valueNumber !== null) return { name: k, value: valueNumber };
+      if (valueNumber !== null) return { name: k, value: valueNumber, decimal: isDecimal(v) };
       if (v && typeof v === 'object' && 'value' in v) return { name: k, ...(range((v as any).value) ?? { value: enumNum((v as any).value) }), notes: notesOf(v) };
       return { name: k, value: null };
     });
@@ -183,9 +188,13 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
   sIndex = s.index;
   const subject = s.index.resolveRedirect(cleanTitle(args.subject, SUBJECT_TYPES));
   const build = args.build ? normalizeTitle(args.build) : null;
-  const also = [...new Set((args.also ?? []).map((x) => s.index.resolveRedirect(cleanTitle(x, SUBJECT_TYPES))))].filter((x) => x !== subject);
+  // A bare identifier in also is one type, from whichever subject defines it.
+  const typeNames = (args.also ?? []).filter((x) => /^[A-Za-z_]\w*$/.test(x.trim()) && !s.index.page(x.trim())).map((x) => x.trim());
+  const singleTypes = typeNames.flatMap((n) => s.index.typeFactsByName(n));
+  for (const n of typeNames) if (!singleTypes.some((f) => { try { return JSON.parse(f.data).name === n; } catch { return false; } })) throw new ToolError('NOT_FOUND', `No struct, enum or typedef fact is named "${n}" (in also).`);
+  const also = [...new Set((args.also ?? []).filter((x) => !typeNames.includes(x.trim())).map((x) => s.index.resolveRedirect(cleanTitle(x, SUBJECT_TYPES))))].filter((x) => x !== subject);
   for (const x of also) if (!s.index.page(x)) throw new ToolError('NOT_FOUND', `"${x}" (in also) does not exist.`);
-  const all = [...also, subject].flatMap((x) => s.index.factsForSubject(x, ['struct', 'enum', 'vtable', 'typedef']))
+  const all = [...singleTypes, ...[...also, subject].flatMap((x) => s.index.factsForSubject(x, ['struct', 'enum', 'vtable', 'typedef']))]
     .filter((f) => !build || f.level !== 'build' || f.applies_to === build)
     .filter((f) => f.status !== 'rejected');
   const warnings: string[] = [];
@@ -350,7 +359,7 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
       for (const v of values) {
         // "MF_SPECIAL (multiplayer only)": the identifier, and the rest as a comment.
         const named = v.named;
-        const literal = v.value === null ? '' : ` = ${enumLiteral(v.value)}`;
+        const literal = v.value === null ? '' : ` = ${v.decimal && (v.value >= 1000n || v.value <= -1000n) ? String(v.value) : enumLiteral(v.value)}`;
         let id = prefixAll ? ident(`${name}_${named.name}`, 'VALUE') : ident(named.name, 'VALUE');
         for (let n = 2; enumConstants.has(id); n++) id = `${ident(`${name}_${named.name}`, 'VALUE')}_${n}`;
         enumConstants.add(id);

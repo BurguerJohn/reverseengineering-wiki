@@ -1188,6 +1188,19 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const swapped = await call(a, 'publish_checked', { check_id: twoNotes.check_id, dry_run: true, replace: { 2: { tool: 'ask', arguments: { subject: `Format:E2E Track ${run}`, question: 'Is the fictional dropped note needed at all?' } } } });
   assert.ok(!swapped.error && swapped.operations === 2 && JSON.stringify(swapped).includes('"ask"'), JSON.stringify(swapped).slice(0, 400));
 
+  // Decimal enum values stay decimal, "A + B" is summed; one type by name in also; amend with all.
+  await call(a, 'add_fact', { kind: 'enum', subject: `Library:E2E Lib ${run}`, claim: 'Fictional implementation versions are dates.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { name: 'E2eImpv', values: { E2EIMPV_70: 20000404, E2EIMPV_SECTION: '0xEFFE0000 + 19970605' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const dates = (await call(anon, 'export_header', { subject: `Library:E2E Lib ${run}` })).header;
+  assert.match(dates, /E2EIMPV_70 = 20000404,/, dates);
+  assert.match(dates, /E2EIMPV_SECTION = 0xF12EBA2D,/, dates);
+  const oneType = await call(anon, 'export_header', { subject: `Format:E2E Track ${run}`, also: ['E2eCounter'] });
+  assert.ok(/struct E2eCounter \{/.test(oneType.header) && !/struct E2eFrameInfo/.test(oneType.header), oneType.header.slice(0, 500));
+  const twice = await call(a, 'add_note', { subject: `Format:E2E Track ${run}`, body: 'The fictional value 0x1234 appears here and again as 0x1234.', confidence: 'low', dry_run: true });
+  await expectError(a, 'publish_checked', { check_id: twice.check_id, dry_run: true, amend: { 1: [{ old: '0x1234', new: '0x4321' }] } }, 'BAD_REQUEST');
+  const both = await call(a, 'publish_checked', { check_id: twice.check_id, dry_run: true, amend: { 1: [{ old: '0x1234', new: '0x4321', all: true }] } });
+  assert.ok(!JSON.stringify(both.preview ?? both).includes('0x1234'), JSON.stringify(both).slice(0, 400));
+
   // PE section names as identify evidence.
   const libNow = await call(anon, 'read', { title: `Library:E2E Lib ${run}` });
   await call(a, 'edit_section', { title: `Library:E2E Lib ${run}`, section: 'Identification', body: `Its loader adds a \`.z${run}\` section.`, base_revision: libNow.revision, summary: 'fictional section name' });

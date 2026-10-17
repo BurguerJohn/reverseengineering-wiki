@@ -36,7 +36,7 @@ Every kind also takes `test_vectors` and `samples` (below). Every fact needs `ev
 - Exact size unknown: `size_min` and/or `size_max`. Entries after a header or a trailing name: the last field typed `T[]` or `T[count_field]` (a C flexible array member; `size` is then the fixed part or `"variable"`). A field after a variable part can have an offset like `"4+length"`: it is written as a comment.
 - Library types (`FT_Long`, `DWORD`, `j_common_ptr`): one `typedef` fact each (`{name, type}`), so headers use them instead of bytes.
 - Layouts that differ by ABI: `data.abi` (`"win64"`, `"lp64"`, `"ilp32"`) on struct and typedef facts, one fact per ABI; `export_header` takes `abi`. Other variants of one layout (a 32- or 64-bit target of a file format, ANSI or Unicode): `data.variant`, and `export_header` takes `variant`.
-- Enum values: `{"0": "NAME"}`, `{"NAME": "0x10"}`, `[{name, value, notes}]`, negative (`"-0x7000"`), 64-bit (`"0x4000000000000001"`, kept exact), character codes (`"'A'"`) and ranges (`"0x80-0x9F"`: exported as the first value, with the range in a comment). Keep names C identifiers; explanations go in `notes`.
+- Enum values: `{"0": "NAME"}`, `{"NAME": "0x10"}`, `[{name, value, notes}]`, negative (`"-0x7000"`), 64-bit (`"0x4000000000000001"`, kept exact), character codes (`"'A'"`), ranges (`"0x80-0x9F"`: exported as the first value, with the range in a comment) and sums (`"0xEFFE0000 + 19970605"`, computed for you). Values written in decimal stay decimal in headers. Keep names C identifiers; explanations go in `notes`.
 
 ## Signatures, magics and strings
 
@@ -66,12 +66,12 @@ Names are identifiers: write what MSVC prints as ``Foo::`vftable'{for `Bar'}`` a
 
 ## Exports
 
-- `export_header` (subject, optional build, abi, and `also` for pages whose types it uses): every struct, enum, typedef and vtable fact as C; `warnings` lists what it could not express. Import it before a build script, so the types exist.
+- `export_header` (subject, optional build, abi, and `also` for pages or single type names it uses, e.g. `also: ["GUID"]`): every struct, enum, typedef and vtable fact as C; `warnings` lists what it could not express. Import it before a build script, so the types exist.
 - `export_symbols`: with `build`, a Ghidra or IDA script (or JSON) naming every function and global of that exact binary, with types; with `subject` (and `also` for a parent library), a script that finds the subject's signatures in your binary; with `platform`, its hardware addresses; `tool: "scan"` (with subject) gives a standalone Python script listing where the subject's signatures, strings and file magics occur in any file (installers, archives, dumps); `tool: "sym"` writes `bank:address name` for banked ROMs; `tool: "wasm-names"` writes WebAssembly names into the module's name section.
 - `symbols` with build and rva also tells where the same name is in other builds (another version or region).
 
 ## Batches and dry runs
 
 - `batch`: up to 50 writes in dependency order (pages, topics, builds, facts/code/notes/symbols, edits, reviews); later operations may refer to what earlier ones create. A real run stops at the first error and says what was published and what did not run. A later `edit_section` with `replace` applies on top of what earlier operations of the same batch wrote on that page. Keep one call under ~20 KB of arguments.
-- A dry run returns a `check_id`: `publish_checked` publishes exactly that. Pass `replace: {"3": {arguments}}` to correct an operation (`{"3": {tool, arguments}}` swaps its tool, `{"3": null}` drops it), or `amend: {"3": [{old, new}]}` for a small text fix; `quiet: true` lists pages without their contents.
+- A dry run returns a `check_id`: `publish_checked` publishes exactly that. Pass `replace: {"3": {arguments}}` to correct an operation (`{"3": {tool, arguments}}` swaps its tool, `{"3": null}` drops it), or `amend: {"3": [{old, new}]}` for a small text fix (`all: true` when the text repeats); a used `check_id` returns what it published, so retrying after a lost answer is safe; `quiet: true` lists pages without their contents.
 - Each write counts against the hourly quota (`account_status`); a batch over it is refused whole, and a dry run says how many operations fit now.

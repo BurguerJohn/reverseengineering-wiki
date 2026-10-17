@@ -27,7 +27,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.31';
+export const VERSION = '0.8.32';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -399,7 +399,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
   server.registerTool('export_header', {
     title: 'Export a C header',
     description: 'C header with every struct, enum, typedef and vtable fact of a subject (optionally one build, one ABI), ready to import into Ghidra/IDA. warnings lists what it could not express (types no fact defines, sizes that disagree).',
-    inputSchema: { subject: z.string(), build: z.string().optional(), also: z.array(z.string()).max(10).optional().describe('Other pages whose types it uses (a platform and the formats its globals are typed by)'), abi: z.string().optional().describe('For layouts that differ by ABI (data.abi on struct and typedef facts): "win64", "lp64", "ilp32"…'), variant: z.string().optional().describe('For other layout variants (data.variant: "32-bit target", "unicode")') },
+    inputSchema: { subject: z.string(), build: z.string().optional(), also: z.array(z.string()).max(10).optional().describe('Other pages whose types it uses (a platform and the formats its globals are typed by), or single type names ("GUID")'), abi: z.string().optional().describe('For layouts that differ by ABI (data.abi on struct and typedef facts): "win64", "lp64", "ilp32"…'), variant: z.string().optional().describe('For other layout variants (data.variant: "32-bit target", "unicode")') },
     annotations: READ,
   }, handler((a: any) => exportHeader(s, a)));
 
@@ -704,11 +704,11 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('publish_checked', {
     title: 'Publish what a dry run checked',
-    description: 'Publish exactly what a dry run (of any write tool or batch) checked, by its check_id, without resending (30 minutes, same account). replace swaps whole operations of a batch; amend fixes small texts; with dry_run true it checks again.',
+    description: 'Publish exactly what a dry run (of any write tool or batch) checked, by its check_id, without resending (30 minutes, same account). Safe to retry after a lost answer: a used check_id returns what it published. replace swaps whole operations of a batch; amend fixes small texts; with dry_run true it checks again.',
     inputSchema: { check_id: z.string(), dry_run: DRY_RUN,
       replace: z.record(z.string(), z.union([z.record(z.string(), z.unknown()), z.null()])).optional().describe('Batches only: {"3": {corrected arguments}} keeps the tool, {"3": {tool, arguments}} swaps it, {"3": null} drops the operation'),
       quiet: z.boolean().optional().describe('With dry_run: list the pages without their contents'),
-      amend: z.record(z.string(), z.array(z.object({ old: z.string().min(1), new: z.string() })).min(1).max(20)).optional()
+      amend: z.record(z.string(), z.array(z.object({ old: z.string().min(1), new: z.string(), all: z.boolean().optional() })).min(1).max(20)).optional()
         .describe('Small text fixes without resending: {"3": [{old, new}]} for operation 3 of a batch ("1" for a single tool); each old must occur exactly once in that operation\'s text values (a line of a code file, a sentence)'),
       ...(review ? { review_id: REVIEW_ID } : {}) },
     annotations: WRITE,
@@ -749,7 +749,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
         if (!Number.isInteger(n) || n < 1 || n > count) return fail(new ToolError('BAD_REQUEST', `amend: operation ${k} does not exist (1-${count}).`));
         try {
           const target = ops ? ops[n - 1].arguments : args;
-          const amended = amendStrings(target, edits);
+          const amended = amendStrings(target, edits as Array<{ old: string; new: string; all?: boolean }>);
           if (ops) ops[n - 1] = { ...ops[n - 1], arguments: amended as Record<string, unknown> };
           else args = amended as Record<string, unknown>;
         } catch (error) {
@@ -767,7 +767,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 }
 
 /** Applies {old, new} edits to the string values of some arguments; each old must occur exactly once in them. */
-function amendStrings(value: unknown, edits: Array<{ old: string; new: string }>): unknown {
+function amendStrings(value: unknown, edits: Array<{ old: string; new: string; all?: boolean }>): unknown {
   let out = value;
   for (const edit of edits) {
     let hits = 0;
@@ -782,7 +782,9 @@ function amendStrings(value: unknown, edits: Array<{ old: string; new: string }>
       return v;
     };
     const next = walk(out);
-    if (hits !== 1) throw new Error(`"${edit.old.slice(0, 60)}" occurs ${hits} times (it must occur exactly once).`);
+    if (hits === 0 || (hits > 1 && !edit.all)) {
+      throw new Error(`"${edit.old.slice(0, 60)}" occurs ${hits} times in the operation's text values (matched inside each string, not against the JSON)${hits > 1 ? '; pass all: true to replace every one' : ''}.`);
+    }
     out = next;
   }
   return out;
