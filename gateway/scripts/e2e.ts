@@ -1034,6 +1034,11 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
     { tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A quiet fictional note whose text is not echoed back.', confidence: 'low' } },
   ] });
   assert.ok(quietRun.check_id && quietRun.preview === undefined && quietRun.pages?.length === 1 && quietRun.pages[0].characters > 0, JSON.stringify(quietRun).slice(0, 400));
+  // quiet sizes are what would be stored, not the shortened preview (previews stop at 3000 characters).
+  const quietLong = await call(a, 'batch', { dry_run: true, quiet: true, operations: [
+    { tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: `A long fictional note. ${'Track data. '.repeat(500)}`, confidence: 'low' } },
+  ] });
+  assert.ok(quietLong.pages?.[0]?.characters > 6000, JSON.stringify(quietLong).slice(0, 400));
   const halfBatch = await call(a, 'batch', { operations: [
     { tool: 'edit_fact', arguments: { target: `Fact:E2E Track ${run}/signature/does not exist`, base_revision: 1, summary: 'fictional correction', claim: 'Nothing at all to correct.' } },
     { tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A fictional note published before the failing edit.', confidence: 'low' } },

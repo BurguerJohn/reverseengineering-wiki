@@ -952,8 +952,11 @@ export async function linkRepo(s: Services, caller: Caller, args: {
     const section = findSection(sections, 'Code & repositories');
     const lines = (section?.body ?? '').split('\n').filter((l) => !l.replace(/^\*\s*/, '').startsWith(`{{Repo|url=${info.url}|`));
     const replaced = parseRepos(section?.body ?? '').some((x) => x.url === info.url);
-    const body = [...lines.filter((l) => l.trim() && !/Nothing documented yet/.test(l)), `* ${entry}`]
-      .map((l) => (l.startsWith('{{Repo|') ? `* ${l}` : l)).join('\n');
+    const kept = lines.filter((l) => !/Nothing documented yet/.test(l));
+    while (kept.length && !kept[0].trim()) kept.shift();
+    while (kept.length && !kept[kept.length - 1].trim()) kept.pop();
+    const lead = section ? (/^\n*/.exec(section.body)?.[0] ?? '') : '';
+    const body = lead + [...kept, `* ${entry}`].map((l) => (l.startsWith('{{Repo|') ? `* ${l}` : l)).join('\n');
     sections = section ? replaceSectionBody(sections, 'Code & repositories', body) : insertSection(sections, 'Code & repositories', body, ['Pitfalls', 'Open questions', 'Evidence & references', 'See also']);
     const edit = await mwEdit(s, op, {
       title: target, text: joinSections(sections), baserevid: page.revid, nocreate: true, tags: ['rewiki-code'],
