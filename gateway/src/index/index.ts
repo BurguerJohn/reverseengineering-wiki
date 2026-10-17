@@ -382,6 +382,7 @@ export class SearchIndex {
     this.doc(p.title, '', body, 'fact');
     this.ids(p.title, '', [...extractFromFactData(doc.data ?? {}), ...extractFromText(doc.claim ?? '')]);
     this.edge(p.title, 'fact_of', doc.subject);
+    if (doc.topic) this.edge(p.title, 'fact_of', doc.topic);
     if (doc.scope?.applies_to?.startsWith('Build:')) this.edge(p.title, 'applies_to', doc.scope.applies_to);
     for (const b of doc.scope?.observed_in ?? []) this.edge(p.title, 'observed_in', b);
     for (const r of doc.related ?? []) this.edge(p.title, 'related', r);
@@ -438,12 +439,12 @@ export class SearchIndex {
   private indexCode(p: IndexablePage): void {
     const doc = parseCodePage(p.content);
     if (!doc) return;
-    const subject = doc.meta.subjects[0] ?? null;
+    const subject = doc.meta.subjects[0] ? subjectRoot(doc.meta.subjects[0]) : null;
     this.insertPage(p, 'code', doc.meta.summary, doc.meta.status, subject, null, JSON.stringify(doc.meta));
     const files = doc.files.map((f) => `--- ${f.name}\n${f.content}`).join('\n').slice(0, 40_000);
     this.doc(p.title, '', `${doc.meta.summary}\n${doc.meta.usage}\nTested on: ${doc.meta.tested_on}\n${files}`, 'code');
     this.ids(p.title, '', extractFromText(files));
-    for (const s of doc.meta.subjects) this.edge(p.title, 'code_for', s);
+    for (const s of new Set(doc.meta.subjects.flatMap((x) => [x, subjectRoot(x)]))) this.edge(p.title, 'code_for', s);
   }
 
   private indexNote(p: IndexablePage): void {
@@ -752,6 +753,12 @@ export class SearchIndex {
   factsForSubject(subject: string, kinds?: string[]): Array<{ title: string; kind: string; status: string; level: string; applies_to: string; data: string }> {
     const rows = this.db.prepare('select title, kind, status, level, applies_to, data from facts where subject = ?').all(subject) as any[];
     return kinds?.length ? rows.filter((r) => kinds.includes(r.kind)) : rows;
+  }
+
+  /** Facts about a topic subpage (fact.topic): stored on its subject page. */
+  factsForTopic(topic: string): Array<{ title: string; kind: string; status: string }> {
+    return this.db.prepare(`select f.title, f.kind, f.status from facts f join edges e on e.src = f.title
+      where e.rel = 'fact_of' and e.dst = ?`).all(topic) as any[];
   }
 
   sectionText(title: string, heading: string): string | null {

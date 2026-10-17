@@ -1040,6 +1040,34 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   ] });
   assert.ok(halfBatch.error && /Published: operation 2\./.test(halfBatch.message), JSON.stringify(halfBatch).slice(0, 500));
 
+  // Facts and code about a topic subpage are listed there; flexible array members; aliases; merged section edits.
+  const chunkTopic = `Format:E2E Track ${run}/Chunk table`;
+  const topicPage = await call(a, 'create_page', { type: 'format', title: `E2E Track ${run}/Chunk table`, summary: 'The fictional chunk table of track files.', body: '## Layout\n\nFictional layout.\n\n## Variants\n\nFictional variants.' });
+  assert.ok(!topicPage.error, JSON.stringify(topicPage).slice(0, 400));
+  const topicFact = await call(a, 'add_fact', { kind: 'struct', subject: chunkTopic, claim: 'The fictional chunk table is a count followed by entries.', scope: { level: 'format', applies_to: 'all versions' },
+    data: { name: 'TrackChunkTable', size: 'variable', fields: [{ offset: 0, size: 4, type: 'uint32_t', name: 'count' }, { offset: 4, size: 4, type: 'uint32_t', name: 'flags' }, { offset: 8, type: 'uint32_t[count]', name: 'entries' }] },
+    evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  assert.ok(topicFact.warnings?.some((w: string) => /listed on the topic page/.test(w)), JSON.stringify(topicFact).slice(0, 500));
+  const topicRead = await call(anon, 'read', { title: chunkTopic });
+  assert.equal(topicRead.facts?.total, 1, JSON.stringify(topicRead).slice(0, 600));
+  const flexHeader = (await call(anon, 'export_header', { subject: `Format:E2E Track ${run}` })).header;
+  assert.match(flexHeader, /\/\* 0x08 \*\/ uint32_t entries\[\]; \/\* count: count \*\/\n\}; \/\* variable size \*\//, flexHeader);
+  const topicCode = await call(a, 'add_code', { name: 'Chunk lister', summary: 'A fictional chunk table lister.', language: 'python', kind: 'parser',
+    subjects: [chunkTopic, `Format:E2E Track ${run}`, chunkTopic], tested_on: 'fictional samples', usage: 'python chunks.py <file>', files: [{ name: 'chunks.py', content: 'print("chunks")\n' }] });
+  assert.match(topicCode.title ?? '', new RegExp(`^Code:E2E Track ${run}/Chunk lister`), JSON.stringify(topicCode).slice(0, 400));
+  const topicCodeRead = await call(anon, 'read', { title: topicCode.title, format: 'files', max_tokens: 200 });
+  assert.deepEqual(topicCodeRead.metadata?.subjects, [chunkTopic, `Format:E2E Track ${run}`], JSON.stringify(topicCodeRead).slice(0, 600));
+  const topicRelated = await call(anon, 'related', { title: chunkTopic, relation: 'has_code' });
+  assert.ok(JSON.stringify(topicRelated).includes(topicCode.title), JSON.stringify(topicRelated).slice(0, 600));
+  await expectError(a, 'create_page', { type: 'format', title: `E2E Alias ${run}`, summary: 'A fictional page with a slashed alias.', body: '## Overview\n\nFictional.', aliases: [`E2E A/B ${run}`], dry_run: true }, 'BAD_TITLE');
+  const cleared = await call(a, 'edit_fact', { target: topicFact.title, base_revision: topicFact.revision, summary: 'fictional: not about the topic', topic: '' });
+  assert.deepEqual(cleared.changed, ['topic'], JSON.stringify(cleared).slice(0, 400));
+  assert.equal((await call(anon, 'read', { title: chunkTopic })).facts, undefined);
+  const topicRev = topicPage.revision;
+  await call(a, 'edit_section', { title: chunkTopic, section: 'Layout', body: 'Fictional layout, edited.', base_revision: topicRev, summary: 'fictional edit one' });
+  const second = await call(a, 'edit_section', { title: chunkTopic, section: 'Variants', body: 'Fictional variants, edited.', base_revision: topicRev, summary: 'fictional edit two' });
+  assert.match(second.merged ?? '', /other sections only/, JSON.stringify(second).slice(0, 400));
+
   // A dry run hands back a check_id: publish_checked publishes exactly that, once.
   const checkedNote = await call(a, 'add_note', { subject: cave, key: 'Checked once', body: 'Published by check_id without resending the arguments.', confidence: 'low', dry_run: true });
   assert.ok(checkedNote.check_id, JSON.stringify(checkedNote).slice(0, 200));
@@ -1065,7 +1093,7 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   assert.match(typed, /\nstruct TrackNode \{/);
   assert.match(typed, /char name\[8\];/);
   assert.match(typed, /int16_t bbox\[2\]\[4\];/);
-  assert.match(typed, /uint8_t children\[0x4\]; \/\* int32_t\[count\]/);
+  assert.match(typed, /int32_t children\[\]; \/\* count: count \*\//);
 
   // PlayStation-style builds: SHA-1 identity, absolute addresses (va), scripts that place them right.
   const sha1 = createHash('sha1').update(`psx-${run}`).digest('hex');

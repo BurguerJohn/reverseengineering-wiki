@@ -196,7 +196,8 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
       if (packed) lines.push(`#pragma pack(push, 1) /* ${misaligned ? 'fields off their natural alignment' : unpadded ? 'declared size has no tail padding' : 'packed'}: offsets as documented */`);
       lines.push(`struct ${name} {`);
       let cursor = 0;
-      for (const field of fields) {
+      let flexible = false;
+      for (const [fieldIndex, field] of fields.entries()) {
         if (field.offset > cursor) {
           lines.push(`    uint8_t _pad_${cursor.toString(16).toUpperCase()}[0x${(field.offset - cursor).toString(16).toUpperCase()}];`);
         } else if (field.offset < cursor) {
@@ -216,7 +217,10 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
         const numericDims = dims.length > 0 && dims.every((d) => /^(?:0x[0-9a-f]+|\d+)$/i.test(d));
         let type = array ? cType(array[1]) : field.type;
         let note = field.notes;
-        if (array && !numericDims) { note = [`${field.rawType}`, note].filter(Boolean).join('; '); type = null; }
+        // The last field "T[]" or "T[count]" (Rich header entries, a trailing name): a flexible array member.
+        const flex = array && dims.length === 1 && !numericDims && fieldIndex === fields.length - 1 && fields.length > 1 && !!type;
+        if (flex && dims[0]) note = [`count: ${dims[0]}`, note].filter(Boolean).join('; ');
+        if (array && !numericDims && !flex) { note = [`${field.rawType}`, note].filter(Boolean).join('; '); type = null; }
         const base = type ? baseType(type) : undefined;
         if (type && base && !BUILTIN.test(type) && !defined.has(base)) {
           if (type.includes('*')) forward.add(base);
@@ -226,14 +230,15 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
             type = null;
           }
         }
-        const suffix = type && numericDims ? dims.map((d) => `[${d}]`).join('') : '';
+        const suffix = type && flex ? '[]' : type && numericDims ? dims.map((d) => `[${d}]`).join('') : '';
+        if (flex && type) flexible = true;
         const decl = type ? `${type} ${fieldId}${suffix};` : `uint8_t ${fieldId}[0x${(field.size ?? 1).toString(16).toUpperCase()}];`;
         lines.push(`    /* 0x${field.offset.toString(16).toUpperCase().padStart(2, '0')} */ ${decl}${note ? ` /* ${comment(note)} */` : ''}`);
         // Bit fields as comments under the field (C bit-field layout is not portable).
         for (const b of field.bits) lines.push(`    /*        bit ${comment(b?.bit)}: ${comment(b?.name)}${b?.notes ? ` (${comment(b.notes)})` : ''} */`);
         cursor = field.offset + (field.size ?? (field.type ? 0 : 1));
       }
-      if (size !== null && size > cursor) lines.push(`    uint8_t _pad_${cursor.toString(16).toUpperCase()}[0x${(size - cursor).toString(16).toUpperCase()}];`);
+      if (size !== null && size > cursor && !flexible) lines.push(`    uint8_t _pad_${cursor.toString(16).toUpperCase()}[0x${(size - cursor).toString(16).toUpperCase()}];`);
       lines.push(`};${size !== null ? ` /* size 0x${size.toString(16).toUpperCase()} */` : data.size === 'variable' ? ' /* variable size */' : ''}`);
       if (packed) lines.push('#pragma pack(pop)');
       lines.push('');

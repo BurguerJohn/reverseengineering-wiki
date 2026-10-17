@@ -375,7 +375,7 @@ export async function read(s: Services, args: { title: string; section?: string;
   const openQuestions = findSection(sections, 'Open questions');
   const isSubject = SUBJECT_TYPES.includes(type as any);
   const root = subjectRoot(title);
-  const factRows = isSubject && root === title ? s.index.factsForSubject(title) : [];
+  const factRows = !isSubject ? [] : root === title ? s.index.factsForSubject(title) : s.index.factsForTopic(title);
   const facts: Record<string, Record<string, number>> = { by_status: {}, by_kind: {} };
   for (const f of factRows) {
     facts.by_status[f.status] = (facts.by_status[f.status] ?? 0) + 1;

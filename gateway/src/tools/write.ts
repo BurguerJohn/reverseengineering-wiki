@@ -213,9 +213,22 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
     return odd.length ? `Enum value names that are not C identifiers (${odd.slice(0, 3).join('; ')}) export as their first word plus a comment; put explanations in the claim or notes and keep values as identifiers.` : undefined;
   })();
   const underscoreNote = /^_|_$/.test(factKey(fact).trim()) ? `MediaWiki titles cannot start or end with "_": the title drops it (data.name keeps "${shortSummary(String(fact.data.name ?? factKey(fact)), 60)}", and exports use data.name).` : undefined;
-  const subjectNote = askedSubject !== fact.subject ? `Stored on ${fact.subject}: facts attach to the subject page, not to its topic pages; mention the fact on ${askedSubject} with a link if useful.` : undefined;
-  const warnings = unknown.length || subjectNote || enumNote || underscoreNote
-    ? [...(subjectNote ? [subjectNote] : []), ...(enumNote ? [enumNote] : []), ...(underscoreNote ? [underscoreNote] : []), ...(unknown.length ? [`data.${unknown.join(', data.')} ${unknown.length > 1 ? 'are' : 'is'} not standard for kind "${fact.kind}" (standard: ${[...FACT_DATA[fact.kind].required, ...(FACT_DATA[fact.kind].one_of ?? []), ...FACT_DATA[fact.kind].optional].join(', ')}). Kept, but tools like export_symbols and export_header only use standard fields. Several related addresses? One fact per address, or add_symbols for many names with their signatures.`] : [])]
+  // A topic subpage as subject: the fact is stored on the subject page and listed on the topic page.
+  const topic = askedSubject !== fact.subject && isTopicPage(askedSubject) && await currentPage(s, askedSubject) ? askedSubject : undefined;
+  const subjectNote = askedSubject === fact.subject ? undefined : topic
+    ? `Stored on ${fact.subject} (facts attach to the subject page) and listed on the topic page ${topic} (read shows it there).`
+    : `Stored on ${fact.subject}: facts attach to the subject page; ${askedSubject} does not exist yet (create the topic page first to list the fact there).`;
+  // A sample made by a published script ({code, args, sha256}) needs that Code page.
+  const sampleCode = (Array.isArray(fact.data.samples) ? fact.data.samples : []).map((x: any) => x?.code).filter((c): c is string => typeof c === 'string');
+  const missingCode: string[] = [];
+  for (const c of sampleCode) {
+    let ct: string | null = null;
+    try { ct = title(s, c, ['code']); } catch { /* not a title */ }
+    if (!ct || !(await currentPage(s, ct))) missingCode.push(c);
+  }
+  const sampleNote = missingCode.length ? `samples name Code pages that do not exist: ${missingCode.join(', ')}. Publish the generator with add_code first (a batch runs add_code before add_fact).` : undefined;
+  const warnings = unknown.length || subjectNote || enumNote || underscoreNote || sampleNote
+    ? [...(subjectNote ? [subjectNote] : []), ...(enumNote ? [enumNote] : []), ...(underscoreNote ? [underscoreNote] : []), ...(sampleNote ? [sampleNote] : []), ...(unknown.length ? [`data.${unknown.join(', data.')} ${unknown.length > 1 ? 'are' : 'is'} not standard for kind "${fact.kind}" (standard: ${[...FACT_DATA[fact.kind].required, ...(FACT_DATA[fact.kind].one_of ?? []), ...FACT_DATA[fact.kind].optional].join(', ')}). Kept, but tools like export_symbols and export_header only use standard fields. Several related addresses? One fact per address, or add_symbols for many names with their signatures.`] : [])]
     : undefined;
   const partialBuild = fact.scope.level === 'build' ? buildIdentity(await currentPage(s, fact.scope.applies_to)) === 'partial' : false;
   assertClean(scanValue(fact, 'fact'));
@@ -233,7 +246,7 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
     });
   }
   const doc: FactDoc = {
-    schema: 'rewiki.fact/1', ...fact, status: 'claimed', created_by: op.username, created_at: now(), verifications: [],
+    schema: 'rewiki.fact/1', ...fact, ...(topic ? { topic } : {}), status: 'claimed', created_by: op.username, created_at: now(), verifications: [],
   };
   const r = await mwEdit(s, op, {
     title: t, text: JSON.stringify(doc, null, 2), summary: `Fact: ${shortSummary(fact.claim, 150)}`, createonly: true, tags: ['rewiki-fact'],
@@ -255,7 +268,7 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
 export async function editFact(s: Services, caller: Caller, args: {
   target: string; base_revision: number; summary: string;
   claim?: string; data?: Record<string, unknown>; scope?: { level: string; applies_to: string; observed_in?: string[] };
-  add_evidence?: Array<{ type: string; detail: string }>; confidence?: 'low' | 'medium' | 'high'; related?: string[];
+  add_evidence?: Array<{ type: string; detail: string }>; confidence?: 'low' | 'medium' | 'high'; related?: string[]; topic?: string;
 }) {
   const op = requireWriter(s, caller);
   const t = title(s, args.target, ['fact']);
@@ -276,7 +289,17 @@ export async function editFact(s: Services, caller: Caller, args: {
   if (args.add_evidence?.length) { doc.evidence = [...doc.evidence, ...args.add_evidence as FactDoc['evidence']]; changed.push('evidence'); }
   if (args.confidence && args.confidence !== doc.confidence) { doc.confidence = args.confidence; changed.push('confidence'); }
   if (args.related) { doc.related = args.related; changed.push('related'); }
-  if (!changed.length) throw new ToolError('BAD_REQUEST', 'Nothing to change: give claim, data, scope, add_evidence, confidence or related.');
+  if (args.topic !== undefined) {
+    // "" clears it; otherwise an existing topic subpage of the fact's subject.
+    const topic = args.topic.trim() ? title(s, args.topic, SUBJECTS) : undefined;
+    if (topic && (!isTopicPage(topic) || subjectRoot(topic) !== doc.subject)) throw new ToolError('BAD_REQUEST', `topic must be a topic subpage of ${doc.subject} ("${doc.subject}/<topic>"), or "" to clear it.`);
+    if (topic && !(await currentPage(s, topic))) throw new ToolError('NOT_FOUND', `${topic} does not exist. Create the topic page first.`);
+    if (topic !== doc.topic) {
+      if (topic) doc.topic = topic; else delete doc.topic;
+      changed.push('topic');
+    }
+  }
+  if (!changed.length) throw new ToolError('BAD_REQUEST', 'Nothing to change: give claim, data, scope, add_evidence, confidence, related or topic.');
   const parsed = factInputSchema.safeParse(doc);
   if (!parsed.success) throw new ToolError('SCHEMA_INVALID', `The corrected fact does not match rewiki.fact/1: ${issueList(parsed.error.issues)}.`, { issues: parsed.error.issues });
   const problems = checkFactData(doc.kind, doc.data);
@@ -433,6 +456,8 @@ export async function editSection(s: Services, caller: Caller, args: {
   return result(s, t, r.newrevid, {
     section: heading, words, nochange: r.nochange || undefined, ...missingGeneralPages(s, newBody),
     diff: op.dryRun ? undefined : changes,
+    merged: page.revid !== args.base_revision
+      ? `The page changed since revision ${args.base_revision} (now ${page.revid}) in other sections only, so your edit applied on top of those changes.` : undefined,
     revision_note: r.newrevid && r.newrevid !== page.revid + 1 ? 'Revision ids count the edits of the whole wiki, not of this page: other pages were edited in between.' : undefined,
     hint: splittable && words > TOPIC_SPLIT_WORDS
       ? `This section now has ${words} words. Move it to a topic subpage with split_section (title="${t}", section="${heading}"), which leaves a short summary and a link here.`
@@ -529,6 +554,7 @@ export async function createPage(s: Services, caller: Caller, args: {
   if (await currentPage(s, t)) throw new ToolError('DUPLICATE_SUSPECTED', `"${t}" already exists. Use edit_section to improve it.`, { existing: t, url: link(s, t) });
 
   const aliasTitles = (args.aliases ?? []).map((a) => {
+    if (a.includes('/')) throw new ToolError('BAD_TITLE', `Alias "${a}": "/" makes a subpage title; write it with a space or "-" ("${a.replace(/\//g, '-')}").`);
     try { return makeTitle(args.type, nameOf(a)); } catch (e) { throw e instanceof ToolError ? e : new ToolError('BAD_TITLE', `Alias "${a}": ${(e as Error).message}`); }
   }).filter((a) => a !== t);
 
@@ -575,7 +601,9 @@ export async function createPage(s: Services, caller: Caller, args: {
   const stored = t.slice(t.indexOf(':') + 1);
   const capitalized = requested && requested[0] !== stored[0] && requested.slice(1) === stored.slice(1)
     ? `MediaWiki capitalizes the first letter of titles: the page is "${t}" (links in either case still work).` : undefined;
-  return result(s, t, r.newrevid, { aliases: created.slice(1), aliases_skipped: skipped.length ? skipped : undefined, ...missingGeneralPages(s, text), note: capitalized });
+  const underscored = (args.aliases ?? []).some((a) => a.includes('_')) || args.title.includes('_')
+    ? 'MediaWiki shows "_" in titles as a space ("IMAGE_DOS_HEADER" is "IMAGE DOS HEADER"); links and searches with either work.' : undefined;
+  return result(s, t, r.newrevid, { aliases: created.slice(1), aliases_skipped: skipped.length ? skipped : undefined, ...missingGeneralPages(s, text), note: [capitalized, underscored].filter(Boolean).join(' ') || undefined });
 }
 
 // ---- topic subpages --------------------------------------------------------------
@@ -823,8 +851,8 @@ export async function addCode(s: Services, caller: Caller, args: {
   if (total > CODE_PAGE_LIMIT) fileIssues.push(`total size ${total} bytes exceeds ${CODE_PAGE_LIMIT}; publish a repository and use link_repo`);
   if (fileIssues.length) throw new ToolError('SCHEMA_INVALID', fileIssues.join('; '), { problems: fileIssues });
 
-  const subjects = meta.data.subjects.map((x) => subjectRoot(title(s, x, SUBJECTS)));
-  for (const subject of subjects) await mustExist(s, subject, 'Create the subject page first (create_page).');
+  const subjects = [...new Set(meta.data.subjects.map((x) => title(s, x, SUBJECTS)))];
+  for (const subject of subjects) await mustExist(s, subject, isTopicPage(subject) ? `Create the topic page first, or name ${subjectRoot(subject)}.` : 'Create the subject page first (create_page).');
   assertClean([
     ...files.flatMap((f) => scanText(f.content, 'code', f.name)),
     ...scanText(`${args.summary}\n${args.usage}\n${args.tested_on}\n${args.dependencies ?? ''}`, 'summary'),
@@ -847,7 +875,7 @@ export async function addCode(s: Services, caller: Caller, args: {
     const lang = languageName(args.language);
     // "WAD inspector (Python)" with language python: the language is added once.
     const bare = args.name.replace(/\s*\(([^)]*)\)\s*$/, (m, inner: string) => (languageName(inner).toLowerCase() === lang.toLowerCase() ? '' : m));
-    t = normalizeTitle(`Code:${baseName(subjects[0])}/${titleSegment(bare, 80)} (${titleSegment(lang, 20)})`);
+    t = normalizeTitle(`Code:${baseName(subjectRoot(subjects[0]))}/${titleSegment(bare, 80)} (${titleSegment(lang, 20)})`);
     if (await currentPage(s, t)) {
       throw new ToolError('DUPLICATE_SUSPECTED', `"${t}" already exists. Read it, then update it with title and base_revision.`, { existing: t, url: link(s, t) });
     }

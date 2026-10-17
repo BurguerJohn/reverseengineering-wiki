@@ -105,7 +105,7 @@ export const verificationSchema = z.object({
 
 export const factInputSchema = z.object({
   kind: z.enum(FACT_KINDS),
-  subject: z.string().min(3).describe('Subject page, e.g. "Library:CRIWARE ADX2" or "Software:Earth Defense Force 5"'),
+  subject: z.string().min(3).describe('Subject page, e.g. "Library:CRIWARE ADX2" or "Software:Earth Defense Force 5"; a topic subpage ("Format:X/Header") stores the fact on the subject page and lists it on the topic'),
   claim: z.string().min(10).max(2000).describe('One-sentence claim in plain English'),
   scope: z.object({
     level: z.enum(['technique', 'platform', 'format', 'library', 'tool', 'software', 'build']),
@@ -128,6 +128,8 @@ export interface FactDoc extends FactInput {
   verifications: Array<z.infer<typeof verificationSchema>>;
   /** Corrections (edit_fact): who changed the claim, data or scope, and why. */
   revisions?: Array<{ by: string; date: string; summary: string; changed: string[] }>;
+  /** The topic subpage the fact is about ("Format:PE/Rich header"): stored on the subject page, listed on the topic too. */
+  topic?: string;
   /** Verifications of an earlier version, kept when a correction reset the status. */
   earlier_verifications?: Array<z.infer<typeof verificationSchema> & { of_revision: number }>;
 }
