@@ -91,6 +91,7 @@ function cType(raw: unknown): string | null {
 function signedNum(raw: unknown): number | null {
   if (typeof raw === 'number' && Number.isInteger(raw)) return raw;
   if (typeof raw === 'string' && /^-\d+$/.test(raw.trim())) return parseInt(raw.trim(), 10);
+  if (typeof raw === 'string' && /^-0x[0-9a-f]+$/i.test(raw.trim())) return -parseInt(raw.trim().slice(3), 16);
   // Character codes ("'A'", as mangling letters and opcodes are often written).
   if (typeof raw === 'string' && /^'[\x20-\x7e]'$/.test(raw.trim())) return raw.trim().charCodeAt(1);
   return hexNum(raw);
@@ -221,7 +222,8 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
       for (const v of values) {
         // "MF_SPECIAL (multiplayer only)": the identifier, and the rest as a comment.
         const named = v.named;
-        const literal = v.value === null ? '' : v.value < 0 ? ` = ${v.value}` : ` = 0x${v.value.toString(16).toUpperCase()}`;
+        // Small negatives read best in decimal (-1, -2), error codes in hex (-0x7000).
+        const literal = v.value === null ? '' : v.value < 0 ? ` = ${v.value > -256 ? v.value : `-0x${(-v.value).toString(16).toUpperCase()}`}` : ` = 0x${v.value.toString(16).toUpperCase()}`;
         let id = prefixAll ? ident(`${name}_${named.name}`, 'VALUE') : ident(named.name, 'VALUE');
         for (let n = 2; enumConstants.has(id); n++) id = `${ident(`${name}_${named.name}`, 'VALUE')}_${n}`;
         enumConstants.add(id);

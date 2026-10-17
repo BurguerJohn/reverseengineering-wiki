@@ -80,13 +80,14 @@ function codeBlocks(text: string): Array<{ body: string; start: number }> {
 const VERSION_BEFORE = /\b(?:version|ver|v|patch|build|update|release|revision|rev|exe|game|engine|sdk|driver|firmware)\s*[:=#]?\s*$/i;
 
 /**
- * "pairs from 1.2.0 to 1.3.0.1", "`1.2.11.1`": a dotted quad next to two- or three-part version numbers,
+ * "pairs from 1.2.0 to 1.3.0.1", "`1.2.11.1`", ["3.6.3", "3.6.3.1"]: a dotted quad next to two- or three-part version numbers,
  * or in backticks, is a version. Lists of IP addresses do not qualify (their neighbours have four parts).
  */
 const LIST_SEP = String.raw`\s*(?:,|;|/|-|–|\bto\b|\band\b|\bor\b|\bthrough\b|\bthen\b)\s*`;
 const SHORT_VERSION = String.raw`\d{1,3}\.\d{1,3}(?:\.\d{1,3})?`;
-const VERSION_THEN = new RegExp(String.raw`(?<![\d.])${SHORT_VERSION}${LIST_SEP}$`, 'i');
-const THEN_VERSION = new RegExp(String.raw`^${LIST_SEP}${SHORT_VERSION}(?![\d.])`, 'i');
+const QUOTE = `["'\`]?`;
+const VERSION_THEN = new RegExp(String.raw`(?<![\d.])${SHORT_VERSION}${QUOTE}${LIST_SEP}${QUOTE}$`, 'i');
+const THEN_VERSION = new RegExp(String.raw`^${QUOTE}${LIST_SEP}${QUOTE}${SHORT_VERSION}(?![\d.])`, 'i');
 function amongVersions(text: string, index: number, length: number): boolean {
   if (VERSION_THEN.test(text.slice(Math.max(0, index - 40), index)) || THEN_VERSION.test(text.slice(index + length, index + length + 40))) return true;
   return text[index - 1] === '`' && text[index + length] === '`';

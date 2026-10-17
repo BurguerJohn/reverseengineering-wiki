@@ -964,6 +964,29 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const tooLong = await a.callTool({ name: 'ask', arguments: { subject: `Format:E2E Track ${run}`, question: 'Is the fictional banner always present?', context: 'x'.repeat(700), dry_run: true } }) as any;
   assert.ok(tooLong.isError && /context/i.test(JSON.stringify(tooLong.content)), JSON.stringify(tooLong).slice(0, 300));
 
+  // Error codes keyed by negative hex; identify reads them signed, unsigned or in hex; a fact is read once.
+  await call(a, 'add_fact', { kind: 'enum', subject: `Format:E2E Track ${run}`, claim: 'Fictional track error codes are negative.', scope: { level: 'format', applies_to: 'all versions' },
+    data: { name: 'TrackErr', values: { '-0x5E2E': 'TRACK_ERR_SYNC', '-0x5E31': 'TRACK_ERR_CRC' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const errHeader = (await call(anon, 'export_header', { subject: `Format:E2E Track ${run}` })).header;
+  assert.match(errHeader, /TRACK_ERR_CRC = -0x5E31,\n {4}TRACK_ERR_SYNC = -0x5E2E,/, errHeader);
+  for (const constant of [-24110, '0xFFFFA1D2', '-0x5E2E']) {
+    const byConstant = await call(anon, 'identify', { constants: [constant] });
+    assert.ok(byConstant.candidates.some((c: any) => c.subject === `Format:E2E Track ${run}`), `${constant}: ${JSON.stringify(byConstant).slice(0, 400)}`);
+  }
+  assert.ok(!thunkFact.content.includes('Every fictional handler'), thunkFact.content);
+  // A dry run before the subject exists still checks the rest; notes keep their title from dry run to publish.
+  const early = await expectError(a, 'add_fact', { kind: 'signature', subject: `Format:E2E Absent ${run}`, claim: 'A fictional signature on a page not created yet.', scope: { level: 'format', applies_to: 'all versions' },
+    data: { pattern: '11 22 33 44' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low', dry_run: true }, 'SCHEMA_INVALID');
+  assert.match(early.message, /matches[\s\S]*does not exist yet/, early.message);
+  const fine = await expectError(a, 'add_fact', { kind: 'signature', subject: `Format:E2E Absent ${run}`, claim: 'A fictional signature on a page not created yet.', scope: { level: 'format', applies_to: 'all versions' },
+    data: { pattern: '11 22 33 44', matches: 'nothing' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low', dry_run: true }, 'NOT_FOUND');
+  assert.match(fine.message, /passed the checks/);
+  const noteArgs = { subject: `Format:E2E Track ${run}`, key: 'Stable title', body: 'The fictional title suffix comes from the content.', confidence: 'low' };
+  const dryNote = await call(a, 'add_note', { ...noteArgs, dry_run: true });
+  const realNote = await call(a, 'add_note', noteArgs);
+  assert.equal(realNote.title, dryNote.title ?? dryNote.pages?.[0]?.title, JSON.stringify(dryNote).slice(0, 300));
+  await expectError(a, 'add_note', noteArgs, 'DUPLICATE_SUSPECTED');
+
   // A dry run hands back a check_id: publish_checked publishes exactly that, once.
   const checkedNote = await call(a, 'add_note', { subject: cave, key: 'Checked once', body: 'Published by check_id without resending the arguments.', confidence: 'low', dry_run: true });
   assert.ok(checkedNote.check_id, JSON.stringify(checkedNote).slice(0, 200));

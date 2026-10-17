@@ -1,5 +1,5 @@
 /** Write tools (design/04-mcp-server.md#write). Every write needs an operator account. */
-import { randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { createTwoFilesPatch } from 'diff';
 import type { Operator } from '../db/accounts.ts';
 import {
@@ -23,7 +23,7 @@ import {
   LEADING_SECTIONS, TRAILING_SECTIONS, TOPIC_SPLIT_WORDS, MAX_SYMBOLS_PER_CALL, CODE_PAGE_LIMIT,
   type FactDoc, type BuildDoc, type CodeDoc, type SymbolsDoc, type SymbolInput, type SymbolConflict,
 } from '../wiki/pages.ts';
-import { resolveRepo } from './repos.ts';
+import { resolveRepo, SPDX_EXPRESSION } from './repos.ts';
 
 const SUBJECTS = SUBJECT_TYPES as readonly PageType[];
 const MODERATION_QUEUE = 'REWiki:Moderation queue';
@@ -151,9 +151,12 @@ export async function addNote(s: Services, caller: Caller, args: { subject: stri
   assertClean([...scanText(args.body, 'note'), ...scanText(args.evidence ?? '', 'note')]);
   await mustExist(s, subject, 'Create the subject page first (create_page).');
   const date = new Date().toISOString().slice(0, 10);
-  // A short key makes the list of notes readable; the random suffix keeps titles unique.
+  // A short key makes the list of notes readable; a suffix from the content keeps titles unique (and the
+  // same between a dry run and the publish).
   const label = args.key ? ` ${titleSegment(args.key, 60)}` : '';
-  const t = normalizeTitle(`Notes:${baseName(subject)}/${date}${label} ${randomBytes(2).toString('hex')}`);
+  const suffix = createHash('sha256').update(`${op.username}\n${args.key ?? ''}\n${args.body}`).digest('hex').slice(0, 4);
+  const t = normalizeTitle(`Notes:${baseName(subject)}/${date}${label} ${suffix}`);
+  if (await currentPage(s, t)) throw new ToolError('DUPLICATE_SUSPECTED', `This note is already published: ${t}.`, { existing: t, url: link(s, t) });
   const text = renderNote({
     subject, confidence: args.confidence, bodyWikitext: markdownToWikitext(args.body, { topLevel: 2 }),
     evidenceWikitext: args.evidence ? markdownToWikitext(args.evidence, { topLevel: 3 }) : undefined,
@@ -172,7 +175,9 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   const fact = parsed.data;
   const askedSubject = title(s, fact.subject, SUBJECTS);
   fact.subject = subjectRoot(askedSubject);
-  await mustExist(s, fact.subject, 'Create the subject page first (create_page).');
+  // Checked last, so a dry run before the subject exists still reports everything else.
+  const subjectMissing = !(await currentPage(s, fact.subject));
+  const missingText = `${fact.subject} does not exist yet. Create the subject page first (create_page); in a batch, put that operation first.`;
   const problems = checkFactData(fact.kind, fact.data);
   // A hardware address is the same in every program of a platform; any other address belongs to one build.
   const hardware = fact.data.rva === undefined && (fact.data.address as { kind?: string } | undefined)?.kind === 'hardware';
@@ -193,7 +198,7 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
     }
     if (addressLike && fact.scope.level !== 'build') problems.push('A fact with an address (data.rva or data.address) must have scope.level = "build".');
   }
-  if (problems.length) throw new ToolError('SCHEMA_INVALID', problems.join(' '), { problems });
+  if (problems.length) throw new ToolError('SCHEMA_INVALID', [...problems, ...(subjectMissing ? [missingText] : [])].join(' '), { problems });
   fact.scope.observed_in = await Promise.all(fact.scope.observed_in.map((o) => {
     if (SHA256_REF.test(o.trim())) return buildRef(s, o);
     let t: string | null = null;
@@ -213,6 +218,7 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
     : undefined;
   const partialBuild = fact.scope.level === 'build' ? buildIdentity(await currentPage(s, fact.scope.applies_to)) === 'partial' : false;
   assertClean(scanValue(fact, 'fact'));
+  if (subjectMissing) throw new ToolError('NOT_FOUND', `${missingText} Everything else in this fact passed the checks.`);
 
   const buildSuffix = fact.scope.level === 'build' ? ` @ ${titleSegment(baseName(fact.scope.applies_to).split('/').slice(1).join(' '), 60)}` : '';
   const key = factKey(fact);
@@ -884,7 +890,7 @@ export async function linkRepo(s: Services, caller: Caller, args: {
   // GitHub's detector misses licenses stated only in a text file or file headers: the contributor may declare it.
   if (args.license && (['none', 'unknown', 'NOASSERTION'].includes(info.license) || info.license.startsWith('unrecognized'))) {
     // An SPDX id or expression: "MIT", "Apache-2.0 WITH LLVM-exception", "(MIT OR Apache-2.0)".
-    if (!/^\(?[A-Za-z0-9.+-]{2,40}(?:\s+(?:WITH|OR|AND)\s+\(?[A-Za-z0-9.+-]{2,40}\)?)*\)?$/.test(args.license.trim())) {
+    if (!SPDX_EXPRESSION.test(args.license.trim())) {
       throw new ToolError('BAD_REQUEST', 'license must be an SPDX id or expression, e.g. MIT, GPL-2.0-only, "Apache-2.0 WITH LLVM-exception" or "MIT OR Apache-2.0".');
     }
     info.license = `${args.license} (declared: the detector found none; check the repository)`;
@@ -918,7 +924,7 @@ export async function linkRepo(s: Services, caller: Caller, args: {
   const target = pages[0].target;
   return result(s, target, r.newrevid, {
     listed_on: pages.length > 1 ? pages.map((p) => p.target) : undefined,
-    repository: info, warnings: [info.license.startsWith('unrecognized') ? `GitHub did not recognize the license file ${info.license.slice(14, -1)}. Read it and run link_repo again with license (its SPDX id or expression): the entry is replaced.` : null,
+    repository: info, warnings: [info.license.startsWith('unrecognized') ? `GitHub did not recognize the license file ${info.license.slice(14, -1)}.${info.licenseHint ? ` It names "${info.licenseHint}".` : ''} Read it and run link_repo again with license (its SPDX id or expression): the entry is replaced.${info.licenseHint ? ' (In a dry run: pass license in the real call and no second call is needed.)' : ''}` : null,
       info.license === 'none' ? 'GitHub detected no license. If the repository has a license file or license headers, run link_repo again with license (its SPDX id, e.g. "Zlib"): the entry is replaced. Without a license, agents cannot legally reuse it.' : null,
       info.binaryReleaseAssets ? 'Release contains binaries; they are flagged, not linked.' : null,
       info.archived ? `The repository is archived (read-only${info.lastCommit ? `, last activity ${info.lastCommit.slice(0, 10)}` : ''}): its successor, if any, may be worth linking too.` : null].filter(Boolean),

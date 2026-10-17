@@ -11,6 +11,24 @@ export interface RepoInfo {
   archived: boolean;
   lastCommit: string | null;
   binaryReleaseAssets: boolean;
+  /** An SPDX expression found in a license file GitHub did not recognize: a hint, never applied on its own. */
+  licenseHint?: string;
+}
+
+/** An SPDX id or expression: "MIT", "Apache-2.0 WITH LLVM-exception", "(MIT OR Apache-2.0)". */
+export const SPDX_EXPRESSION = /^\(?[A-Za-z0-9.+-]{2,40}(?:\s+(?:WITH|OR|AND)\s+\(?[A-Za-z0-9.+-]{2,40}\)?)*\)?$/;
+
+/**
+ * "SPDX-License-Identifier: MIT", or ids joined by OR/AND/WITH ("dual [Apache-2.0](...) OR [GPL-2.0-or-later](...)
+ * license", Mbed TLS) in a license file's text.
+ */
+export function licenseHint(text: string): string | undefined {
+  const plain = text.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+  const id = String.raw`(?:[A-Za-z][A-Za-z0-9.+]*-[A-Za-z0-9.+-]*\d[A-Za-z0-9.+-]*|[A-Za-z0-9.+-]+-exception|MIT|ISC|Zlib|Unlicense|0BSD)`;
+  const tagged = /SPDX-License-Identifier:\s*([^\n*]+?)\s*(?:\*\/|-->|$)/im.exec(plain)?.[1];
+  const joined = new RegExp(String.raw`\(?${id}\)?(?:\s+(?:OR|AND|WITH)\s+\(?${id}\)?)+`).exec(plain)?.[0];
+  const hint = (tagged ?? joined)?.replace(/\s+/g, ' ').trim();
+  return hint && hint.length <= 120 && SPDX_EXPRESSION.test(hint) ? hint : undefined;
 }
 
 const BINARY_ASSET = /\.(exe|dll|msi|scr|zip|7z|rar|bin|so|dylib|apk|jar)$/i;
@@ -56,20 +74,25 @@ export async function resolveRepo(raw: string, commit?: string): Promise<RepoInf
     } catch {
       // No releases.
     }
+    let hint: string | undefined;
     let license = repo.license?.spdx_id && repo.license.spdx_id !== 'NOASSERTION' ? repo.license.spdx_id : 'none';
     if (license === 'none') {
       // GitHub's detector misses many license files (LICENSE.TXT with an exception, COPYING with headers).
       try {
         const root = await getJson(`${api}/contents/?ref=${c.sha}`, headers) as Array<{ name: string; type: string }>;
         const file = root.find((x) => x.type === 'file' && /^(?:licen[cs]e|copying|unlicense)(?:[._-].*)?$/i.test(x.name));
-        if (file) license = `unrecognized (${file.name})`;
+        if (file) {
+          license = `unrecognized (${file.name})`;
+          const body = await getJson(`${api}/contents/${encodeURIComponent(file.name)}?ref=${c.sha}`, headers) as { content?: string; encoding?: string };
+          if (body.encoding === 'base64' && body.content) hint = licenseHint(Buffer.from(body.content, 'base64').toString('utf8').slice(0, 20000));
+        }
       } catch {
         // Listing failed: keep "none".
       }
     }
     return {
       url: r.url, commit: c.sha, license,
-      archived: !!repo.archived, lastCommit: repo.pushed_at ?? null, binaryReleaseAssets: binaries,
+      archived: !!repo.archived, lastCommit: repo.pushed_at ?? null, binaryReleaseAssets: binaries, licenseHint: hint,
     };
   }
 

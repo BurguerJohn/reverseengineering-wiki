@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { scanText } from '../src/policy/scanner.ts';
 import { checkUsername, skeleton } from '../src/auth/usernames.ts';
-import { extractFromText, evidenceTokens, normalizeBytes, normalizeHex } from '../src/index/identifiers.ts';
+import { constantTokens, extractFromText, evidenceTokens, extractFromFactData, normalizeBytes, normalizeHex } from '../src/index/identifiers.ts';
+import { licenseHint } from '../src/tools/repos.ts';
 
 const rules = (text: string, ctx: Parameters<typeof scanText>[1] = 'article') => scanText(text, ctx).map((f) => f.rule);
 
@@ -37,6 +38,8 @@ test('version numbers are not IP addresses', () => {
   assert.ok(!rules('Seen in 1.2.11, 1.2.11.1 and 1.2.12.', 'article').includes('public-ipv4'));
   assert.ok(rules('client 2.1 connected from 93.184.216.34 yesterday', 'article').includes('public-ipv4'));
   assert.ok(rules('resolvers 8.8.8.8 and 1.1.1.1', 'article').includes('public-ipv4'));
+  assert.ok(!rules('TAGS = ["3.6.2", "3.6.3", "3.6.3.1", "3.6.4"]', 'code').includes('public-ipv4'));
+  assert.ok(rules('SERVERS = ["8.8.8.8", "1.1.1.1"]', 'code').includes('public-ipv4'));
 });
 
 test('code rules', () => {
@@ -82,4 +85,17 @@ test('identifiers', () => {
   assert.ok(kinds.includes('string:cri atom ver.2'));
   const tokens = evidenceTokens({ constants: [4660, '0x1234'], magic: ['4D 5A'] });
   assert.deepEqual(tokens.map((t) => t.token), ['1234', '1234', '4d5a']);
+  // One constant however a tool prints it: signed decimal, negative hex, 32-bit two's complement.
+  assert.deepEqual(constantTokens(-26880), ['6900']);
+  assert.deepEqual(constantTokens('-0x6900'), ['6900']);
+  assert.deepEqual(constantTokens('0xFFFF9700'), ['ffff9700', '6900']);
+  assert.deepEqual(constantTokens('0xFFFFFFFFFFFF9700'), ['ffffffffffff9700', '6900']);
+  const enumIds = extractFromFactData({ name: 'Err', values: { '-0x7000': 'ERR_FEATURE', '-1': 'ERR_GENERIC' } }).map((i) => `${i.kind}:${i.token}`);
+  assert.ok(enumIds.includes('hex:7000') && enumIds.includes('symbol:err_feature') && !enumIds.includes('hex:1'), enumIds.join(' '));
+});
+
+test('license hints', () => {
+  assert.equal(licenseHint('Mbed TLS files are provided under a dual [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html)\nOR [GPL-2.0-or-later](https://spdx.org/licenses/GPL-2.0-or-later.html) license.'), 'Apache-2.0 OR GPL-2.0-or-later');
+  assert.equal(licenseHint('/* SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception */'), 'Apache-2.0 WITH LLVM-exception');
+  assert.equal(licenseHint('Permission is hereby granted, free of charge, to any person'), undefined);
 });

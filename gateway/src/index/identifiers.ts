@@ -28,6 +28,30 @@ export function normalizeHex(raw: string): string | null {
   return s;
 }
 
+/**
+ * A constant as tokens: its magnitude (-26880, "-0x6900" → 6900), and for a value with the top bit set
+ * (0xFFFF9700, as a disassembler shows -0x6900) also its negation in 32 or 64 bits. Digit-only strings are decimal.
+ */
+export function constantTokens(c: string | number): string[] {
+  const s = String(c).trim();
+  let v: bigint | null = null;
+  try {
+    if (/^-?\d+$/.test(s)) v = BigInt(s);
+    else if (/^-?0x[0-9a-f]+$/i.test(s)) v = s.startsWith('-') ? -BigInt(s.slice(1)) : BigInt(s);
+  } catch {
+    v = null;
+  }
+  if (v === null) {
+    const h = normalizeHex(s);
+    return h ? [h] : [];
+  }
+  const out = new Set<string>([(v < 0n ? -v : v).toString(16)]);
+  for (const bits of [32n, 64n]) {
+    if (v >= 1n << (bits - 1n) && v < 1n << bits) out.add(((1n << bits) - v).toString(16));
+  }
+  return [...out];
+}
+
 /** "48 89 5C 24 ?? 57" → "48895c24..57" */
 export function normalizeBytes(raw: string): string | null {
   const parts = raw.trim().split(/[\s,]+/).filter(Boolean).map((p) => p.replace(/^0x/i, '').toLowerCase());
@@ -114,6 +138,19 @@ export function extractFromFactData(data: Record<string, unknown>): Identifier[]
   }
   const rtti = str(data.rtti);
   if (rtti) add(out, 'rtti', rtti.toLowerCase());
+  // Enum values ({"-0x7000": "NAME"}, {"NAME": -28672}, [{name, value}]): names as symbols, values by magnitude
+  // as identify reads constants. Small values (0, 1, 2) would match everything.
+  const values = data.values;
+  const pairs: Array<[unknown, unknown]> = Array.isArray(values)
+    ? values.map((v) => [v && typeof v === 'object' ? (v as any).name : undefined, v && typeof v === 'object' ? (v as any).value : undefined])
+    : values && typeof values === 'object' ? Object.entries(values).map(([k, v]) => (typeof v === 'string' ? [v, k] : [k, v])) : [];
+  for (const [name, value] of pairs) {
+    if (typeof name === 'string' && /^[A-Za-z_]\w{2,}$/.test(name)) add(out, 'symbol', normalizeSymbol(name));
+    if ((typeof value === 'string' && /^-?(?:0x[0-9a-f]+|\d+)$/i.test(value.trim())) || (typeof value === 'number' && Number.isInteger(value))) {
+      const magnitude = constantTokens(value as string | number)[0];
+      if (magnitude && magnitude.length >= 3) add(out, 'hex', magnitude);
+    }
+  }
   for (const listKey of ['values', 'fields', 'slots']) {
     const list = data[listKey];
     if (!Array.isArray(list)) continue;
@@ -143,9 +180,7 @@ export function evidenceTokens(e: Evidence): Array<Identifier & { input: string;
   const out: Array<Identifier & { input: string; weight: number; prefix?: boolean }> = [];
   for (const s of e.strings ?? []) out.push({ kind: 'string', token: normalizeString(s), input: s, weight: 2 });
   for (const c of e.constants ?? []) {
-    const raw = typeof c === 'number' ? `0x${c.toString(16)}` : /^\d+$/.test(c) ? `0x${BigInt(c).toString(16)}` : c;
-    const token = normalizeHex(raw);
-    if (token) out.push({ kind: 'hex', token, input: String(c), weight: 1.5 });
+    for (const token of constantTokens(c)) out.push({ kind: 'hex', token, input: String(c), weight: 1.5 });
   }
   for (const m of e.magic ?? []) {
     const token = normalizeBytes(m);

@@ -255,7 +255,8 @@ assert.match(approvedPage.html, /<h1>Approved/);
 const published = parse(await plain.callTool({ name: 'add_note', arguments: { ...noteArgs, review_id: asked.review_id } }));
 assert.ok(published.title && !published.isError, JSON.stringify(published));
 const reused = parse(await plain.callTool({ name: 'add_note', arguments: { ...noteArgs, review_id: asked.review_id } }));
-assert.equal(reused.error, 'REVIEW_USED', 'one approval, one publication');
+// The server's check runs first: the same note again is a duplicate (its title comes from the content).
+assert.ok(['REVIEW_USED', 'DUPLICATE_SUSPECTED'].includes(reused.error), `one approval, one publication: ${JSON.stringify(reused)}`);
 
 // On another device: sign in with the email code, then approve.
 const second = parse(await plain.callTool({ name: 'add_note', arguments: { subject, body: 'Approved from another device after the email code.', confidence: 'low' } }));
