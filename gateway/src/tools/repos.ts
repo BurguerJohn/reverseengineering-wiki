@@ -56,8 +56,19 @@ export async function resolveRepo(raw: string, commit?: string): Promise<RepoInf
     } catch {
       // No releases.
     }
+    let license = repo.license?.spdx_id && repo.license.spdx_id !== 'NOASSERTION' ? repo.license.spdx_id : 'none';
+    if (license === 'none') {
+      // GitHub's detector misses many license files (LICENSE.TXT with an exception, COPYING with headers).
+      try {
+        const root = await getJson(`${api}/contents/?ref=${c.sha}`, headers) as Array<{ name: string; type: string }>;
+        const file = root.find((x) => x.type === 'file' && /^(?:licen[cs]e|copying|unlicense)(?:[._-].*)?$/i.test(x.name));
+        if (file) license = `unrecognized (${file.name})`;
+      } catch {
+        // Listing failed: keep "none".
+      }
+    }
     return {
-      url: r.url, commit: c.sha, license: repo.license?.spdx_id && repo.license.spdx_id !== 'NOASSERTION' ? repo.license.spdx_id : 'none',
+      url: r.url, commit: c.sha, license,
       archived: !!repo.archived, lastCommit: repo.pushed_at ?? null, binaryReleaseAssets: binaries,
     };
   }

@@ -91,6 +91,8 @@ function cType(raw: unknown): string | null {
 function signedNum(raw: unknown): number | null {
   if (typeof raw === 'number' && Number.isInteger(raw)) return raw;
   if (typeof raw === 'string' && /^-\d+$/.test(raw.trim())) return parseInt(raw.trim(), 10);
+  // Character codes ("'A'", as mangling letters and opcodes are often written).
+  if (typeof raw === 'string' && /^'[\x20-\x7e]'$/.test(raw.trim())) return raw.trim().charCodeAt(1);
   return hexNum(raw);
 }
 
@@ -338,7 +340,7 @@ if unmapped:
 function exportSignatureScan(s: Services, args: { subject: string; tool: SymbolTool }) {
   const subject = s.index.resolveRedirect(cleanTitle(args.subject, SUBJECT_TYPES));
   if (!s.index.page(subject)) throw new ToolError('NOT_FOUND', `"${subject}" does not exist.`);
-  const sigs: Array<{ name: string; pattern: string; kind: string; status: string; fact: string; prototype?: string; offset: number }> = [];
+  const sigs: Array<{ name: string; pattern: string; kind: string; status: string; fact: string; prototype?: string; offset: number; multiple: boolean }> = [];
   for (const f of s.index.factsForSubject(subject).filter((x) => x.status !== 'rejected')) {
     const d = JSON.parse(f.data);
     const pattern = typeof d.signature === 'string' ? d.signature : typeof d.pattern === 'string' ? d.pattern : null;
@@ -346,17 +348,18 @@ function exportSignatureScan(s: Services, args: { subject: string; tool: SymbolT
     // The name goes at match start + offset: signature_offset (function/global), or offset of a signature fact; negative = before.
     const raw = d.signature_offset ?? (f.kind === 'signature' ? d.offset : undefined);
     const offset = typeof raw === 'string' && /^-/.test(raw.trim()) ? -(hexNum(raw.trim().slice(1)) ?? 0) : hexNum(raw) ?? 0;
-    sigs.push({ name: qualifiedName(d.name ?? d.class ?? f.title.split('/').pop(), `rewiki_${f.kind}`), pattern: pattern.trim().toUpperCase().replace(/\?\??/g, '??'), kind: f.kind, status: f.status, fact: f.title, prototype: typeof d.prototype === 'string' ? d.prototype : undefined, offset });
+    sigs.push({ name: qualifiedName(d.name ?? d.class ?? f.title.split('/').pop(), `rewiki_${f.kind}`), pattern: pattern.trim().toUpperCase().replace(/\?\??/g, '??'), kind: f.kind, status: f.status, fact: f.title, prototype: typeof d.prototype === 'string' ? d.prototype : undefined, offset, multiple: d.multiple === true });
   }
   const ascii = (x: string) => JSON.stringify(x.replace(/[^\x20-\x7e]/g, '?'));
-  const list = sigs.map((x) => `    (${ascii(x.name)}, ${ascii(x.pattern)}, ${ascii(x.kind)}, ${ascii(x.status)}, ${ascii(x.fact)}, ${x.offset}),`).join('\n');
+  const list = sigs.map((x) => `    (${ascii(x.name)}, ${ascii(x.pattern)}, ${ascii(x.kind)}, ${ascii(x.status)}, ${ascii(x.fact)}, ${x.offset}, ${x.multiple ? 'True' : 'False'}),`).join('\n');
   const head = `# ${HEADER_NOTE}\n# Signatures of: ${comment(subject)}\n# Generated: ${new Date().toISOString()}\n`;
   let script: string;
   if (args.tool === 'json' || args.tool === 'sym') script = JSON.stringify({ subject, signatures: sigs }, null, 2);
   else if (args.tool === 'ghidra') {
     script = `${head}# Run in Ghidra's Script Manager (Jython or PyGhidra) with your program open. It searches the program
 # for each signature and names a match only when it is unique; data tables (kind "global") compiled in
-# more than once get every copy named (_2, _3...). Set LABEL_ALL = True to do that for functions too.
+# more than once, and signatures marked multiple (thunks, inlined helpers), get every copy named (_2, _3...).
+# Set LABEL_ALL = True to do that for every signature.
 from ghidra.program.model.symbol import SourceType
 
 LABEL_ALL = False
@@ -370,8 +373,8 @@ def to_regex(pattern):
     return "".join("[\\\\x00-\\\\xff]" if b == "??" else "\\\\x" + b for b in pattern.split())
 
 named = 0
-for name, pattern, kind, status, fact, offset in SIGNATURES:
-    every = LABEL_ALL or kind == "global"
+for name, pattern, kind, status, fact, offset, multiple in SIGNATURES:
+    every = LABEL_ALL or multiple or kind == "global"
     hits = findBytes(currentProgram.getMinAddress(), to_regex(pattern), MAX_COPIES if every else 2)
     if not hits or (len(hits) > 1 and not every):
         print("%s: %d matches, not named" % (name, len(hits)))
@@ -389,7 +392,7 @@ print("ReverseEngineering.wiki: named %d of %d signatures" % (named, len(SIGNATU
   } else {
     script = `${head}# Run in IDA via File > Script file (IDAPython) with your database open. It searches for each signature
 # and names a match only when it is unique; data tables (kind "global") compiled in more than once get
-# every copy named (_2, _3...). Set LABEL_ALL = True to do that for functions too.
+# every copy named (_2, _3...), and so do signatures marked multiple. Set LABEL_ALL = True for all of them.
 import idaapi, idc, ida_bytes, ida_funcs, ida_name
 
 LABEL_ALL = False
@@ -414,8 +417,8 @@ def find_all(pattern, limit=2):
     return hits
 
 named = 0
-for name, pattern, kind, status, fact, offset in SIGNATURES:
-    every = LABEL_ALL or kind == "global"
+for name, pattern, kind, status, fact, offset, multiple in SIGNATURES:
+    every = LABEL_ALL or multiple or kind == "global"
     hits = find_all(pattern, MAX_COPIES if every else 2)
     if not hits or (len(hits) > 1 and not every):
         print("%s: %d matches, not named" % (name, len(hits)))

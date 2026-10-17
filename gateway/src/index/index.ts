@@ -141,13 +141,20 @@ export interface SearchHit {
 const SUBJECT_TYPES_SET = new Set(['software', 'library', 'format', 'platform', 'technique', 'tool']);
 
 /** Whether byte string `outer` contains `inner` (hex pairs; ".." is a wildcard on either side). */
-function bytesContain(outer: string, inner: string): boolean {
+/** inner occurs in outer (".." matches any byte), with at least minFixed real bytes equal on both sides. */
+function bytesContain(outer: string, inner: string, minFixed = 0): boolean {
   const a = outer.match(/../g) ?? [];
   const b = inner.match(/../g) ?? [];
+  const innerFixed = b.filter((x) => x !== '..').length;
   for (let start = 0; start + b.length <= a.length; start++) {
     let ok = true;
-    for (let i = 0; i < b.length && ok; i++) ok = a[start + i] === '..' || b[i] === '..' || a[start + i] === b[i];
-    if (ok) return true;
+    let fixed = 0;
+    for (let i = 0; i < b.length && ok; i++) {
+      ok = a[start + i] === '..' || b[i] === '..' || a[start + i] === b[i];
+      if (ok && a[start + i] !== '..' && b[i] !== '..') fixed++;
+    }
+    // "E8 ?? ?? ?? ??" fits anywhere: count only matches that share real bytes, half of the inner's at least.
+    if (ok && fixed >= minFixed && fixed * 2 >= innerFixed) return true;
   }
   return false;
 }
@@ -567,7 +574,7 @@ export class SearchIndex {
         // A pattern of 4+ bytes found inside a published signature, or containing one; ?? matches any byte.
         const all = this.db.prepare(`select i.title, i.token, p.subject from identifiers i join pages p on p.title = i.title
           where i.kind = 'bytes' limit 20000`).all() as Array<{ title: string; token: string; subject: string | null }>;
-        rows = all.filter((r) => r.token === t.token || (r.token.length >= 8 && (bytesContain(r.token, t.token) || bytesContain(t.token, r.token))));
+        rows = all.filter((r) => r.token === t.token || (r.token.length >= 8 && (bytesContain(r.token, t.token, 3) || bytesContain(t.token, r.token, 3))));
       } else if (t.kind === 'string') {
         rows = this.db.prepare(`select i.title, p.subject from identifiers i join pages p on p.title = i.title
           where i.kind = 'string' and (i.token = ?

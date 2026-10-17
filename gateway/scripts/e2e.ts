@@ -930,11 +930,26 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   await call(a, 'add_fact', { kind: 'global', subject: `Format:E2E Track ${run}`, claim: 'The fictional length table sits 4 bytes before this pattern.', scope: { level: 'format', applies_to: 'all versions' },
     data: { name: 'track_lext', type: 'uint16_t[31]', signature: '10 00 10 00 11 00 ?? 00', signature_offset: '-4' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
   const sigScan = (await call(anon, 'export_symbols', { subject: `Format:E2E Track ${run}`, tool: 'ghidra' })).script;
-  assert.match(sigScan, /\("track_lext", "10 00 10 00 11 00 \?\? 00", "global", "claimed", "[^"]+", -4\),/, sigScan.slice(0, 1500));
-  assert.match(sigScan, /every = LABEL_ALL or kind == "global"/);
+  assert.match(sigScan, /\("track_lext", "10 00 10 00 11 00 \?\? 00", "global", "claimed", "[^"]+", -4, False\),/, sigScan.slice(0, 1500));
+  assert.match(sigScan, /every = LABEL_ALL or multiple or kind == "global"/);
   assert.match(sigScan, /addr = hit\.add\(offset\)/);
   writeFileSync(join(tmpdir(), `rewiki-sigscan-${run}.py`), sigScan);
   writeFileSync(join(tmpdir(), `rewiki-sigscan-ida-${run}.py`), (await call(anon, 'export_symbols', { subject: `Format:E2E Track ${run}`, tool: 'ida' })).script);
+
+  // Signatures meant to match many times; observed_in free text kept; character-keyed enums; wildcard-only overlaps do not identify.
+  const thunk = await call(a, 'add_fact', { kind: 'signature', subject: `Format:E2E Track ${run}`, claim: 'Every fictional handler thunk starts like this.', scope: { level: 'format', applies_to: 'all versions', observed_in: ['??_7 MAP', 'msvcp140.dll'] },
+    data: { pattern: '33 C8 E8 ?? ?? ?? ?? B8', matches: 'handler thunk', offset: 8, multiple: true }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  assert.ok(!thunk.error, JSON.stringify(thunk).slice(0, 400));
+  const thunkFact = await call(anon, 'read', { title: thunk.title });
+  assert.deepEqual(thunkFact.document?.scope?.observed_in, ['??_7 MAP', 'msvcp140.dll'], JSON.stringify(thunkFact).slice(0, 600));
+  const thunkScan = (await call(anon, 'export_symbols', { subject: `Format:E2E Track ${run}`, tool: 'ghidra' })).script;
+  assert.match(thunkScan, /"33 C8 E8 \?\? \?\? \?\? \?\? B8", "signature", "claimed", "[^"]+", 8, True\),/, thunkScan.slice(0, 1500));
+  const letters = await call(a, 'add_fact', { kind: 'enum', subject: `Format:E2E Track ${run}`, claim: 'Fictional calling-convention letters.', scope: { level: 'format', applies_to: 'all versions' },
+    data: { name: 'CallConv', values: { "'A'": 'CC_CDECL', "'G'": 'CC_STDCALL' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  assert.ok(!letters.error, JSON.stringify(letters).slice(0, 400));
+  assert.match((await call(anon, 'export_header', { subject: `Format:E2E Track ${run}` })).header, /CC_CDECL = 0x41,\n {4}CC_STDCALL = 0x47,/);
+  const noisy = await call(anon, 'identify', { patterns: ['E8 ?? ?? ?? ?? 90 90 90'] });
+  assert.ok(!noisy.candidates.some((c: any) => c.subject === `Format:E2E Track ${run}`), JSON.stringify(noisy).slice(0, 500));
 
   // A dry run hands back a check_id: publish_checked publishes exactly that, once.
   const checkedNote = await call(a, 'add_note', { subject: cave, key: 'Checked once', body: 'Published by check_id without resending the arguments.', confidence: 'low', dry_run: true });

@@ -7,7 +7,8 @@
 import MarkdownIt from 'markdown-it';
 import { tableToMarkdown } from './wikitext.ts';
 
-const md = new MarkdownIt('default', { html: false, linkify: false, typographer: false });
+// html: true only so inline tags arrive as tokens: a few (code, sub, sup, br, kbd) pass through, everything else is escaped.
+const md = new MarkdownIt('default', { html: true, linkify: false, typographer: false });
 
 type Token = ReturnType<typeof md.parse>[number];
 
@@ -109,7 +110,7 @@ function renderInline(tokens: Token[], inTable = false): string {
         emit(escapeText(t.content || String(t.attrGet('src') ?? ''), inTable));
         break;
       case 'html_inline':
-        emit(escapeText(t.content, inTable));
+        emit(/^<\/?(?:code|sub|sup|kbd|var|small|br)\s*\/?>$/i.test(t.content.trim()) ? t.content.trim().toLowerCase().replace(/\s+/g, '') : escapeText(t.content, inTable));
         break;
       default:
         if (t.children) emit(renderInline(t.children, inTable));

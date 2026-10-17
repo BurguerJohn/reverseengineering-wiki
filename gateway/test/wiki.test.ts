@@ -112,3 +112,10 @@ test('markdown → wikitext: MediaWiki tables written inside Markdown become rea
   assert.match(out, /^Header:/);
   assert.match(out, /After the table\./);
 });
+
+test('markdown → wikitext: a few inline HTML tags pass through, others are escaped', () => {
+  const out = markdownToWikitext('| Name | Meaning |\n|---|---|\n| <code>??_7</code> | vftable, x<sup>2</sup> |\n\nSee <script>x</script>.');
+  assert.match(out, /<code>\?\?_7<\/code>/);
+  assert.match(out, /x<sup>2<\/sup>/);
+  assert.doesNotMatch(out, /<script>/);
+});
