@@ -3,6 +3,7 @@
  * callers get read tools; the local package (and authenticated callers) also
  * get write tools.
  */
+import { createTwoFilesPatch } from 'diff';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -16,6 +17,7 @@ import { quota, remainingWrites } from '../auth/trust.ts';
 import * as read from '../tools/read.ts';
 import * as write from '../tools/write.ts';
 import { importSymbols, SYMBOL_FILE_FORMATS } from '../tools/symbolimport.ts';
+import { proposeFromRepo } from '../tools/repoproposal.ts';
 import { exportHeader, exportSymbols } from '../tools/exports.ts';
 import { FACT_KINDS, FACT_DATA, CODE_KINDS, SYMBOL_KINDS, SYMBOL_SOURCES, MAX_SYMBOLS_PER_CALL, expandDoc } from '../wiki/pages.ts';
 
@@ -27,7 +29,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.33';
+export const VERSION = '0.8.34';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -143,6 +145,18 @@ ${text}`,
  * With review (OAuth clients), a real run in review mode needs the operator's approval first.
  */
 function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Caller, args: any) => Promise<Record<string, unknown>> | Record<string, unknown>, review?: ServerReview, known?: Set<string>) {
+  // Refused before anything was written: keep the arguments, so only the broken part is fixed and resent.
+  const keepForFix = (error: unknown, rest: Record<string, unknown>) => {
+    if (!(error instanceof ToolError) || !caller.operator) return;
+    if (!['BATCH_INVALID', 'SCHEMA_INVALID', 'POLICY_BLOCKED', 'PRIVACY_BLOCKED', 'REPLACE_FAILED'].includes(error.code)) return;
+    if (Array.isArray(error.details.completed) && error.details.completed.length) return; // part of a batch was published
+    Object.assign(error.details, {
+      check_id: rememberCheck(name, rest, caller.operator.id),
+      fix_with: name === 'batch'
+        ? 'publish_checked with this check_id and replace = {"<operation number>": {corrected arguments}} (or amend = {"<n>": [{old, new}]} for a small text fix), with dry_run true to check again: the other operations are reused, not resent.'
+        : 'publish_checked with this check_id and amend = {"1": [{old, new}]} for a small fix, with dry_run true to check again, instead of resending everything.',
+    });
+  };
   const body = async (args: any, extra: Extra): Promise<Record<string, unknown>> => {
     const { dry_run: dryRun, review_id: reviewId, quiet, ...rest } = args ?? {};
     const mode = caller.operator ? s.db.operatorById(caller.operator.id)?.mode : undefined;
@@ -152,25 +166,33 @@ function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Ca
       try {
         ran = await dryRunOf(s, caller, fn, rest, reviewed);
       } catch (error) {
-        // A batch with some failing operations: fix only those, without resending the rest.
-        if (name === 'batch' && error instanceof ToolError && error.code === 'BATCH_INVALID' && caller.operator) {
-          Object.assign(error.details, {
-            check_id: rememberCheck(name, rest, caller.operator.id),
-            fix_with: 'publish_checked with this check_id and replace = {"<operation number>": {corrected arguments}} (with dry_run true to check again): the other operations are reused, not resent.',
-          });
-        }
+        keepForFix(error, rest);
         throw error;
       }
       const full = compactPreview(ran);
       // quiet: what would be written, without echoing it (publish_checked still publishes exactly what was checked).
       const checked = quiet && Array.isArray(full.preview)
-        ? { ...full, preview: undefined, aliases_previewed: undefined, pages: (ran.preview as Preview[]).map((p) => ({ title: p.title, action: p.action, ...(p.content !== undefined ? { characters: p.content.length } : { diff_characters: (p.diff ?? '').length }) })) }
+        ? { ...full, preview: undefined, aliases_previewed: undefined, pages: mergePreviews(ran.preview as Preview[]).map((p) => ({ title: p.title, action: p.action, ...(p.content !== undefined ? { characters: p.content.length } : { diff_characters: (p.diff ?? '').length }) })) }
         : full;
       if (!caller.operator) return checked;
       return { ...checked, check_id: rememberCheck(name, rest, caller.operator.id), publish_with: `publish_checked with this check_id publishes exactly what was checked, without resending it (valid 30 minutes).${name === 'batch' ? ' To change some operations first (after a warning), pass replace = {"<operation number>": {corrected arguments}} with dry_run true.' : ''}` };
     }
-    if (!reviewed) return fn(caller, rest);
-    const how = await approve(s, review!, caller.operator!.id, name, rest, await dryRunOf(s, caller, fn, rest, true), typeof reviewId === 'string' ? reviewId : undefined, extra);
+    if (!reviewed) {
+      try {
+        return await fn(caller, rest);
+      } catch (error) {
+        keepForFix(error, rest);
+        throw error;
+      }
+    }
+    let checkedRun: Record<string, unknown>;
+    try {
+      checkedRun = await dryRunOf(s, caller, fn, rest, true);
+    } catch (error) {
+      keepForFix(error, rest);
+      throw error;
+    }
+    const how = await approve(s, review!, caller.operator!.id, name, rest, checkedRun, typeof reviewId === 'string' ? reviewId : undefined, extra);
     const out = await fn({ ...caller, approved: how }, rest);
     // The agent does not see the client's prompt: tell it the approval happened.
     return { ...out, review: how === 'client' ? 'Approved by your operator in their MCP client (that prompt is shown to them, not to you).' : 'Approved by your operator on the review page.' };
@@ -207,8 +229,24 @@ const PREVIEW_TOTAL = 24000;
  * cut at a few thousand characters and alias redirects folded; the operator's review page and
  * approval prompt use the whole text.
  */
+/** Several edits of one page in a batch: one preview with the whole change (first state to last). */
+function mergePreviews(previews: Preview[]): Preview[] {
+  const byTitle = new Map<string, Preview[]>();
+  for (const p of previews) byTitle.set(p.title, [...(byTitle.get(p.title) ?? []), p]);
+  return [...byTitle.values()].map((list) => {
+    const first = list[0];
+    const last = list[list.length - 1];
+    const strip = ({ shownBefore: _b, shownAfter: _a, ...p }: Preview) => p;
+    if (list.length === 1) return strip(first);
+    if (first.action === 'create') return { ...strip(first), content: last.shownAfter ?? last.content, edits: list.length } as Preview;
+    if (first.shownBefore === undefined || last.shownAfter === undefined) return strip(last);
+    const patch = createTwoFilesPatch('current', 'after', first.shownBefore, last.shownAfter, '', '', { context: 2 });
+    return { title: first.title, action: 'edit', format: first.format, diff: patch.split('\n').slice(2).join('\n'), edits: list.length } as Preview;
+  });
+}
+
 function compactPreview(out: Record<string, unknown>): Record<string, unknown> {
-  const previews = (out.preview ?? []) as Preview[];
+  const previews = mergePreviews((out.preview ?? []) as Preview[]);
   let budget = PREVIEW_TOTAL;
   let cut = false;
   const redirects = previews.filter((p) => /^#REDIRECT/i.test((p.content ?? '').trim()));
@@ -309,6 +347,13 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     },
     annotations: READ,
   }, handler((a: any) => read.identify(s, a)));
+
+  server.registerTool('exists', {
+    title: 'Check which pages exist',
+    description: 'Which of these subjects already have a page? One call for a list of names ("CRIWARE", "MinHook", "DLL proxy"): exact titles in every namespace, aliases, and similar titles. Use it before create_page and before linking general pages.',
+    inputSchema: { names: z.array(z.string().min(1).max(120)).min(1).max(50) },
+    annotations: READ,
+  }, handler((a: any) => read.exists(s, a)));
 
   server.registerTool('lookup_binary', {
     title: 'Look up a binary',
@@ -515,7 +560,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       body: z.string().optional().describe('New section body in Markdown (without the heading); or use replace'),
       replace: z.array(z.object({ old: z.string().min(1), new: z.string() })).min(1).max(20).optional()
         .describe("Small changes instead of body: each old text must occur exactly once in the section's Markdown (as read returns it)"),
-      base_revision: z.number().int(),
+      base_revision: z.number().int().optional().describe('The revision you read; inside a batch it may be left out for a page an earlier operation of the batch writes'),
       summary: z.string().min(3),
       reason: z.string().optional(),
       create_if_missing: z.boolean().optional(),
@@ -603,6 +648,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       kind: z.enum(CODE_KINDS),
       subjects: z.array(z.string()).min(1),
       tested_on: z.string().min(3).max(1000).describe('Builds/samples and tool versions it was run against'),
+      tested_how: z.enum(['read', 'built', 'run', 'tested_against_build']).optional().describe('read (not run), built, run, or tested_against_build (checked on a real build)'),
       usage: z.string().min(10).max(4000).describe('How to run it'),
       dependencies: z.string().optional(),
       files: z.array(z.object({ name: z.string(), lang: z.string().optional(), content: z.string() })).min(1),
@@ -610,15 +656,28 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     annotations: WRITE,
   }, (c, a) => write.addCode(s, c, a));
 
+  // Needs an account (it makes dozens of requests to GitHub), though it writes nothing.
+  server.registerTool('propose_from_repo', {
+    title: 'Draft a batch from a repository',
+    description: 'For "put this GitHub repository on the wiki": reads it at a pinned commit (README and up to 40 source files) and returns a draft batch to review: link_repo prefilled, the wiki pages its README names, and the byte patterns (AOB signatures) in its code as candidate signature facts with their source lines. Writes nothing.',
+    inputSchema: {
+      url: z.string().describe('https://github.com/owner/repo'),
+      commit: z.string().optional().describe('Default: the head of the default branch'),
+      subjects: z.array(z.string()).max(5).optional().describe('Subject pages the facts belong to (default: the pages the README names)'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  }, handler((a: any) => proposeFromRepo(s, a)));
+
   registerWrite('link_repo', {
     title: 'Link a repository',
-    description: 'List a public GitHub/GitLab/Codeberg repository on a subject page, pinned to a commit, with its license detected.',
+    description: 'List a public GitHub/GitLab/Codeberg repository on a subject page, pinned to a commit (default: the head of the default branch) with its license detected. The answer also gives its last activity, its top-level files and the pages that already list it.',
     inputSchema: { dry_run: DRY_RUN,
       url: z.string(),
       commit: z.string().optional(),
       subjects: z.array(z.string()).min(1),
       description: z.string(),
       tested_on: z.string(),
+      tested_how: z.enum(['read', 'built', 'run', 'tested_against_build']).optional().describe('How far you went: read the source, built it, ran it, or checked it against a real build'),
       page: z.string().optional().describe('Another page to list it on too (a Code page, say); every subject gets it anyway'),
       license: z.string().optional().describe('SPDX id or expression the repository states ("BSD-3-Clause OR GPL-2.0-only"): used when GitHub\'s detector finds none (dual licenses, COPYING files), so pass it on the first call when you know it'),
     },
@@ -708,6 +767,8 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     inputSchema: { check_id: z.string(), dry_run: DRY_RUN,
       replace: z.record(z.string(), z.union([z.record(z.string(), z.unknown()), z.null()])).optional().describe('Batches only: {"3": {corrected arguments}} keeps the tool, {"3": {tool, arguments}} swaps it, {"3": null} drops the operation'),
       quiet: z.boolean().optional().describe('With dry_run: list the pages without their contents'),
+      append: z.array(z.object({ tool: z.string(), arguments: z.record(z.string(), z.unknown()) })).max(50).optional().describe('More operations to add to what was checked (it becomes a batch)'),
+      merge: z.array(z.string()).max(10).optional().describe('Other check_ids of yours to publish together with this one, as one batch'),
       amend: z.record(z.string(), z.array(z.object({ old: z.string().min(1), new: z.string(), all: z.boolean().optional() })).min(1).max(20)).optional()
         .describe('Small text fixes without resending: {"3": [{old, new}]} for operation 3 of a batch ("1" for a single tool); each old must occur exactly once in that operation\'s text values (a line of a code file, a sentence)'),
       ...(review ? { review_id: REVIEW_ID } : {}) },
@@ -726,9 +787,29 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       return ok({ already_published: true, note: 'This check_id was already published; nothing was written again. The first answer follows.', result: previous });
     }
     let args = checked.args;
+    let tool = checked.tool;
+    // append / merge: what was checked separately goes out as one batch (one approval in review mode).
+    if ((a.append && a.append.length) || (a.merge && a.merge.length)) {
+      const asOps = (t: string, x: Record<string, unknown>) => (t === 'batch' && Array.isArray(x.operations)
+        ? x.operations as Array<{ tool: string; arguments: Record<string, unknown> }> : [{ tool: t, arguments: x }]);
+      const ops = asOps(tool, args);
+      for (const id of a.merge ?? []) {
+        const other = CHECKED.get(String(id));
+        if (!other || other.operatorId !== caller.operator?.id || Date.now() - other.at > CHECK_TTL_MS) return fail(new ToolError('CHECK_EXPIRED', `merge: check_id ${id} is unknown or expired.`));
+        if (other.published) return fail(new ToolError('BAD_REQUEST', `merge: check_id ${id} was already published.`));
+        ops.push(...asOps(other.tool, other.args));
+      }
+      for (const o of a.append ?? []) {
+        if (!handlers.has(o.tool) || o.tool === 'batch') return fail(new ToolError('BAD_REQUEST', `append: "${o.tool}" is not a write tool.`));
+        ops.push({ tool: o.tool, arguments: o.arguments });
+      }
+      if (ops.length > MAX_BATCH) return fail(new ToolError('BAD_REQUEST', `Together they are ${ops.length} operations; a batch takes at most ${MAX_BATCH}.`));
+      tool = 'batch';
+      args = { operations: ops };
+    }
     if (a.replace && Object.keys(a.replace).length) {
       const ops = Array.isArray(args.operations) ? [...(args.operations as Array<{ tool: string; arguments: Record<string, unknown> }>)] : null;
-      if (checked.tool !== 'batch' || !ops) return fail(new ToolError('BAD_REQUEST', 'replace works on batch checks only.'));
+      if (tool !== 'batch' || !ops) return fail(new ToolError('BAD_REQUEST', 'replace works on batch checks only.'));
       const dropped = new Set<number>();
       for (const [k, v] of Object.entries(a.replace as Record<string, Record<string, unknown> | null>)) {
         const n = Number(k);
@@ -742,7 +823,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       args = { ...args, operations: ops.filter((_, i) => !dropped.has(i)) };
     }
     if (a.amend && Object.keys(a.amend).length) {
-      const ops = checked.tool === 'batch' && Array.isArray(args.operations) ? [...(args.operations as Array<{ tool: string; arguments: Record<string, unknown> }>)] : null;
+      const ops = tool === 'batch' && Array.isArray(args.operations) ? [...(args.operations as Array<{ tool: string; arguments: Record<string, unknown> }>)] : null;
       for (const [k, edits] of Object.entries(a.amend as Record<string, Array<{ old: string; new: string }>>)) {
         const n = Number(k);
         const count = ops ? ops.length : 1;
@@ -758,7 +839,8 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       }
       if (ops) args = { ...args, operations: ops };
     }
-    const result = await handlers.get(checked.tool)!({ ...args, ...(a.dry_run ? { dry_run: true, ...(a.quiet ? { quiet: true } : {}) } : {}), ...(a.review_id ? { review_id: a.review_id } : {}) }, extra);
+    const result = await handlers.get(tool)!({ ...args, ...(a.dry_run ? { dry_run: true, ...(a.quiet ? { quiet: true } : {}) } : {}), ...(a.review_id ? { review_id: a.review_id } : {}) }, extra);
+    for (const id of a.merge ?? []) if (!result.isError && !a.dry_run) { const other = CHECKED.get(String(id)); if (other) other.published = result; }
     if (!result.isError && !a.dry_run) checked.published = result;
     return result;
   }) as any);

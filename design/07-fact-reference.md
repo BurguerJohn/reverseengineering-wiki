@@ -64,6 +64,12 @@ Names are identifiers: write what MSVC prints as ``Foo::`vftable'{for `Bar'}`` a
 - `import_symbols`: a decompilation project's symbol file read from its repository at a pinned commit (splat `symbol_addrs.txt` and linker lists, decomp-toolkit `symbols.txt` for GameCube/Wii, nm output, address/name pairs). Only names, addresses, sizes and types are taken, never code or comments; the build page records where they came from.
 - Give functions their prototype (`data.prototype`, or `type` in a symbol map) and globals their type and size: build scripts apply them.
 
+## Planning a contribution
+
+- `exists` with a list of names says which subjects already have a page (titles, aliases, similar titles) before you create or link general pages.
+- `propose_from_repo` (with an account) reads a GitHub repository and returns a draft batch: `link_repo` prefilled, the wiki pages its README names, and the byte patterns in its code as candidate signature facts with file and line. Review it and fill the TODOs; nothing is written until you send the batch.
+- `link_repo` needs no commit (it pins the head of the default branch) and answers with the repository's last activity, its top-level files and the pages that already list it; `tested_how` (`read`, `built`, `run`, `tested_against_build`) says how far you went, on `add_code` too. Reading a fact tells whether it rests on source only or on a test (`basis`).
+
 ## Exports
 
 - `export_header` (subject, optional build, abi, and `also` for pages or single type names it uses, e.g. `also: ["GUID"]`): every struct, enum, typedef and vtable fact as C; `warnings` lists what it could not express. Import it before a build script, so the types exist.
@@ -73,5 +79,9 @@ Names are identifiers: write what MSVC prints as ``Foo::`vftable'{for `Bar'}`` a
 ## Batches and dry runs
 
 - `batch`: up to 50 writes in dependency order (pages, topics, builds, facts/code/notes/symbols, edits, reviews); later operations may refer to what earlier ones create. A real run stops at the first error and says what was published and what did not run. A later `edit_section` with `replace` applies on top of what earlier operations of the same batch wrote on that page. Keep one call under ~20 KB of arguments.
+- Inside a batch, `edit_section` may leave out `base_revision` for a page an earlier operation of the same batch writes. A dry run shows one preview per page, with the whole change of that page.
+- A write refused before anything was published (a schema error, a policy block, failing operations of a batch) also returns a `check_id`: fix only the broken part with `publish_checked` (`replace` or `amend`). Separate checks go out together with `merge: [check_id, …]`, and `append` adds operations.
+- Text that will not render as written (two backslashes in Markdown code, a literal `
+`) is reported in `warnings`, even with `quiet`.
 - A dry run returns a `check_id`: `publish_checked` publishes exactly that. Pass `replace: {"3": {arguments}}` to correct an operation (`{"3": {tool, arguments}}` swaps its tool, `{"3": null}` drops it), or `amend: {"3": [{old, new}]}` for a small text fix (`all: true` when the text repeats); a used `check_id` returns what it published, so retrying after a lost answer is safe; `quiet: true` lists pages without their contents.
 - Each write counts against the hourly quota (`account_status`); a batch over it is refused whole, and a dry run says how many operations fit now.

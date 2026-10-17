@@ -40,6 +40,9 @@ export interface Preview {
   format?: 'markdown' | 'json' | 'wikitext';
   content?: string;
   diff?: string;
+  /** The page as shown before and after this edit, to merge several edits of one page into one preview. */
+  shownBefore?: string;
+  shownAfter?: string;
 }
 
 /**
@@ -174,13 +177,18 @@ export function assertClean(findings: Finding[]): void {
 /** Runs a MediaWiki edit as the operator and maps MediaWiki errors to tool errors. */
 export async function mwEdit(s: Services, op: Writer, params: EditParams): Promise<EditResult> {
   const store = batchContext.getStore();
+  if (store?.before && params.baserevid && !store.before.has(params.title)) store.before.set(params.title, params.baserevid);
   if (op.dryRun) {
     op.previews?.push(await previewEdit(s, params));
     if (store && params.text !== undefined && (params.createonly || store.created.has(params.title))) store.created.set(params.title, params.text);
+    // A later operation of this dry-run batch sees this edit, as the real run will.
+    else if (store?.pageCache && params.text !== undefined) {
+      const page = await readPage(s, params.title);
+      if (page.exists) store.pageCache.set(params.title, { ...page, content: params.text });
+    }
     return { title: params.title, nochange: false };
   }
   if (store && params.createonly && params.text !== undefined) store.created.set(params.title, params.text);
-  if (store?.before && params.baserevid && !store.before.has(params.title)) store.before.set(params.title, params.baserevid);
   store?.pageCache?.delete(params.title);
   const mw = await s.sessions.forOperator(op);
   try {
@@ -223,9 +231,11 @@ async function previewEdit(s: Services, params: EditParams): Promise<Preview> {
   // Code pages as stored: the Markdown conversion would collapse blank lines inside the files.
   const shown = (stored: string) => (json ? prettyStored(params.title, stored) : type === 'code' ? stored : `${wikitextToMarkdown(stored).trimEnd()}\n`);
   const format = json ? 'json' as const : type === 'code' ? 'wikitext' as const : 'markdown' as const;
-  if (!current.exists) return { title: params.title, action: 'create', format, content: shown(text) };
-  const patch = createTwoFilesPatch('current', 'after', shown(current.content), shown(text), '', '', { context: 2 });
-  return { title: params.title, action: 'edit', format, diff: patch.split('\n').slice(2).join('\n') };
+  if (!current.exists) return { title: params.title, action: 'create', format, content: shown(text), shownAfter: shown(text) };
+  const before = shown(current.content);
+  const after = shown(text);
+  const patch = createTwoFilesPatch('current', 'after', before, after, '', '', { context: 2 });
+  return { title: params.title, action: 'edit', format, diff: patch.split('\n').slice(2).join('\n'), shownBefore: before, shownAfter: after };
 }
 
 /** Bookkeeping after a successful write: quota, counters, trust promotion, index refresh. */

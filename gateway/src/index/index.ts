@@ -788,6 +788,11 @@ export class SearchIndex {
     return kinds?.length ? rows.filter((r) => kinds.includes(r.kind)) : rows;
   }
 
+  /** Pages whose text contains a string (a repository URL), for "already listed on". */
+  pagesMentioning(text: string, limit = 20): string[] {
+    return (this.db.prepare('select distinct title from docs where instr(body, ?) > 0 limit ?').all(text, limit) as Array<{ title: string }>).map((r) => r.title);
+  }
+
   /** Struct, enum and typedef facts of one type name, on any subject (export_header also=["GUID"]). */
   typeFactsByName(name: string): Array<{ title: string; kind: string; status: string; level: string; applies_to: string; data: string }> {
     return this.db.prepare(`select title, kind, status, level, applies_to, data from facts where kind in ('struct', 'enum', 'typedef')

@@ -679,7 +679,7 @@ ok('export_symbols (Ghidra) and export_header (C, with padding)');
   const planned = await call(a, 'batch', { operations: ops, dry_run: true });
   assert.equal(planned.dry_run, true, JSON.stringify(planned).slice(0, 400));
   assert.deepEqual(planned.order, [3, 4, 5, 2, 1], 'page first, then its topics, then build, then fact');
-  assert.equal(planned.preview.length, 6, 'one preview for the whole batch: 5 pages and one Topics edit');
+  assert.equal(planned.preview.length, 5, 'one preview per page: the Topics edit of the parent is merged into its creation');
   await expectError(anon, 'read', { title: `Software:${chrono}` }, 'NOT_FOUND');
   const started = Date.now();
   const published = await call(a, 'batch', { operations: ops });
@@ -1210,6 +1210,34 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
     data: { method: 'symbol names', indicator: `_ZN${run}e2e*` }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
   const byPattern = await call(anon, 'identify', { exports: [`_ZN${run}e2e5Codec4openEv`] });
   assert.equal(byPattern.candidates[0]?.subject, `Library:E2E Lib ${run}`, JSON.stringify(byPattern).slice(0, 400));
+
+  // External test feedback: a schema error keeps a check_id; checks append and merge; one preview per page;
+  // base_revision may be left out in a batch for a page the batch wrote; render warnings; exists; source-only facts.
+  const broken = await call(a, 'batch', { operations: [
+    { tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A fictional note whose confidence was forgotten.' } },
+    { tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A fictional second note of the same batch.', confidence: 'low' } },
+  ] });
+  assert.ok(broken.error === 'SCHEMA_INVALID' && (broken.details?.check_id ?? broken.check_id), JSON.stringify(broken).slice(0, 500));
+  const repaired = await call(a, 'publish_checked', { check_id: broken.details?.check_id ?? broken.check_id, dry_run: true, replace: { 1: { subject: `Format:E2E Track ${run}`, body: 'A fictional note whose confidence was forgotten.', confidence: 'low' } } });
+  assert.equal(repaired.operations, 2, JSON.stringify(repaired).slice(0, 400));
+  const firstCheck = await call(a, 'add_note', { subject: `Format:E2E Track ${run}`, body: 'A fictional note checked on its own first.', confidence: 'low', dry_run: true });
+  const secondCheck = await call(a, 'add_note', { subject: `Format:E2E Track ${run}`, body: 'Another fictional note checked separately.', confidence: 'low', dry_run: true });
+  const merged = await call(a, 'publish_checked', { check_id: firstCheck.check_id, merge: [secondCheck.check_id], append: [{ tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A third fictional note appended to the check.', confidence: 'low' } }], dry_run: true });
+  assert.equal(merged.operations, 3, JSON.stringify(merged).slice(0, 400));
+  const twoEdits = await call(anon, 'read', { title: rebasePage.title });
+  const onePerPage = await call(a, 'batch', { dry_run: true, operations: [
+    { tool: 'edit_section', arguments: { title: rebasePage.title, section: 'Overview', body: 'Fictional, edited once.', base_revision: twoEdits.revision, summary: 'fictional one' } },
+    { tool: 'edit_section', arguments: { title: rebasePage.title, section: 'Overview', replace: [{ old: 'edited once', new: 'edited twice' }], summary: 'fictional two' } },
+  ] });
+  const pagePreviews = (onePerPage.preview ?? []).filter((p: any) => p.title === rebasePage.title);
+  assert.ok(pagePreviews.length === 1 && pagePreviews[0].edits === 2 && /edited twice/.test(pagePreviews[0].diff), JSON.stringify(onePerPage).slice(0, 700));
+  await expectError(a, 'edit_section', { title: rebasePage.title, section: 'Overview', body: 'No revision given.', summary: 'fictional', dry_run: true }, 'BAD_REQUEST');
+  const escaped = await call(a, 'add_note', { subject: `Format:E2E Track ${run}`, body: 'Plugins go in `Mods\\\\Plugins` next to the game.', confidence: 'low', dry_run: true, quiet: true });
+  assert.ok(escaped.warnings?.some((w: string) => /two backslashes/.test(w)), JSON.stringify(escaped).slice(0, 400));
+  const which = await call(anon, 'exists', { names: [`E2E Lib ${run}`, `zzalias ${run}`, `Nothing Here ${run}`] });
+  assert.deepEqual(which.results.map((r: any) => r.exists), [true, true, false], JSON.stringify(which).slice(0, 600));
+  assert.deepEqual(which.missing, [`Nothing Here ${run}`]);
+  assert.match((await call(anon, 'read', { title: sameName.title, format: 'json' })).basis ?? '', /^source only/);
 
   // PE section names as identify evidence.
   const libNow = await call(anon, 'read', { title: `Library:E2E Lib ${run}` });

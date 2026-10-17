@@ -40,6 +40,19 @@ export function licenseHint(text: string): string | undefined {
 
 const BINARY_ASSET = /\.(exe|dll|msi|scr|zip|7z|rar|bin|so|dylib|apk|jar)$/i;
 
+/** The top-level files and folders of a GitHub repository at a commit (folders end in "/"), to plan what to read. */
+export async function repoRootFiles(url: string, commit: string): Promise<string[] | undefined> {
+  const r = parseRepoUrl(url);
+  if (r.host !== 'github') return undefined;
+  const headers: Record<string, string> = process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {};
+  try {
+    const list = await getJson(`https://api.github.com/repos/${r.owner}/${r.repo}/contents/?ref=${commit}`, headers) as Array<{ name: string; type: string }>;
+    return list.map((x) => (x.type === 'dir' ? `${x.name}/` : x.name)).slice(0, 80);
+  } catch {
+    return undefined;
+  }
+}
+
 async function getJson(url: string, headers: Record<string, string> = {}): Promise<any> {
   const response = await fetch(url, { headers: { 'User-Agent': 'REWikiGateway/0.1', Accept: 'application/json', ...headers } });
   if (response.status === 404) throw new ToolError('NOT_FOUND', 'Repository not found or not public.');

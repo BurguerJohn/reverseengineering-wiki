@@ -23,7 +23,7 @@ import {
   LEADING_SECTIONS, TRAILING_SECTIONS, TOPIC_SPLIT_WORDS, MAX_SYMBOLS_PER_CALL, CODE_PAGE_LIMIT,
   type FactDoc, type BuildDoc, type CodeDoc, type SymbolsDoc, type SymbolInput, type SymbolConflict,
 } from '../wiki/pages.ts';
-import { resolveRepo, SPDX_EXPRESSION } from './repos.ts';
+import { repoRootFiles, resolveRepo, SPDX_EXPRESSION } from './repos.ts';
 
 const SUBJECTS = SUBJECT_TYPES as readonly PageType[];
 const MODERATION_QUEUE = 'REWiki:Moderation queue';
@@ -38,6 +38,22 @@ function title(s: Services, raw: string, allowed: readonly PageType[]): string {
     if (error instanceof TitleError) throw new ToolError('BAD_TITLE', error.message);
     throw error;
   }
+}
+
+/**
+ * Text that will not render as the writer expects, shown even in quiet dry runs: JSON, Markdown and wikitext
+ * each escape differently, and agents often escape once too often.
+ */
+export function renderWarnings(markdown: string | undefined): string[] {
+  if (!markdown) return [];
+  const out: string[] = [];
+  const CODE = /```[\s\S]*?```|`[^`\n]+`/g;
+  const code = markdown.match(CODE) ?? [];
+  const doubled = code.find((c) => c.includes('\\\\'));
+  if (doubled) out.push(`Code here has two backslashes in a row (${doubled.slice(0, 60).replace(/\n/g, ' ')}): in Markdown code a backslash is literal, so it renders as two. Write one (Mods\\Plugins); only the JSON string escapes it.`);
+  const prose = markdown.replace(CODE, '');
+  if (/\\n|\\t/.test(prose)) out.push('The text has a literal "\\n" or "\\t": an escaped line break arrived as two characters (escaped twice?). Send real line breaks.');
+  return out;
 }
 
 function shortSummary(text: string, max = 200): string {
@@ -167,7 +183,8 @@ export async function addNote(s: Services, caller: Caller, args: { subject: stri
   });
   const r = await mwEdit(s, op, { title: t, text, summary: `Field note on [[${subject}]]`, createonly: true, tags: ['rewiki-note'] });
   await afterWrite(s, op, [t]);
-  return result(s, t, r.newrevid, { next: 'Curators distill notes into articles and facts. Precise claims can go straight to add_fact.' });
+  const noteWarnings = [...renderWarnings(args.body), ...renderWarnings(args.evidence)];
+  return result(s, t, r.newrevid, { next: 'Curators distill notes into articles and facts. Precise claims can go straight to add_fact.', warnings: noteWarnings.length ? noteWarnings : undefined });
 }
 
 // ---- facts -----------------------------------------------------------------------
@@ -423,12 +440,18 @@ export async function verify(s: Services, caller: Caller, args: { target: string
 
 // ---- articles --------------------------------------------------------------------
 
-export async function editSection(s: Services, caller: Caller, args: {
-  title: string; section: string; body?: string; replace?: Array<{ old: string; new: string }>; base_revision: number; summary: string; reason?: string; create_if_missing?: boolean;
+export async function editSection(s: Services, caller: Caller, input: {
+  title: string; section: string; body?: string; replace?: Array<{ old: string; new: string }>; base_revision?: number; summary: string; reason?: string; create_if_missing?: boolean;
   infobox?: Record<string, string>;
 }) {
   const op = requireWriter(s, caller);
-  const t = title(s, args.title, [...SUBJECTS, 'notes']);
+  const t = title(s, input.title, [...SUBJECTS, 'notes']);
+  // Inside a batch, a page an earlier operation wrote needs no base_revision: the batch knows the one it started from.
+  const fromBatch = batchContext.getStore()?.before?.get(t);
+  if (input.base_revision === undefined && fromBatch === undefined) {
+    throw new ToolError('BAD_REQUEST', 'base_revision is required: the revision you read (inside a batch it may be left out for a page an earlier operation of the batch writes).');
+  }
+  let args = { ...input, base_revision: input.base_revision ?? fromBatch! };
   if (args.infobox || /^infobox$/i.test(args.section.trim())) return editInfobox(s, op, t, args);
   if ((args.body === undefined) === (args.replace === undefined)) {
     throw new ToolError('BAD_REQUEST', 'Give either body (the whole new section) or replace (small changes: [{old, new}]), not both.');
@@ -504,6 +527,7 @@ export async function editSection(s: Services, caller: Caller, args: {
     .split('\n').slice(2).join('\n');
   return result(s, t, r.newrevid, {
     section: heading, words, nochange: r.nochange || undefined, ...missingGeneralPages(s, newBody),
+    warnings: renderWarnings(body).length ? renderWarnings(body) : undefined,
     diff: op.dryRun ? undefined : changes,
     merged: page.revid !== args.base_revision
       ? `The page changed since revision ${args.base_revision} (now ${page.revid}) in other sections only, so your edit applied on top of those changes.` : undefined,
@@ -662,7 +686,8 @@ export async function createPage(s: Services, caller: Caller, args: {
     ? `MediaWiki capitalizes the first letter of titles: the page is "${t}" (links in either case still work).` : undefined;
   const underscored = (args.aliases ?? []).some((a) => a.includes('_')) || args.title.includes('_')
     ? 'MediaWiki shows "_" in titles as a space ("IMAGE_DOS_HEADER" is "IMAGE DOS HEADER"); links and searches with either work.' : undefined;
-  return result(s, t, r.newrevid, { aliases: created.slice(1), aliases_skipped: skipped.length ? skipped : undefined, ...missingGeneralPages(s, text), note: [capitalized, underscored].filter(Boolean).join(' ') || undefined });
+  const pageWarnings = renderWarnings(args.body);
+  return result(s, t, r.newrevid, { aliases: created.slice(1), aliases_skipped: skipped.length ? skipped : undefined, ...missingGeneralPages(s, text), note: [capitalized, underscored].filter(Boolean).join(' ') || undefined, warnings: pageWarnings.length ? pageWarnings : undefined });
 }
 
 // ---- topic subpages --------------------------------------------------------------
@@ -912,12 +937,12 @@ export async function addSymbols(s: Services, caller: Caller, args: { build: str
 
 export async function addCode(s: Services, caller: Caller, args: {
   title?: string; name?: string; summary: string; language: string; kind: string; subjects: string[]; tested_on: string;
-  usage: string; dependencies?: string; files: Array<{ name: string; lang?: string; content: string }>; base_revision?: number;
+  usage: string; dependencies?: string; files: Array<{ name: string; lang?: string; content: string }>; base_revision?: number; tested_how?: string;
 }) {
   const op = requireWriter(s, caller);
   const files = args.files.map((f) => ({ ...f, lang: f.lang ?? args.language }));
   const meta = codeMetaSchema.safeParse({
-    summary: args.summary, language: args.language, kind: args.kind, subjects: args.subjects, tested_on: args.tested_on,
+    summary: args.summary, language: args.language, kind: args.kind, subjects: args.subjects, tested_on: args.tested_on, tested_how: args.tested_how,
     usage: args.usage, dependencies: args.dependencies,
   });
   if (!meta.success) throw new ToolError('SCHEMA_INVALID', 'Invalid code metadata.', { issues: meta.error.issues });
@@ -1002,7 +1027,7 @@ export async function addCode(s: Services, caller: Caller, args: {
 }
 
 export async function linkRepo(s: Services, caller: Caller, args: {
-  url: string; commit?: string; subjects: string[]; description: string; tested_on: string; page?: string; license?: string;
+  url: string; commit?: string; subjects: string[]; description: string; tested_on: string; tested_how?: string; page?: string; license?: string;
 }) {
   const op = requireWriter(s, caller);
   assertClean([...scanText(`${args.description}\n${args.tested_on}`, 'summary'), ...scanText(args.url, 'repo')]);
@@ -1010,7 +1035,7 @@ export async function linkRepo(s: Services, caller: Caller, args: {
   if (!subjects.length) throw new ToolError('BAD_REQUEST', 'At least one subject is required.');
   // On the page given, or on every subject named (each gets the repository in Code & repositories).
   const targets = [...new Set([...(args.page ? [title(s, args.page, [...SUBJECTS, 'code'])] : []), ...subjects])];
-  const pages = [];
+  const pages: Array<{ target: string; page: NonNullable<Awaited<ReturnType<typeof currentPage>>> }> = [];
   for (const t of targets) {
     const found = await currentPage(s, t);
     if (!found) throw new ToolError('NOT_FOUND', `"${t}" does not exist. Create the subject page first.`);
@@ -1039,7 +1064,12 @@ export async function linkRepo(s: Services, caller: Caller, args: {
     info.license === 'none' ? 'no license: not reusable' : null,
     info.license.startsWith('unrecognized') ? 'the license file was not recognized automatically: read it' : null,
   ].filter(Boolean).join('; ');
-  const entry = renderRepo({ url: info.url, commit: info.commit, license: info.license, description: args.description, tested_on: args.tested_on, checked });
+  const TESTED: Record<string, string> = { read: 'source read, not run', built: 'built', run: 'built and run', tested_against_build: 'checked against a real build' };
+  const testedOn = args.tested_how ? `${TESTED[args.tested_how] ?? args.tested_how}: ${args.tested_on}` : args.tested_on;
+  const entry = renderRepo({ url: info.url, commit: info.commit, license: info.license, description: args.description, tested_on: testedOn, checked });
+  // Where it is already listed, and what is in it: planning the next step without another round trip.
+  const alreadyOn = s.index.pagesMentioning(info.url).filter((p) => !pages.some((x) => x.target === p) && !p.startsWith('Code:'));
+  const files = await repoRootFiles(info.url, info.commit);
 
   let r: { newrevid?: number } = {};
   for (const { target, page } of pages) {
@@ -1063,6 +1093,9 @@ export async function linkRepo(s: Services, caller: Caller, args: {
   const target = pages[0].target;
   return result(s, target, r.newrevid, {
     listed_on: pages.length > 1 ? pages.map((p) => p.target) : undefined,
+    already_listed_on: alreadyOn.length ? alreadyOn : undefined,
+    last_activity: info.lastCommit ?? undefined,
+    files,
     repository: info, warnings: [info.license.startsWith('unrecognized') ? `GitHub did not recognize the license file ${info.license.slice(14, -1)}.${info.licenseHint ? ` It names "${info.licenseHint}".` : ''} Read it and run link_repo again with license (its SPDX id or expression): the entry is replaced.${info.licenseHint ? ' (In a dry run: pass license in the real call and no second call is needed.)' : ''}` : null,
       info.license === 'none' ? 'GitHub detected no license. If the repository has a license file or license headers, run link_repo again with license (its SPDX id, e.g. "Zlib"): the entry is replaced. Without a license, agents cannot legally reuse it.' : null,
       info.binaryReleaseAssets ? 'Release contains binaries; they are flagged, not linked.' : null,

@@ -456,6 +456,7 @@ export const codeMetaSchema = z.object({
   tested_on: z.string().min(3).max(1000),
   usage: z.string().min(10).max(4000),
   dependencies: z.string().max(2000).optional(),
+  tested_how: z.enum(['read', 'built', 'run', 'tested_against_build']).optional(),
 });
 export type CodeMeta = z.infer<typeof codeMetaSchema>;
 

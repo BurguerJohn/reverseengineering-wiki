@@ -256,3 +256,20 @@ Decisions taken during the loop are listed per round, with the reason, so the ow
   - libcurl was reported as Libbrotli "high" through the brotli functions it imports: a candidate matched only by imports is marked as a dependency and capped at medium.
   - Files the wiki does not cover (OpenSSL's libcrypto, libcurl) got only container matches and no advice: the hint now says so and what to try next; the server instructions mention the scan export.
 - Still open (coverage, not tools): OpenSSL, libcurl and the other common DLLs a new agent meets first have no pages yet; the rounds chose formats and libraries by gaps in the wiki, not by what agents meet most often.
+
+## Owner's external test (review mode, a real game, four GitHub repositories)
+
+- Feedback from a session outside the loop, with the owner's account in review mode: ten points; the three it ranked first were fixing a batch without resending it, previews that show how text renders, and a more complete link_repo. All ten were checked against the code.
+- 0.8.34:
+  1. link_repo: the commit was already optional (now said in the description); the answer adds last activity, the repository's top-level files and the pages that already list it.
+  2. A batch refused for a schema error (one missing field) had no check_id, so 20 KB were resent: every write refused before anything was published (schema, policy, a batch's failing operations, a failed replace) keeps a check_id for replace or amend, also in review mode and in real runs.
+  3. publish_checked takes merge (other check_ids) and append (more operations): separate checks go out as one batch.
+  4. Render warnings, shown even with quiet: two backslashes in Markdown code (JSON, Markdown and wikitext escaping stacked into "Mods\Plugins") and literal "
+" in text.
+  5. exists: which of a list of names have a page (titles, aliases, similar titles), in one call.
+  6. A dry-run batch applies its edits in order, so a later edit sees an earlier one, and shows one preview per page with the whole change (a page edited four times showed four times).
+  7. edit_section may leave out base_revision inside a batch for a page an earlier operation of the batch writes.
+  8. tested_how (read, built, run, tested_against_build) on link_repo and add_code; reading a fact gives its basis (source only, or tested).
+  9. Review-mode instructions: usually the client asks the operator in place and the call returns published; REVIEW_REQUIRED with a review link only for clients without prompts.
+  10. propose_from_repo (with an account, writes nothing): a draft batch from a GitHub repository: link_repo prefilled, the wiki pages its README names, the byte patterns in its code as candidate signature facts with file and line, TODOs to fill.
+- Not covered by e2e (network): link_repo's new fields and propose_from_repo; the pattern finder has a unit test.
