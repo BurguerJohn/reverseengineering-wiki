@@ -208,7 +208,7 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   const unknown = unknownFactFields(fact.kind, fact.data);
   const enumNote = fact.kind === 'enum' && (() => {
     const values = fact.data.values;
-    const names = Array.isArray(values) ? values.map((v: any) => (typeof v === 'string' ? v : v?.name)) : values && typeof values === 'object' ? Object.entries(values).map(([k, v]) => (typeof v === 'string' ? v : k)) : [];
+    const names = Array.isArray(values) ? values.map((v: any) => (typeof v === 'string' ? v : v?.name)) : values && typeof values === 'object' ? Object.entries(values).map(([k, v]) => (typeof v === 'string' && !/^\s*-?(?:0x[0-9a-f]+|\d+)\s*$/i.test(v) ? v : k)) : [];
     const odd = names.filter((n) => typeof n === 'string' && !/^[A-Za-z_]\w*$/.test(n));
     return odd.length ? `Enum value names that are not C identifiers (${odd.slice(0, 3).join('; ')}) export as their first word plus a comment; put explanations in the claim or notes and keep values as identifiers.` : undefined;
   })();
@@ -938,8 +938,9 @@ export async function registerBuild(s: Services, caller: Caller, input: unknown)
   const parsed = buildInputSchema.safeParse(input);
   if (!parsed.success) throw new ToolError('SCHEMA_INVALID', `Build does not match rewiki.build/1: ${issueList(parsed.error.issues)}.`, { issues: parsed.error.issues });
   const b = parsed.data;
-  b.software = title(s, b.software, ['software']);
-  await mustExist(s, b.software, 'Create the Software: page first (create_page with type software).');
+  // A bare name is a Software: page; a library's own binary names its Library: page.
+  b.software = title(s, b.software, /^\s*library\s*:/i.test(b.software) ? ['library'] : ['software']);
+  await mustExist(s, b.software, 'Create the Software: page first (create_page with type software); a library\'s own binary can use its Library: page.');
   b.files = b.files.map((f) => ({ ...f, sha256: f.sha256?.toLowerCase() }));
   // Without a hash, a file is identified by its size plus a timestamp or version text: weaker.
   const strong = (f: (typeof b.files)[number]) => !!(f.sha256 || f.sha1 || f.md5);

@@ -37,7 +37,7 @@ export interface Preview {
   title: string;
   action: 'create' | 'edit' | 'undo';
   /** markdown: articles, as read returns them (stored as wikitext, which displays the same); json: facts, builds, symbol maps. */
-  format?: 'markdown' | 'json';
+  format?: 'markdown' | 'json' | 'wikitext';
   content?: string;
   diff?: string;
 }
@@ -217,8 +217,9 @@ async function previewEdit(s: Services, params: EditParams): Promise<Preview> {
   const type = typeOfTitle(params.title);
   const json = type === 'fact' || type === 'build' || type === 'symbols';
   // Articles are previewed in the Markdown agents write and read; both sides of a diff alike.
-  const shown = (stored: string) => (json ? prettyStored(params.title, stored) : `${wikitextToMarkdown(stored).trimEnd()}\n`);
-  const format = json ? 'json' as const : 'markdown' as const;
+  // Code pages as stored: the Markdown conversion would collapse blank lines inside the files.
+  const shown = (stored: string) => (json ? prettyStored(params.title, stored) : type === 'code' ? stored : `${wikitextToMarkdown(stored).trimEnd()}\n`);
+  const format = json ? 'json' as const : type === 'code' ? 'wikitext' as const : 'markdown' as const;
   if (!current.exists) return { title: params.title, action: 'create', format, content: shown(text) };
   const patch = createTwoFilesPatch('current', 'after', shown(current.content), shown(text), '', '', { context: 2 });
   return { title: params.title, action: 'edit', format, diff: patch.split('\n').slice(2).join('\n') };

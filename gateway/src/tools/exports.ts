@@ -78,6 +78,19 @@ function fieldName(raw: unknown): { name: string; rest?: string } {
   return { name: ident(first, ''), rest: text };
 }
 
+/**
+ * Integer and float types as agents spell them: "uint8", "u32", "int16_le", "uint32_be", "f32" become
+ * stdint/float types; a stated byte order goes into the comment.
+ */
+function stdType(raw: string): { type: string; order?: string } | null {
+  const m = /^(?:(u|s|i)(8|16|32|64)|(u?)int(8|16|32|64)(?:_t)?|(f|float)(32|64))(?:[_ ]?(be|le))?$/i.exec(raw.trim());
+  if (!m) return null;
+  const order = m[7] ? (m[7].toLowerCase() === 'be' ? 'big-endian' : 'little-endian') : undefined;
+  if (m[5]) return { type: m[6] === '32' ? 'float' : 'double', order };
+  const unsigned = m[1] ? m[1].toLowerCase() === 'u' : m[3] === 'u' || m[3] === 'U';
+  return { type: `${unsigned ? 'u' : ''}int${m[2] ?? m[4]}_t`, order };
+}
+
 function cType(raw: unknown): string | null {
   const s = String(raw ?? '').trim();
   return C_TYPE.test(s) ? s : null;
@@ -114,6 +127,7 @@ function enumValues(raw: unknown): Array<{ name: string; value: number | null }>
 }
 
 let sIndex: Services['index'] | undefined;
+let knownStructs = new Set<string>();
 
 function cleanTitle(raw: string, allowed: readonly PageType[]): string {
   try {
@@ -144,6 +158,8 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
     }
   };
   const defined = new Set(facts.map(typeName));
+  // Struct names defined on other subjects' pages, to tell "defined on another page" from "not defined anywhere".
+  knownStructs = new Set(s.index.structNames().map((n) => ident(fieldName(n).name, '')));
   const forward = new Set<string>();
   const enumConstants = new Set<string>();
   // Every struct is declared first, so pointers between them work in any order.
@@ -158,7 +174,12 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
       const fields = (Array.isArray(data.fields) ? data.fields : [])
         .map((x: any) => {
           const named = fieldName(x.name);
-          return { offset: hexNum(x.offset), size: hexNum(x.size), type: cType(x.type), rawType: String(x.type ?? ''), name: named.name, notes: [named.rest, x.notes].filter(Boolean).join('; '), bits: Array.isArray(x.bits) ? x.bits : [] };
+          // "uint32_be[4]" → "uint32_t[4]", byte order noted.
+          const rawType = String(x.type ?? '').trim();
+          const arrayPart = /((?:\[[^\]]*\])+)$/.exec(rawType)?.[1] ?? '';
+          const std = stdType(rawType.slice(0, rawType.length - arrayPart.length));
+          const typeText = std ? `${std.type}${arrayPart}` : rawType;
+          return { offset: hexNum(x.offset), size: hexNum(x.size), type: cType(typeText), rawType: typeText, name: named.name, notes: [named.rest, std?.order, x.notes].filter(Boolean).join('; '), bits: Array.isArray(x.bits) ? x.bits : [] };
         })
         .filter((x: any) => x.offset !== null)
         .sort((a: any, b: any) => a.offset - b.offset);
@@ -167,8 +188,11 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
         const n = x.type ? NATURAL[x.type.replace(/^const\s+/, '')] : undefined;
         return n !== undefined && x.offset % n !== 0;
       });
-      const packed = hexNum(data.alignment) === 1 || data.packed === true || misaligned;
-      if (packed) lines.push(`#pragma pack(push, 1) /* ${misaligned ? 'fields off their natural alignment' : 'packed'}: offsets as documented */`);
+      // A declared size that is not a multiple of the widest field (IHDR: 13 bytes of uint32/uint8) means no tail padding.
+      const widest = Math.max(1, ...fields.map((x: any) => (x.type ? NATURAL[x.type.replace(/^const\s+/, '')] ?? 1 : 1)));
+      const unpadded = size !== null && size % widest !== 0;
+      const packed = hexNum(data.alignment) === 1 || data.packed === true || misaligned || unpadded;
+      if (packed) lines.push(`#pragma pack(push, 1) /* ${misaligned ? 'fields off their natural alignment' : unpadded ? 'declared size has no tail padding' : 'packed'}: offsets as documented */`);
       lines.push(`struct ${name} {`);
       let cursor = 0;
       for (const field of fields) {
@@ -196,8 +220,8 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
         if (type && base && !BUILTIN.test(type) && !defined.has(base)) {
           if (type.includes('*')) forward.add(base);
           else {
-            // A type from another page, by value: its bytes, with the type named in a comment.
-            note = [`${field.rawType} (defined on another page)`, note].filter(Boolean).join('; ');
+            // A type this header does not define, by value: its bytes, with the type named in a comment.
+            note = [`${field.rawType} (${knownStructs.has(base) ? 'defined on another page' : 'type not defined here'})`, note].filter(Boolean).join('; ');
             type = null;
           }
         }
@@ -352,7 +376,8 @@ function exportSignatureScan(s: Services, args: { subject: string; tool: SymbolT
     // The name goes at match start + offset: signature_offset (function/global), or offset of a signature fact; negative = before.
     const raw = d.signature_offset ?? (f.kind === 'signature' ? d.offset : undefined);
     const offset = typeof raw === 'string' && /^-/.test(raw.trim()) ? -(hexNum(raw.trim().slice(1)) ?? 0) : hexNum(raw) ?? 0;
-    sigs.push({ name: qualifiedName(d.name ?? d.class ?? f.title.split('/').pop(), `rewiki_${f.kind}`), pattern: pattern.trim().toUpperCase().replace(/\?\??/g, '??'), kind: f.kind, status: f.status, fact: f.title, prototype: typeof d.prototype === 'string' ? d.prototype : undefined, offset, multiple: d.multiple === true });
+    const matchesName = f.kind === 'signature' && typeof d.matches === 'string' && /^[A-Za-z_][\w:]*$/.test(d.matches.trim()) ? d.matches.trim() : undefined;
+    sigs.push({ name: qualifiedName(d.name ?? d.class ?? matchesName ?? f.title.split('/').pop(), `rewiki_${f.kind}`), pattern: pattern.trim().toUpperCase().replace(/\?\??/g, '??'), kind: f.kind, status: f.status, fact: f.title, prototype: typeof d.prototype === 'string' ? d.prototype : undefined, offset, multiple: d.multiple === true });
   }
   const ascii = (x: string) => JSON.stringify(x.replace(/[^\x20-\x7e]/g, '?'));
   const list = sigs.map((x) => `    (${ascii(x.name)}, ${ascii(x.pattern)}, ${ascii(x.kind)}, ${ascii(x.status)}, ${ascii(x.fact)}, ${x.offset}, ${x.multiple ? 'True' : 'False'}),`).join('\n');

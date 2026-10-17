@@ -40,6 +40,7 @@ test('version numbers are not IP addresses', () => {
   assert.ok(rules('resolvers 8.8.8.8 and 1.1.1.1', 'article').includes('public-ipv4'));
   assert.ok(!rules('TAGS = ["3.6.2", "3.6.3", "3.6.3.1", "3.6.4"]', 'code').includes('public-ipv4'));
   assert.ok(rules('SERVERS = ["8.8.8.8", "1.1.1.1"]', 'code').includes('public-ipv4'));
+  assert.ok(!rules('See the PNG specification section 11.3.6.2 and § 4.1.2.3.', 'fact').includes('public-ipv4'));
 });
 
 test('code rules', () => {

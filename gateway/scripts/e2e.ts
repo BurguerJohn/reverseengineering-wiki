@@ -791,7 +791,7 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
     data: { name: 'TrackHeader', size: '0x11', fields: [{ offset: '0x0', size: 16, type: 'ObjectEntry', name: 'entry' }, { offset: '0x10', size: 1, type: 'uint8_t', name: 'kind (0 = coaster, 1 = flat ride)' }] },
     evidence: [{ type: 'documentation', detail: 'fictional test data' }], confidence: 'low' });
   const header = (await call(anon, 'export_header', { subject: `Format:E2E Track ${run}` })).header;
-  assert.match(header, /uint8_t entry\[0x10\]; \/\* ObjectEntry \(defined on another page\)/, header);
+  assert.match(header, /uint8_t entry\[0x10\]; \/\* ObjectEntry \(type not defined here\)/, header);
   assert.match(header, /uint8_t kind; \/\* kind \(0 = coaster, 1 = flat ride\)/, header);
   // Enum values in the documented {"0": "Name"} form become enumerators.
   await call(a, 'add_fact', { kind: 'enum', subject: `Format:E2E Track ${run}`, claim: 'The fictional track kind byte selects coaster or flat ride.', scope: { level: 'format', applies_to: 'all versions' },
@@ -986,6 +986,38 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const realNote = await call(a, 'add_note', noteArgs);
   assert.equal(realNote.title, dryNote.title ?? dryNote.pages?.[0]?.title, JSON.stringify(dryNote).slice(0, 300));
   await expectError(a, 'add_note', noteArgs, 'DUPLICATE_SUSPECTED');
+
+  // Types as agents spell them, a declared size without tail padding; signatures labelled by "matches".
+  await call(a, 'add_fact', { kind: 'struct', subject: `Format:E2E Track ${run}`, claim: 'The fictional track header is 13 bytes.', scope: { level: 'format', applies_to: 'all versions' },
+    data: { name: 'TrackIhdr', size: 13, fields: [{ offset: 0, size: 4, type: 'uint32_be', name: 'width' }, { offset: 4, size: 4, type: 'trk_uint_32', name: 'height' }, { offset: 8, size: 1, type: 'uint8', name: 'depth' }] },
+    evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const ihdr = (await call(anon, 'export_header', { subject: `Format:E2E Track ${run}` })).header;
+  assert.match(ihdr, /#pragma pack\(push, 1\) \/\* declared size has no tail padding[^\n]*\nstruct TrackIhdr \{\n {4}\/\* 0x00 \*\/ uint32_t width; \/\* big-endian \*\/\n {4}\/\* 0x04 \*\/ uint8_t height\[0x4\]; \/\* trk_uint_32 \(type not defined here\) \*\/\n {4}\/\* 0x08 \*\/ uint8_t depth;/, ihdr);
+  await call(a, 'add_fact', { kind: 'signature', subject: `Format:E2E Track ${run}`, claim: 'The fictional gamma table starts like this.', scope: { level: 'format', applies_to: 'all versions' },
+    data: { pattern: '00 00 0D 0D 1A 1A 27 27', matches: 'trk_gamma_table' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  assert.match((await call(anon, 'export_symbols', { subject: `Format:E2E Track ${run}`, tool: 'ghidra' })).script, /\("trk_gamma_table", "00 00 0D 0D 1A 1A 27 27"/);
+  // A trailer of 6+ bytes is found inside a longer published sequence.
+  await call(a, 'add_fact', { kind: 'magic', subject: `Format:E2E Track ${run}`, claim: 'Fictional track files end with an empty END chunk.', scope: { level: 'format', applies_to: 'all versions' },
+    data: { offset: 'end-12', bytes: '00 00 00 00 7E 2E 3A 91 C4 5B 06 E2', meaning: 'END chunk' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const trailer = await call(anon, 'identify', { magic: ['7E 2E 3A 91 C4 5B 06 E2'] });
+  assert.equal(trailer.candidates[0]?.subject, `Format:E2E Track ${run}`, JSON.stringify(trailer).slice(0, 400));
+  // A failing batch dry run hands back a check_id: only the failing operation is resent.
+  const badBatch = await call(a, 'batch', { dry_run: true, operations: [
+    { tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A long fictional note that should not need resending.', confidence: 'low' } },
+    { tool: 'add_fact', arguments: { kind: 'signature', subject: `Format:E2E Track ${run}`, claim: 'A fictional signature missing its matches field.', scope: { level: 'format', applies_to: 'all versions' }, data: { pattern: '91 92 93 94' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' } },
+  ] });
+  assert.equal(badBatch.error, 'BATCH_INVALID', JSON.stringify(badBatch).slice(0, 400));
+  const batchCheck = badBatch.details?.check_id ?? badBatch.check_id;
+  assert.ok(batchCheck, JSON.stringify(badBatch).slice(0, 600));
+  const fixedBatch = await call(a, 'publish_checked', { check_id: batchCheck, dry_run: true, replace: { 2: { kind: 'signature', subject: `Format:E2E Track ${run}`, claim: 'A fictional signature missing its matches field.', scope: { level: 'format', applies_to: 'all versions' }, data: { pattern: '91 92 93 94', matches: 'trk_fixed' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' } } });
+  assert.ok(!fixedBatch.error && fixedBatch.check_id && fixedBatch.operations === 2, JSON.stringify(fixedBatch).slice(0, 400));
+  // A library's own binary is a build of its Library: page; code previews keep blank lines.
+  await call(a, 'create_page', { type: 'library', title: `E2E Lib ${run}`, summary: 'A fictional library for build tests.', body: '## Overview\n\nFictional.' });
+  const libBuild = await call(a, 'register_build', { software: `Library:E2E Lib ${run}`, version: '1.6.58', platform: 'windows-x64', distribution: 'bundled with an app', files: [{ name: 'e2elib.dll', sha256: createHash('sha256').update(`lib-${run}`).digest('hex') }], dry_run: true });
+  assert.ok(!libBuild.error, JSON.stringify(libBuild).slice(0, 400));
+  const blankCode = await call(a, 'add_code', { name: 'Blank lines', summary: 'A fictional script with blank lines kept.', language: 'python', kind: 'parser',
+    subjects: [`Format:E2E Track ${run}`], tested_on: 'fictional samples', usage: 'python blank.py <file>', files: [{ name: 'blank.py', content: 'a = 1\n\n\nb = 2\n' }], dry_run: true });
+  assert.ok(blankCode.preview?.some((p: any) => (p.content ?? '').includes('a = 1\n\n\nb = 2')), JSON.stringify(blankCode.preview).slice(0, 600));
 
   // A dry run hands back a check_id: publish_checked publishes exactly that, once.
   const checkedNote = await call(a, 'add_note', { subject: cave, key: 'Checked once', body: 'Published by check_id without resending the arguments.', confidence: 'low', dry_run: true });

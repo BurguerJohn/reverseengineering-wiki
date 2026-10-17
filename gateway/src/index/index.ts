@@ -581,6 +581,13 @@ export class SearchIndex {
         const wild = this.db.prepare(`select i.title, i.token, p.subject from identifiers i join pages p on p.title = i.title
           where i.kind = 'bytes' and instr(i.token, '..') > 0 limit 20000`).all() as Array<{ title: string; token: string; subject: string | null }>;
         rows = [...rows, ...wild.filter((r) => bytesPrefix(r.token, t.token))];
+        // 6+ bytes also match inside a longer published sequence (a trailer after its length field: IEND's
+        // type and CRC inside "00 00 00 00 49 45 4E 44 AE 42 60 82").
+        if (t.token.length >= 12) {
+          const longer = this.db.prepare(`select i.title, i.token, p.subject from identifiers i join pages p on p.title = i.title
+            where i.kind = 'bytes' and length(i.token) > ? limit 20000`).all(t.token.length) as Array<{ title: string; token: string; subject: string | null }>;
+          rows = [...rows, ...longer.filter((r) => bytesContain(r.token, t.token, 6))];
+        }
       } else if (t.kind === 'bytes' && t.token.length >= 8) {
         // A pattern of 4+ bytes found inside a published signature, or containing one; ?? matches any byte.
         const all = this.db.prepare(`select i.title, i.token, p.subject from identifiers i join pages p on p.title = i.title
@@ -729,6 +736,12 @@ export class SearchIndex {
     const hits = this.db.prepare(`select title, type, summary, status, revision from pages where ${where} order by title limit ? offset ?`)
       .all(...params, limit, offset) as any[];
     return { hits: hits.map((h) => ({ ...h, summary: String(h.summary ?? '').slice(0, 200) })), total };
+  }
+
+  /** Names of every struct fact on the wiki (export_header tells a type from another page from an unknown one). */
+  structNames(): string[] {
+    return (this.db.prepare(`select json_extract(data, '$.name') as name from facts where kind = 'struct' and status != 'rejected'`).all() as Array<{ name: unknown }>)
+      .map((r) => r.name).filter((n): n is string => typeof n === 'string');
   }
 
   factsForSubject(subject: string, kinds?: string[]): Array<{ title: string; kind: string; status: string; level: string; applies_to: string; data: string }> {

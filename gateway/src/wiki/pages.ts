@@ -266,7 +266,7 @@ export function factKey(fact: FactInput): string {
 // ---- builds ------------------------------------------------------------------
 
 export const buildInputSchema = z.object({
-  software: z.string().min(3).describe('Software: page, e.g. "Software:Earth Defense Force 5"'),
+  software: z.string().min(3).describe('Software: page, e.g. "Software:Earth Defense Force 5"; or the Library: page for a library binary on its own (libpng16-16.dll)'),
   version: z.string().min(1).max(60),
   platform: z.string().min(2).max(40).describe('e.g. windows-x64, ps4, switch'),
   distribution: z.string().min(2).max(40).describe('e.g. steam, epic, gog, retail, disc'),

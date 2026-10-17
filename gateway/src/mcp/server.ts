@@ -26,7 +26,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.8';
+export const VERSION = '0.8.9';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -147,7 +147,20 @@ function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Ca
     const mode = caller.operator ? s.db.operatorById(caller.operator.id)?.mode : undefined;
     const reviewed = !!review && mode === 'review';
     if (dryRun) {
-      const checked = compactPreview(await dryRunOf(s, caller, fn, rest, reviewed));
+      let ran: Record<string, unknown>;
+      try {
+        ran = await dryRunOf(s, caller, fn, rest, reviewed);
+      } catch (error) {
+        // A batch with some failing operations: fix only those, without resending the rest.
+        if (name === 'batch' && error instanceof ToolError && error.code === 'BATCH_INVALID' && caller.operator) {
+          Object.assign(error.details, {
+            check_id: rememberCheck(name, rest, caller.operator.id),
+            fix_with: 'publish_checked with this check_id and replace = {"<operation number>": {corrected arguments}} (with dry_run true to check again): the other operations are reused, not resent.',
+          });
+        }
+        throw error;
+      }
+      const checked = compactPreview(ran);
       if (!caller.operator) return checked;
       return { ...checked, check_id: rememberCheck(name, rest, caller.operator.id), publish_with: 'publish_checked with this check_id publishes exactly what was checked, without resending it (valid 30 minutes).' };
     }
@@ -580,10 +593,10 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     title: 'Register a build',
     description: 'Create a Build: page, titled "Build:<software>/<version> (<platform>, <distribution>)" (the dry run lists it), from file hashes (for consoles: the ROM or executable hashes; SHA-1/MD5 accepted) so address facts can be attached to an exact binary. Hashes and metadata only, never the file. Facts can then refer to it by its title or by a file\'s SHA-256 (in a batch too). Without the file, a partial identity (size + PE timestamp or version text) is accepted and marked as such.',
     inputSchema: { dry_run: DRY_RUN,
-      software: z.string(),
+      software: z.string().describe('Software: page; or a Library: page for a library binary on its own (a DLL)'),
       version: z.string(),
       platform: z.string(),
-      distribution: z.string(),
+      distribution: z.string().describe('2-40 characters: steam, gog, retail, disc, cartridge, official installer, bundled with <app>'),
       files: z.array(z.object({
         name: z.string(), sha256: z.string().optional().describe('Strongly preferred'),
         sha1: z.string().optional().describe('As ROM/disc databases publish it'), md5: z.string().optional(), crc32: z.string().optional().describe('Weak alone: with size'),
@@ -654,15 +667,28 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('publish_checked', {
     title: 'Publish what a dry run checked',
-    description: 'Publish exactly what an earlier dry run (of any write tool or batch) checked, by the check_id it returned, without resending the arguments. Good for 30 minutes, for the same account.',
-    inputSchema: { check_id: z.string(), dry_run: DRY_RUN, ...(review ? { review_id: REVIEW_ID } : {}) },
+    description: 'Publish exactly what an earlier dry run (of any write tool or batch) checked, by the check_id it returned, without resending the arguments. Good for 30 minutes, for the same account. A batch dry run with failures also returns a check_id: pass replace with the corrected arguments of the failing operations (by number) and dry_run true to check again.',
+    inputSchema: { check_id: z.string(), dry_run: DRY_RUN,
+      replace: z.record(z.string(), z.record(z.string(), z.unknown())).optional().describe('Batches only: {"3": {corrected arguments of operation 3}}; the tool stays the same'),
+      ...(review ? { review_id: REVIEW_ID } : {}) },
     annotations: WRITE,
   }, (async (a: any, extra: Extra) => {
     const checked = CHECKED.get(String(a.check_id));
     if (!checked || checked.operatorId !== caller.operator?.id || Date.now() - checked.at > CHECK_TTL_MS) {
       return fail(new ToolError('CHECK_EXPIRED', 'Unknown or expired check_id (they last 30 minutes, for the account that ran the dry run). Run the dry run again.'));
     }
-    const result = await handlers.get(checked.tool)!({ ...checked.args, ...(a.dry_run ? { dry_run: true } : {}), ...(a.review_id ? { review_id: a.review_id } : {}) }, extra);
+    let args = checked.args;
+    if (a.replace && Object.keys(a.replace).length) {
+      const ops = Array.isArray(args.operations) ? [...(args.operations as Array<{ tool: string; arguments: Record<string, unknown> }>)] : null;
+      if (checked.tool !== 'batch' || !ops) return fail(new ToolError('BAD_REQUEST', 'replace works on batch checks only.'));
+      for (const [k, v] of Object.entries(a.replace as Record<string, Record<string, unknown>>)) {
+        const n = Number(k);
+        if (!Number.isInteger(n) || n < 1 || n > ops.length) return fail(new ToolError('BAD_REQUEST', `replace: operation ${k} does not exist (1-${ops.length}).`));
+        ops[n - 1] = { tool: ops[n - 1].tool, arguments: v };
+      }
+      args = { ...args, operations: ops };
+    }
+    const result = await handlers.get(checked.tool)!({ ...args, ...(a.dry_run ? { dry_run: true } : {}), ...(a.review_id ? { review_id: a.review_id } : {}) }, extra);
     if (!result.isError && !a.dry_run) CHECKED.delete(String(a.check_id));
     return result;
   }) as any);
