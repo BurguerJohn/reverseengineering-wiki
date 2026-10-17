@@ -1125,6 +1125,27 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   assert.match(rootHeader.header, /E2eTable_E2eRoot = 0x0,/, rootHeader.header);
   assert.ok(rootHeader.warnings?.some((w: string) => /E2eRoot: 1 field/.test(w)), JSON.stringify(rootHeader.warnings));
 
+  // Library typedefs and per-ABI layouts; one file per evidence entry; a format's byte order in its header.
+  const libFact = (kind: string, claim: string, data: Record<string, unknown>) => call(a, 'add_fact', { kind, subject: `Library:E2E Lib ${run}`, claim, scope: { level: 'library', applies_to: 'all versions' }, data, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const winLong = await libFact('typedef', 'The fictional E2eLong is 32-bit on Win64.', { name: 'E2eLong', type: 'int32_t', abi: 'win64' });
+  assert.match(winLong.title ?? JSON.stringify(winLong), /typedef\/E2eLong \(win64\)$/);
+  await libFact('typedef', 'The fictional E2eLong is 64-bit on LP64.', { name: 'E2eLong', type: 'int64_t', abi: 'lp64' });
+  await libFact('typedef', 'The fictional charmap handle is a pointer.', { name: 'E2eCharMap', type: 'struct E2eCharMapRec *' });
+  await libFact('struct', 'The fictional face record on Win64.', { name: 'E2eFace', size: 16, abi: 'win64', fields: [{ offset: 0, size: 4, type: 'E2eLong', name: 'flags' }, { offset: 8, size: 8, type: 'E2eCharMap', name: 'charmap' }] });
+  await libFact('struct', 'The fictional face record on LP64.', { name: 'E2eFace', size: 16, abi: 'lp64', fields: [{ offset: 0, size: 8, type: 'E2eLong', name: 'flags' }, { offset: 8, size: 8, type: 'E2eCharMap', name: 'charmap' }] });
+  const anyAbi = await call(anon, 'export_header', { subject: `Library:E2E Lib ${run}` });
+  assert.ok(anyAbi.warnings?.some((w: string) => /E2eFace has layouts for/.test(w)), JSON.stringify(anyAbi.warnings));
+  const lp64 = (await call(anon, 'export_header', { subject: `Library:E2E Lib ${run}`, abi: 'lp64' })).header;
+  assert.match(lp64, /typedef int64_t E2eLong;/, lp64);
+  assert.match(lp64, /\/\* 0x00 \*\/ E2eLong flags;\n {4}\/\* 0x08 \*\/ E2eCharMap charmap;/, lp64);
+  assert.match(lp64, /typedef struct E2eCharMapRec E2eCharMapRec; \/\* not defined by any fact/, lp64);
+  assert.ok(!/typedef int32_t E2eLong/.test(lp64), lp64);
+  await expectError(a, 'add_fact', { kind: 'behavior', subject: `Library:E2E Lib ${run}`, claim: 'A fictional claim citing two files at once.', scope: { level: 'library', applies_to: 'all versions' }, data: {},
+    evidence: [{ type: 'source', detail: 'two files', repo: 'https://github.com/e2e/lib', path: 'src/a.c, src/b.c', lines: '1-2' }], confidence: 'low', dry_run: true }, 'SCHEMA_INVALID');
+  const trackNow = await call(anon, 'read', { title: `Format:E2E Track ${run}` });
+  await call(a, 'edit_section', { title: `Format:E2E Track ${run}`, section: 'Infobox', infobox: { endianness: 'big' }, base_revision: trackNow.revision, summary: 'fictional byte order' });
+  assert.match((await call(anon, 'export_header', { subject: `Format:E2E Track ${run}` })).header, /Byte order of the format: big \(swap multi-byte fields on little-endian machines\)/);
+
   // A dry run hands back a check_id: publish_checked publishes exactly that, once.
   const checkedNote = await call(a, 'add_note', { subject: cave, key: 'Checked once', body: 'Published by check_id without resending the arguments.', confidence: 'low', dry_run: true });
   assert.ok(checkedNote.check_id, JSON.stringify(checkedNote).slice(0, 200));

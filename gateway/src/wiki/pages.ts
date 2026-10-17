@@ -51,7 +51,7 @@ export function redirectText(target: string): string {
 // ---- facts -------------------------------------------------------------------
 
 export const FACT_KINDS = [
-  'function', 'global', 'struct', 'vtable', 'enum', 'magic', 'string', 'signature', 'identification', 'behavior',
+  'function', 'global', 'struct', 'vtable', 'enum', 'typedef', 'magic', 'string', 'signature', 'identification', 'behavior',
 ] as const;
 export type FactKind = (typeof FACT_KINDS)[number];
 
@@ -91,7 +91,7 @@ export const evidenceSchema = z.object({
   // A source citation that can be checked again: repository, commit, file and lines.
   repo: z.string().max(300).optional(),
   commit: z.string().regex(/^[0-9a-fA-F]{7,40}$/, 'a commit hash (7-40 hex digits), not a tag or branch: name the tag in detail').optional(),
-  path: z.string().max(300).optional(),
+  path: z.string().max(300).regex(/^(?![^\n]*[,;]\s+\S*[./]\S)/, 'one file per evidence entry: give each file its own entry with its lines').optional(),
   lines: z.string().regex(/^\d+(?:-\d+)?(?:\s*,\s*\d+(?:-\d+)?)*$/).optional(),
 });
 
@@ -142,10 +142,11 @@ export interface FactDoc extends FactInput {
 export const FACT_DATA: Record<FactKind, { required: string[]; one_of?: string[]; optional: string[]; example: Record<string, unknown> }> = {
   function: { required: ['name'], one_of: ['rva', 'address', 'signature'], optional: ['prototype', 'calling_convention', 'size', 'rva_end', 'signature_offset', 'multiple'], example: { name: 'Player::TakeDamage', rva: '0x141230', signature: '48 89 5C 24 ?? 57 48 83 EC 20', prototype: 'void __fastcall(Player*, float)' } },
   global: { required: ['name', 'type'], one_of: ['rva', 'address', 'signature'], optional: ['size', 'signature_offset', 'multiple'], example: { name: 'g_GameState', type: 'GameState*', rva: '0x2F1A80' } },
-  struct: { required: ['name', 'fields'], one_of: ['size', 'size_min'], optional: ['size_max', 'alignment'], example: { name: 'Weapon', size: '0x88', fields: [{ offset: '0x0', size: 8, type: 'void*', name: 'vtable' }, { offset: '0x8', size: 1, type: 'uint8_t', name: 'kind', notes: '0 = rifle, 1 = shotgun' }, { offset: '0x9', size: 1, type: 'uint8_t', name: 'flags', bits: [{ bit: '0', name: 'is_loaded' }, { bit: '4-5', name: 'palette', notes: 'CGB only' }] }] } },
+  struct: { required: ['name', 'fields'], one_of: ['size', 'size_min'], optional: ['size_max', 'alignment', 'abi'], example: { name: 'Weapon', size: '0x88', fields: [{ offset: '0x0', size: 8, type: 'void*', name: 'vtable' }, { offset: '0x8', size: 1, type: 'uint8_t', name: 'kind', notes: '0 = rifle, 1 = shotgun' }, { offset: '0x9', size: 1, type: 'uint8_t', name: 'flags', bits: [{ bit: '0', name: 'is_loaded' }, { bit: '4-5', name: 'palette', notes: 'CGB only' }] }] } },
   vtable: { required: ['class', 'slots'], one_of: ['rva', 'address', 'rtti'], optional: [], example: { class: 'Weapon', rtti: '.?AVWeapon@@', rva: '0x1D3E00', slots: [{ index: 0, name: '~Weapon' }] } },
   enum: { required: ['name', 'values'], optional: ['underlying_type'], example: { name: 'WeaponClass', values: { 0: 'AssaultRifle', 1: 'Shotgun' } } },
-  magic: { required: ['bytes', 'offset', 'meaning'], optional: ['mask'], example: { bytes: '52 41 42 00', offset: '0x0', meaning: 'RAB archive header' } },
+  typedef: { required: ['name', 'type'], optional: ['abi'], example: { name: 'FT_Long', type: 'int32_t', abi: 'win64' } },
+  magic: { required: ['bytes', 'offset', 'meaning'], optional: ['mask', 'relative_to'], example: { bytes: '52 41 42 00', offset: '0x0', meaning: 'RAB archive header' } },
   string: { required: ['value', 'meaning'], optional: ['encoding', 'rva', 'address'], example: { value: 'EDF5_SAVE', meaning: 'Save file tag', encoding: 'ascii' } },
   signature: { required: ['pattern', 'matches'], optional: ['name', 'offset', 'multiple'], example: { pattern: '48 8B 05 ?? ?? ?? ?? 48 85 C0', matches: 'load of g_GameState' } },
   identification: { required: ['method', 'indicator'], optional: ['table'], example: { method: 'string', indicator: 'CRI Middleware' } },
@@ -222,6 +223,10 @@ export function checkFactData(kind: FactKind, data: Record<string, unknown>): st
       if (!located && data.rtti === undefined) problems.push('vtable facts need data.rva, data.address or data.rtti');
       break;
     case 'enum': need('name'); need('values'); break;
+    case 'typedef':
+      need('name'); need('type');
+      if (typeof data.name === 'string' && !/^[A-Za-z_]\w*$/.test(data.name.trim())) problems.push('data.name of a typedef must be a C identifier (FT_Long, j_common_ptr)');
+      break;
     case 'magic': need('bytes'); need('offset'); need('meaning'); break;
     case 'string': need('value'); need('meaning'); break;
     case 'signature': need('pattern'); need('matches'); break;
@@ -233,7 +238,7 @@ export function checkFactData(kind: FactKind, data: Record<string, unknown>): st
 
 /** The data field that names each kind of fact, in a fixed order per kind. */
 const KEY_FIELDS: Record<FactKind, string[]> = {
-  function: ['name'], global: ['name'], struct: ['name'], enum: ['name'], vtable: ['class'],
+  function: ['name'], global: ['name'], struct: ['name'], enum: ['name'], typedef: ['name'], vtable: ['class'],
   magic: ['bytes'], string: ['value'], signature: ['pattern'], identification: ['indicator'], behavior: [],
 };
 
@@ -263,7 +268,8 @@ export function factKey(fact: FactInput): string {
   if (fact.key?.trim()) return fact.key.trim();
   const d = fact.data;
   const pick = KEY_FIELDS[fact.kind].map((f) => d[f]).find((v) => typeof v === 'string' && v.trim()) as string | undefined;
-  return shortLabel(pick ?? fact.claim);
+  const abi = typeof d.abi === 'string' && d.abi.trim() && pick ? ` (${d.abi.trim()})` : '';
+  return shortLabel(pick ? `${pick}${abi}` : fact.claim);
 }
 
 // ---- builds ------------------------------------------------------------------

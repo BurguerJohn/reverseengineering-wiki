@@ -172,6 +172,7 @@ Every address, of any kind, is build-level: `scope.level = "build"` with a `Buil
 | `struct` | `name`, `size`, `fields[]` (`offset`, `size`, `type`, `name`) |
 | `vtable` | `class`, `rva` or RTTI name, `slots[]` |
 | `enum` | `name`, `values[]` |
+| `typedef` | `name`, `type` (a library type: `FT_Long` → `int32_t`); `abi` when it differs by ABI, as on `struct` |
 | `magic` | `bytes`, `offset`, `meaning` (file magic, protocol IDs, notable constants) |
 | `string` | `value`, `meaning` (distinctive strings that identify a subject) |
 | `signature` | `pattern`, `matches` (what it finds), `stability` (how many builds it survived) |

@@ -141,17 +141,34 @@ function cleanTitle(raw: string, allowed: readonly PageType[]): string {
   }
 }
 
-export function exportHeader(s: Services, args: { subject: string; build?: string }) {
+export function exportHeader(s: Services, args: { subject: string; build?: string; abi?: string }) {
   sIndex = s.index;
   const subject = s.index.resolveRedirect(cleanTitle(args.subject, SUBJECT_TYPES));
   const build = args.build ? normalizeTitle(args.build) : null;
-  const facts = s.index.factsForSubject(subject, ['struct', 'enum', 'vtable'])
+  const all = s.index.factsForSubject(subject, ['struct', 'enum', 'vtable', 'typedef'])
     .filter((f) => !build || f.level !== 'build' || f.applies_to === build)
     .filter((f) => f.status !== 'rejected');
-  const lines = [`/* ${HEADER_NOTE}`, ` * Subject: ${comment(subject)}${build ? `\n * Build: ${comment(build)}` : ''}`,
+  const warnings: string[] = [];
+  // One layout per name: the ABI asked for, else the one without an ABI, else the first (with a warning).
+  const abiOf = (f: { data: string }) => { try { const a = JSON.parse(f.data).abi; return typeof a === 'string' ? a.trim().toLowerCase() : ''; } catch { return ''; } };
+  const nameOf = (f: { kind: string; data: string }) => { try { const d = JSON.parse(f.data); return `${f.kind === 'typedef' ? 'typedef' : 'type'}:${d.name ?? d.class}`; } catch { return f.kind; } };
+  const wanted = args.abi?.trim().toLowerCase();
+  const abis = [...new Set(all.map(abiOf).filter(Boolean))].sort();
+  const groups = new Map<string, typeof all>();
+  for (const f of all) groups.set(nameOf(f), [...(groups.get(nameOf(f)) ?? []), f]);
+  const facts = [...groups.values()].flatMap((g) => {
+    if (g.length === 1 && (!wanted || !abiOf(g[0]) || abiOf(g[0]) === wanted)) return g;
+    const pick = (wanted ? g.find((f) => abiOf(f) === wanted) : undefined) ?? g.find((f) => !abiOf(f)) ?? (wanted ? undefined : [...g].sort((a, b) => abiOf(a).localeCompare(abiOf(b)))[0]);
+    if (!wanted && g.length > 1 && pick && abiOf(pick)) warnings.push(`${nameOf(pick).split(':')[1]} has layouts for ${g.map(abiOf).join(', ')}: this header uses ${abiOf(pick)} (pass abi to choose).`);
+    return pick ? [pick] : [];
+  }).sort((a, b) => all.indexOf(a) - all.indexOf(b));
+  // A format's byte order (its infobox): fields are stored that way, whatever the machine reading them.
+  let endianness = '';
+  try { endianness = String(JSON.parse(s.index.page(subject)?.json ?? '{}').infobox?.endianness ?? '').trim(); } catch { /* no infobox */ }
+  const lines = [`/* ${HEADER_NOTE}`, ` * Subject: ${comment(subject)}${build ? `\n * Build: ${comment(build)}` : ''}${wanted ? `\n * ABI: ${comment(wanted)}` : abis.length ? `\n * ABIs with their own layouts: ${abis.map(comment).join(', ')} (pass abi)` : ''}`,
+    ...(endianness ? [` * Byte order of the format: ${comment(endianness)}${/big/i.test(endianness) ? ' (swap multi-byte fields on little-endian machines)' : ''}`] : []),
     ` * Generated: ${new Date().toISOString()} */`, '#pragma once', '#include <stdint.h>', ''];
   const skipped: string[] = [];
-  const warnings: string[] = [];
   const unknownTypes = new Set<string>();
   // Types defined in this header; others come from other pages and must still compile here.
   const typeName = (f: { kind: string; data: string }) => {
@@ -168,9 +185,29 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
   const forward = new Set<string>();
   const enumConstants = new Set<string>();
   // Every struct is declared first, so pointers between them work in any order.
-  const declared = facts.filter((f) => f.kind !== 'enum').map(typeName).filter(Boolean);
+  const declared = facts.filter((f) => f.kind !== 'enum' && f.kind !== 'typedef').map(typeName).filter(Boolean);
   if (declared.length) lines.push(...declared.map((t) => `typedef struct ${t} ${t};`), '');
-  for (const f of dependencyOrder(facts, typeName)) {
+  const typedefs = facts.filter((f) => f.kind === 'typedef');
+  for (const f of typedefs) {
+    const d = JSON.parse(f.data);
+    const target = String(d.type ?? '').trim();
+    const std = stdType(target);
+    const ctype = std ? std.type : target;
+    const name = ident(String(d.name ?? ''), '');
+    if (!name) continue;
+    if (FN_POINTER.test(ctype)) lines.push(`typedef ${ctype.replace(/\(\s*\*\s*\)/, `(*${name})`)}; /* [${f.status}] ${comment(f.title)} */`);
+    else if (cType(ctype)) {
+      const base = baseType(ctype);
+      // A pointer to a struct no fact defines still compiles; by value it needs the struct.
+      if (!BUILTIN.test(ctype) && !defined.has(base) && ctype.includes('*') && !declared.includes(base)) forward.add(base);
+      lines.push(`typedef ${ctype} ${name}; /* [${f.status}] ${comment(f.title)}${std?.order ? `; ${std.order}` : ''} */`);
+    } else {
+      lines.push(`/* typedef ${comment(target)} ${name}: not a C type (${comment(f.title)}) */`);
+      defined.delete(name);
+    }
+  }
+  if (typedefs.length) lines.push('');
+  for (const f of dependencyOrder(facts.filter((x) => x.kind !== 'typedef'), typeName)) {
     const data = JSON.parse(f.data);
     lines.push(`/* [${f.status}] ${comment(f.title)} */`);
     if (f.kind === 'struct') {
@@ -315,7 +352,8 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
   if (!facts.length && !hardware.length) lines.push('/* No struct, enum or vtable facts for this subject yet. Add them with add_fact. */');
   // Pointers to types from other pages: forward declarations right after the includes.
   const elsewhere = [...forward].filter((t) => !defined.has(t));
-  if (elsewhere.length) lines.splice(6, 0, ...elsewhere.map((t) => `typedef struct ${t} ${t}; /* defined on another page */`), '');
+  const at = lines.indexOf('#include <stdint.h>') + 2;
+  if (elsewhere.length) lines.splice(at, 0, ...elsewhere.map((t) => `typedef struct ${t} ${t}; /* ${knownStructs.has(t) ? 'defined on another page' : 'not defined by any fact: declared so pointers to it compile'} */`), '');
   if (unknownTypes.size) warnings.push(`Types not defined by any fact: ${[...unknownTypes].join(', ')}. Fields of these types are bytes (or void * for pointer typedefs); add struct facts for them, or write the field as a stdint type.`);
   return { subject, build, facts: facts.length, warnings: warnings.length ? warnings : undefined, header: lines.join('\n') };
 }

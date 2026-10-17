@@ -26,7 +26,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.15';
+export const VERSION = '0.8.16';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -395,8 +395,8 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('export_header', {
     title: 'Export a C header',
-    description: 'C header with every struct, enum and vtable fact of a subject (optionally one build), ready to import into Ghidra/IDA.',
-    inputSchema: { subject: z.string(), build: z.string().optional() },
+    description: 'C header with every struct, enum, typedef and vtable fact of a subject (optionally one build, one ABI), ready to import into Ghidra/IDA. warnings lists what it could not express (types no fact defines, sizes that disagree).',
+    inputSchema: { subject: z.string(), build: z.string().optional(), abi: z.string().optional().describe('For layouts that differ by ABI (data.abi on struct and typedef facts): "win64", "lp64", "ilp32"…') },
     annotations: READ,
   }, handler((a: any) => exportHeader(s, a)));
 
@@ -459,7 +459,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
         applies_to: z.string().describe('What it holds for; for build-level facts a Build: title or the SHA-256 of one of its files (also one registered earlier in the same batch)'),
         observed_in: z.array(z.string()).optional(),
       }),
-      data: z.record(z.string(), z.unknown()).describe(`Fields by kind (examples and schemas per kind: fact_data in /tools.json). ${FACT_DATA_SUMMARY}. Struct fields: {offset, size, type, name, notes?, bits?: [{bit: "0" or "4-5", name, notes?}]}; the last field may be "T[]" or "T[count_field]" (entries after a header, a trailing name: a C flexible array member; data.size is then the fixed part or "variable"). Addresses: rva (PE, "0x141230") or address {kind: va|file|segmented|banked, value: "0x80012345" | "0x1A2B0" | "1000:5AFA" | "03:8000"} on a build; fixed hardware addresses (I/O registers, vectors, BIOS calls) as address {kind: "hardware", value: "0xFF46"} at scope.level platform. struct with unknown exact size: size_min and/or size_max. Signatures (data.signature, or a signature fact's pattern): the name goes at match address + signature_offset (offset on a signature fact), negative when the pattern starts inside the object; multiple: true names every match (thunks); a variant (an optional endbr64 prefix) is a second signature fact with the same name; string facts may use * for a variable part ("Copyright (C) 1991-* The libjpeg-turbo Project"), and identify matches versions and years with other digits anyway; a signature fact takes a name for its label. One address per fact; many names: add_symbols. Any kind also takes test_vectors [{input, expected}] (hashes, ciphers, checksums) and samples [{url, sha256, note}] (public files others can rerun the check on) or [{code: "Code:…", file, args, sha256}] (a sample a published script generates; file names the script on a multi-file code page).`),
+      data: z.record(z.string(), z.unknown()).describe(`Fields by kind (examples and schemas per kind: fact_data in /tools.json). ${FACT_DATA_SUMMARY}. Library types (FT_Long, DWORD, j_common_ptr): a typedef fact {name, type} each, so headers use them. Layouts that differ by ABI: data.abi ("win64", "lp64", "ilp32") on struct and typedef facts, one fact per ABI; export_header takes abi. magic relative_to: what offset counts from when not the file start (a table, a section). Struct fields: {offset, size, type, name, notes?, bits?: [{bit: "0" or "4-5", name, notes?}]}; the last field may be "T[]" or "T[count_field]" (entries after a header, a trailing name: a C flexible array member; data.size is then the fixed part or "variable"). Addresses: rva (PE, "0x141230") or address {kind: va|file|segmented|banked, value: "0x80012345" | "0x1A2B0" | "1000:5AFA" | "03:8000"} on a build; fixed hardware addresses (I/O registers, vectors, BIOS calls) as address {kind: "hardware", value: "0xFF46"} at scope.level platform. struct with unknown exact size: size_min and/or size_max. Signatures (data.signature, or a signature fact's pattern): the name goes at match address + signature_offset (offset on a signature fact), negative when the pattern starts inside the object; multiple: true names every match (thunks); a variant (an optional endbr64 prefix) is a second signature fact with the same name; string facts may use * for a variable part ("Copyright (C) 1991-* The libjpeg-turbo Project"), and identify matches versions and years with other digits anyway; a signature fact takes a name for its label. One address per fact; many names: add_symbols. Any kind also takes test_vectors [{input, expected}] (hashes, ciphers, checksums) and samples [{url, sha256, note}] (public files others can rerun the check on) or [{code: "Code:…", file, args, sha256}] (a sample a published script generates; file names the script on a multi-file code page).`),
       key: z.string().min(2).max(60).optional().describe('Short title for the fact page, e.g. "RNG seed" (default: the name/value/bytes, else the first clause of the claim). MediaWiki shows "_" as a space in titles; data keeps identifiers as written.'),
       evidence: z.array(evidenceItem).min(1),
       confidence: z.enum(['low', 'medium', 'high']),
@@ -503,7 +503,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('edit_section', {
     title: 'Edit one section',
-    description: 'Change one section (Markdown): the whole new body, or small changes with replace (each old text must occur exactly once in the section as read returns it), which is safer for fixing a sentence. Pass the revision you read as base_revision (revision ids count edits of the whole wiki). Removing >30% needs a reason. Missing sections are created. The answer shows the diff of the section. Link a section as [[Page#Section]]. Unverified claims are welcome when marked as such ("Unverified:") with how to test them. When a section grows past ~1500 words the answer suggests split_section.',
+    description: 'Change one section (Markdown): the whole new body, or small changes with replace (each old text must occur exactly once in the section as read returns it), which is safer for fixing a sentence. Pass the revision you read as base_revision (revision ids count edits of the whole wiki); changes to other sections since then are merged (the answer says so), only a change to the same section is a conflict. Removing >30% needs a reason. Missing sections are created. The answer shows the diff of the section. Link a section as [[Page#Section]]. Unverified claims are welcome when marked as such ("Unverified:") with how to test them. When a section grows past ~1500 words the answer suggests split_section.',
     inputSchema: { dry_run: DRY_RUN,
       title: z.string(),
       section: z.string().describe('Heading, "Summary" for the lead, or "Infobox" with infobox'),
@@ -664,7 +664,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('batch', {
     title: 'Several writes at once',
-    description: 'Up to 50 writes in one call, e.g. a new page with its build, facts and code. They run in a safe order (pages, topics, builds, then facts/code/notes/symbols, then edits, then reviews), so later operations may refer to pages created earlier in the same batch (builds also by a file\'s SHA-256). With dry_run, all of them are checked and previewed together and every failing operation is reported at once; in review mode that means one approval for the whole batch. A real run stops at the first error; the error lists what was already published in completed (with titles and revisions). A real batch larger than the remaining hourly quota is refused whole before anything runs.',
+    description: 'Up to 50 writes in one call, e.g. a new page with its build, facts and code. They run in a safe order (pages, topics, builds, then facts/code/notes/symbols, then edits, then reviews), so later operations may refer to pages created earlier in the same batch (builds also by a file\'s SHA-256). With dry_run, all of them are checked and previewed together and every failing operation is reported at once; in review mode that means one approval for the whole batch. A real run stops at the first error; the error lists what was already published in completed (with titles and revisions). A real batch larger than the remaining hourly quota is refused whole before anything runs. Keep one call under ~20 KB of arguments: send large code pages with add_code on their own.',
     inputSchema: {
       dry_run: DRY_RUN,
       quiet: z.boolean().optional().describe('With dry_run: list the pages that would be written without their contents (smaller answers for large batches)'),
