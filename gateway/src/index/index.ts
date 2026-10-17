@@ -135,6 +135,18 @@ export interface SearchHit {
 
 const SUBJECT_TYPES_SET = new Set(['software', 'library', 'format', 'platform', 'technique', 'tool']);
 
+/** Whether byte string `outer` contains `inner` (hex pairs; ".." is a wildcard on either side). */
+function bytesContain(outer: string, inner: string): boolean {
+  const a = outer.match(/../g) ?? [];
+  const b = inner.match(/../g) ?? [];
+  for (let start = 0; start + b.length <= a.length; start++) {
+    let ok = true;
+    for (let i = 0; i < b.length && ok; i++) ok = a[start + i] === '..' || b[i] === '..' || a[start + i] === b[i];
+    if (ok) return true;
+  }
+  return false;
+}
+
 /** Words too common to search on their own (match="any"). */
 const STOP_WORDS = new Set(['a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'how', 'in', 'into', 'is', 'it', 'of', 'on', 'or', 'the', 'to', 'what', 'when', 'where', 'with']);
 
@@ -282,7 +294,8 @@ export class SearchIndex {
   private indexArticle(p: IndexablePage, type: PageType): void {
     const sections = parseSections(p.content);
     const { rest } = splitInfobox(sections[0]?.text ?? '');
-    const summary = wikitextToMarkdown(rest.split(/\n\s*\n/)[0] ?? '').slice(0, 600);
+    const lead = rest.replace(/^\s*\{\{Topic of\|[^}]*\}\}\s*/, '');
+    const summary = wikitextToMarkdown(lead.split(/\n\s*\n/)[0] ?? '').slice(0, 600);
     const infobox = parseInfobox(p.content);
     const root = subjectRoot(p.title);
     this.insertPage(p, type, summary, null, root, null, JSON.stringify({ infobox }));
@@ -513,6 +526,11 @@ export class SearchIndex {
       if (t.kind === 'bytes' && t.prefix) {
         rows = this.db.prepare(`select i.title, p.subject from identifiers i join pages p on p.title = i.title
           where i.kind = 'bytes' and (i.token like ? or ? like i.token || '%') limit 100`).all(`${t.token}%`, t.token) as any[];
+      } else if (t.kind === 'bytes' && t.token.length >= 8) {
+        // A pattern of 4+ bytes found inside a published signature, or containing one; ?? matches any byte.
+        const all = this.db.prepare(`select i.title, i.token, p.subject from identifiers i join pages p on p.title = i.title
+          where i.kind = 'bytes' limit 20000`).all() as Array<{ title: string; token: string; subject: string | null }>;
+        rows = all.filter((r) => r.token === t.token || (r.token.length >= 8 && (bytesContain(r.token, t.token) || bytesContain(t.token, r.token))));
       } else if (t.kind === 'string') {
         rows = this.db.prepare(`select i.title, p.subject from identifiers i join pages p on p.title = i.title
           where i.kind = 'string' and (i.token = ? or (length(i.token) >= 6 and instr(?, i.token) > 0)) limit 100`)

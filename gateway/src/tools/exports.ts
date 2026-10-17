@@ -101,7 +101,7 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
       const fields = (Array.isArray(data.fields) ? data.fields : [])
         .map((x: any) => {
           const named = fieldName(x.name);
-          return { offset: hexNum(x.offset), size: hexNum(x.size), type: cType(x.type), rawType: String(x.type ?? ''), name: named.name, notes: [named.rest, x.notes].filter(Boolean).join('; ') };
+          return { offset: hexNum(x.offset), size: hexNum(x.size), type: cType(x.type), rawType: String(x.type ?? ''), name: named.name, notes: [named.rest, x.notes].filter(Boolean).join('; '), bits: Array.isArray(x.bits) ? x.bits : [] };
         })
         .filter((x: any) => x.offset !== null)
         .sort((a: any, b: any) => a.offset - b.offset);
@@ -128,6 +128,8 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
         }
         const decl = type ? `${type} ${fieldId};` : `uint8_t ${fieldId}[0x${(field.size ?? 1).toString(16).toUpperCase()}];`;
         lines.push(`    /* 0x${field.offset.toString(16).toUpperCase().padStart(2, '0')} */ ${decl}${note ? ` /* ${comment(note)} */` : ''}`);
+        // Bit fields as comments under the field (C bit-field layout is not portable).
+        for (const b of field.bits) lines.push(`    /*        bit ${comment(b?.bit)}: ${comment(b?.name)}${b?.notes ? ` (${comment(b.notes)})` : ''} */`);
         cursor = field.offset + (field.size ?? (field.type ? 0 : 1));
       }
       if (size !== null && size > cursor) lines.push(`    uint8_t _pad_${cursor.toString(16).toUpperCase()}[0x${(size - cursor).toString(16).toUpperCase()}];`);
@@ -150,14 +152,82 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
       skipped.push(f.title);
     }
   }
-  if (!facts.length) lines.push('/* No struct, enum or vtable facts for this subject yet. Add them with add_fact. */');
+  // Fixed hardware addresses of a platform (I/O registers, vectors): one #define each.
+  const hardware = s.index.factsForSubject(subject).filter((f) => f.status !== 'rejected').flatMap((f) => {
+    const d = JSON.parse(f.data);
+    const address = d.address?.kind === 'hardware' ? hexNum(d.address.value) : null;
+    return address === null ? [] : [{ name: ident(d.name, ''), address, status: f.status, title: f.title }];
+  }).filter((h) => h.name).sort((a, b) => a.address - b.address);
+  if (hardware.length) {
+    lines.push('/* Hardware addresses (the same in every program on this platform) */');
+    for (const h of hardware) lines.push(`#define ${h.name} 0x${h.address.toString(16).toUpperCase()} /* [${h.status}] ${comment(h.title)} */`);
+    lines.push('');
+  }
+  if (!facts.length && !hardware.length) lines.push('/* No struct, enum or vtable facts for this subject yet. Add them with add_fact. */');
   // Pointers to types from other pages: forward declarations right after the includes.
   if (forward.size) lines.splice(6, 0, ...[...forward].map((t) => `typedef struct ${t} ${t}; /* defined on another page */`), '');
   return { subject, build, facts: facts.length, header: lines.join('\n') };
 }
 
-export function exportSymbols(s: Services, args: { build: string; tool: 'ghidra' | 'ida' | 'json' }) {
-  const build = s.index.resolveRedirect(cleanTitle(args.build, ['build']));
+type SymbolTool = 'ghidra' | 'ida' | 'json' | 'sym';
+
+/** A platform's fixed hardware addresses (memory-mapped I/O, vectors, BIOS calls), for every program on it. */
+function exportPlatformSymbols(s: Services, args: { platform: string; tool: SymbolTool }) {
+  const platform = s.index.resolveRedirect(cleanTitle(args.platform, ['platform']));
+  if (!s.index.page(platform)) throw new ToolError('NOT_FOUND', `"${platform}" does not exist.`);
+  const symbols: Array<{ address: number; name: string; kind: string; status: string; fact: string }> = [];
+  for (const f of s.index.factsForSubject(platform).filter((x) => x.status !== 'rejected')) {
+    const data = JSON.parse(f.data);
+    if (data.address?.kind !== 'hardware') continue;
+    const address = hexNum(data.address.value);
+    if (address !== null) symbols.push({ address, name: qualifiedName(data.name ?? data.class, `rewiki_${f.kind}`), kind: f.kind, status: f.status, fact: f.title });
+  }
+  symbols.sort((a, b) => a.address - b.address);
+  const ascii = (x: string) => JSON.stringify(x.replace(/[^\x20-\x7e]/g, '?'));
+  const pyList = symbols.map((x) => `    (0x${x.address.toString(16)}, ${ascii(x.name)}, ${ascii(x.kind)}, ${ascii(x.status)}, ${ascii(x.fact)}),`).join('\n');
+  const head = `# ${HEADER_NOTE}\n# Platform hardware: ${comment(platform)}\n# Generated: ${new Date().toISOString()}\n`;
+  let script: string;
+  if (args.tool === 'json') script = JSON.stringify({ platform, symbols }, null, 2);
+  else if (args.tool === 'sym') script = `; ${HEADER_NOTE}\n; Platform hardware: ${comment(platform)}\n${symbols.map((x) => `00:${x.address.toString(16).toUpperCase().padStart(4, '0')} ${x.name}`).join('\n')}\n`;
+  else if (args.tool === 'ghidra') {
+    script = `${head}# Run in Ghidra's Script Manager (Jython or PyGhidra) with the program open. Absolute addresses.
+from ghidra.program.model.symbol import SourceType
+
+SYMBOLS = [
+${pyList}
+]
+
+for address, name, kind, status, fact in SYMBOLS:
+    addr = toAddr(address)
+    createLabel(addr, name, True, SourceType.USER_DEFINED)
+    setEOLComment(addr, "ReverseEngineering.wiki [%s] %s" % (status, fact))
+print("ReverseEngineering.wiki: applied %d hardware names" % len(SYMBOLS))
+`;
+  } else {
+    script = `${head}# Run in IDA via File > Script file (IDAPython). Absolute addresses.
+import idc, ida_name
+
+SYMBOLS = [
+${pyList}
+]
+
+for ea, name, kind, status, fact in SYMBOLS:
+    ida_name.set_name(ea, name, ida_name.SN_NOWARN | ida_name.SN_NOCHECK | ida_name.SN_FORCE)
+    idc.set_cmt(ea, "ReverseEngineering.wiki [%s] %s" % (status, fact), 1)
+print("ReverseEngineering.wiki: applied %d hardware names" % len(SYMBOLS))
+`;
+  }
+  return {
+    platform, tool: args.tool, symbols: symbols.length, script,
+    hint: symbols.length ? undefined : 'No hardware address facts on this platform yet: add_fact with data.address {kind: "hardware", value} at scope.level platform.',
+    warning: 'Review generated scripts before running. Names come from community facts (status claimed/verified).',
+  };
+}
+
+export function exportSymbols(s: Services, args: { build?: string; platform?: string; tool: SymbolTool }) {
+  if (!args.build && !args.platform) throw new ToolError('BAD_REQUEST', 'Give build (an exact binary) or platform (its fixed hardware addresses).');
+  if (args.platform && !args.build) return exportPlatformSymbols(s, { platform: args.platform, tool: args.tool });
+  const build = s.index.resolveRedirect(cleanTitle(args.build!, ['build']));
   if (!s.index.page(build)) throw new ToolError('NOT_FOUND', `"${build}" is not a known build. Use lookup_binary or register_build.`);
   const rows = s.index.factsForBuild(build).filter((f) => ['function', 'global', 'vtable'].includes(f.kind) && f.status !== 'rejected');
   const symbols: Array<{ rva: number; name: string; kind: string; status: string; fact: string }> = [];
@@ -189,7 +259,14 @@ export function exportSymbols(s: Services, args: { build: string; tool: 'ghidra'
   const head = `# ${HEADER_NOTE}\n# Build: ${comment(build)}\n# Generated: ${new Date().toISOString()}\n`;
 
   let script: string;
-  if (args.tool === 'json') {
+  if (args.tool === 'sym') {
+    // bank:address name (RGBDS, BGB, mGBA and most retro debuggers): banked facts as they are.
+    const banked = otherAddresses.filter((x) => x.kind === 'banked').map((x) => {
+      const [bank, addr] = x.value.split(':');
+      return `${bank.toUpperCase().padStart(2, '0')}:${addr.toUpperCase().padStart(4, '0')} ${x.name}`;
+    });
+    script = `; ${HEADER_NOTE}\n; Build: ${comment(build)}\n${banked.sort().join('\n')}\n`;
+  } else if (args.tool === 'json') {
     script = JSON.stringify({ build, symbols, signature_only: signatureOnly, other_addresses: otherAddresses }, null, 2);
   } else if (args.tool === 'ghidra') {
     script = `${head}# Run in Ghidra's Script Manager (Jython or PyGhidra) with the program open.

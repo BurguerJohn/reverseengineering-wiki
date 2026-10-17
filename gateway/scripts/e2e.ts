@@ -743,7 +743,7 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   // Small edits with replace, and the diff in the answer.
   const caveRead = await call(a, 'read', { title: cave });
   assert.equal(caveRead.authorship.your_edits > 0, true, JSON.stringify(caveRead.authorship));
-  assert.match(caveRead.authorship.note, /Only you wrote this page/);
+  assert.match(caveRead.authorship.note, /Only your account wrote this page/);
   assert.equal((await call(anon, 'read', { title: cave })).authorship.your_edits, undefined, 'anonymous readers get no "you"');
   const fixed = await call(a, 'edit_section', { title: cave, section: 'Engine', replace: [{ old: '`tick()`', new: '`update()`' }], base_revision: caveRead.revision, summary: 'rename the loop function' });
   assert.match(fixed.diff, /-Custom `tick\(\)` loop\.\n\+Custom `update\(\)` loop\./, JSON.stringify(fixed).slice(0, 300));
@@ -837,6 +837,31 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   assert.ok(chunked.general_pages?.some((g: any) => g.title === `Format:E2E Track ${run}` && g.facts === 2), JSON.stringify(chunked.general_pages));
   const browse = await call(anon, 'search', { query: '*', types: ['format'], limit: 50 });
   assert.ok(browse.total >= 2 && browse.hits.some((h: any) => h.title === `Format:${chunk}`), JSON.stringify(browse).slice(0, 300));
+
+  // Consoles: fixed hardware addresses are platform facts; they export as #defines, platform scripts and .sym.
+  const consoleName = `E2E Console ${run}`;
+  const consoleOps = await call(a, 'batch', { dry_run: true, operations: [
+    { tool: 'create_page', arguments: { type: 'platform', title: consoleName, summary: 'A fictional handheld console with memory-mapped I/O.', body: '## Memory map\n\nI/O at 0xFF00.' } },
+    { tool: 'add_fact', arguments: { kind: 'global', subject: `Platform:${consoleName}`, claim: 'Writing the high byte of a source address to rDMA starts an OAM DMA transfer.', scope: { level: 'platform', applies_to: 'all models' },
+      data: { name: 'rDMA', type: 'uint8_t', address: { kind: 'hardware', value: '0xFF46' } }, evidence: [{ type: 'documentation', detail: 'fictional hardware manual' }], confidence: 'medium' } },
+  ] });
+  assert.deepEqual(consoleOps.pages.map((p: any) => p.title), [`Platform:${consoleName}`, `Fact:${consoleName}/global/rDMA`], 'the dry run lists the exact titles first');
+  await call(a, 'batch', { operations: [
+    { tool: 'create_page', arguments: { type: 'platform', title: consoleName, summary: 'A fictional handheld console with memory-mapped I/O.', body: '## Memory map\n\nI/O at 0xFF00.' } },
+    { tool: 'add_fact', arguments: { kind: 'global', subject: `Platform:${consoleName}`, claim: 'Writing the high byte of a source address to rDMA starts an OAM DMA transfer.', scope: { level: 'platform', applies_to: 'all models' },
+      data: { name: 'rDMA', type: 'uint8_t', address: { kind: 'hardware', value: '0xFF46' }, signature: '3E ?? E0 46 3E 28 3D 20 FD C9' }, evidence: [{ type: 'documentation', detail: 'fictional hardware manual' }], confidence: 'medium' } },
+  ] });
+  const wrongLevel = await expectError(a, 'add_fact', { kind: 'global', subject: cave, claim: 'A hardware register named on a game page is the wrong level.', scope: { level: 'software', applies_to: 'all versions' },
+    data: { name: 'rLCDC', type: 'uint8_t', address: { kind: 'hardware', value: '0xFF40' } }, evidence: [{ type: 'documentation', detail: 'manual' }], confidence: 'low', dry_run: true }, 'SCHEMA_INVALID');
+  assert.match(wrongLevel.message, /scope\.level = "platform"/);
+  assert.match((await call(anon, 'export_header', { subject: `Platform:${consoleName}` })).header, /#define rDMA 0xFF46/);
+  const platformGhidra = await call(anon, 'export_symbols', { platform: `Platform:${consoleName}`, tool: 'ghidra' });
+  assert.equal(platformGhidra.symbols, 1);
+  assert.match(platformGhidra.script, /\(0xff46, "rDMA"[\s\S]*toAddr\(address\)/);
+  assert.match((await call(anon, 'export_symbols', { platform: `Platform:${consoleName}`, tool: 'sym' })).script, /^00:FF46 rDMA$/m);
+  // identify finds a pattern inside a published signature; a fact sent to a topic page says where it went.
+  const sub = await call(anon, 'identify', { patterns: ['E0 46 3E 28 3D 20 FD C9'] });
+  assert.equal(sub.candidates[0]?.subject, `Platform:${consoleName}`, JSON.stringify(sub.candidates));
 
   // A wrong build title: "did you mean" the real one.
   const typo = await expectError(a, 'add_fact', { ...fn('Cave::Draw', '0x2000', `Build:${cave}/1.0 (Win64, Steam)`), dry_run: true }, 'SCHEMA_INVALID');

@@ -161,10 +161,16 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   const parsed = factInputSchema.safeParse(input);
   if (!parsed.success) throw new ToolError('SCHEMA_INVALID', `Fact does not match rewiki.fact/1: ${issueList(parsed.error.issues)}.`, { issues: parsed.error.issues });
   const fact = parsed.data;
-  fact.subject = subjectRoot(title(s, fact.subject, SUBJECTS));
+  const askedSubject = title(s, fact.subject, SUBJECTS);
+  fact.subject = subjectRoot(askedSubject);
   await mustExist(s, fact.subject, 'Create the subject page first (create_page).');
   const problems = checkFactData(fact.kind, fact.data);
-  const addressLike = fact.data.rva !== undefined || fact.data.address !== undefined;
+  // A hardware address is the same in every program of a platform; any other address belongs to one build.
+  const hardware = fact.data.rva === undefined && (fact.data.address as { kind?: string } | undefined)?.kind === 'hardware';
+  const addressLike = !hardware && (fact.data.rva !== undefined || fact.data.address !== undefined);
+  if (hardware && fact.scope.level !== 'platform') {
+    problems.push('A hardware address (data.address.kind "hardware": memory-mapped I/O, vectors, BIOS entry points) holds for every program of a platform: use scope.level = "platform" with the Platform: page as subject.');
+  }
   if (fact.scope.level === 'build' || addressLike) {
     if (!fact.scope.applies_to.startsWith('Build:') && !SHA256_REF.test(fact.scope.applies_to.trim())) {
       problems.push('Address facts and build-level facts need scope.applies_to = a "Build:" page or the SHA-256 of one of its files (create the build with register_build). Addresses are only valid for one build.');
@@ -181,8 +187,9 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   if (problems.length) throw new ToolError('SCHEMA_INVALID', problems.join(' '), { problems });
   fact.scope.observed_in = await Promise.all(fact.scope.observed_in.map((o) => (SHA256_REF.test(o.trim()) ? buildRef(s, o) : s.index.resolveRedirect(normalizeTitle(o)))));
   const unknown = unknownFactFields(fact.kind, fact.data);
-  const warnings = unknown.length
-    ? [`data.${unknown.join(', data.')} ${unknown.length > 1 ? 'are' : 'is'} not standard for kind "${fact.kind}" (standard: ${[...FACT_DATA[fact.kind].required, ...(FACT_DATA[fact.kind].one_of ?? []), ...FACT_DATA[fact.kind].optional].join(', ')}). Kept, but tools like export_symbols and export_header only use standard fields. Several related addresses? One fact per address, or add_symbols for many names with their signatures.`]
+  const subjectNote = askedSubject !== fact.subject ? `Stored on ${fact.subject}: facts attach to the subject page, not to its topic pages; mention the fact on ${askedSubject} with a link if useful.` : undefined;
+  const warnings = unknown.length || subjectNote
+    ? [...(subjectNote ? [subjectNote] : []), ...(unknown.length ? [`data.${unknown.join(', data.')} ${unknown.length > 1 ? 'are' : 'is'} not standard for kind "${fact.kind}" (standard: ${[...FACT_DATA[fact.kind].required, ...(FACT_DATA[fact.kind].one_of ?? []), ...FACT_DATA[fact.kind].optional].join(', ')}). Kept, but tools like export_symbols and export_header only use standard fields. Several related addresses? One fact per address, or add_symbols for many names with their signatures.`] : [])]
     : undefined;
   const partialBuild = fact.scope.level === 'build' ? buildIdentity(await currentPage(s, fact.scope.applies_to)) === 'partial' : false;
   assertClean(scanValue(fact, 'fact'));

@@ -249,8 +249,8 @@ async function authorship(s: Services, title: string, viewer: Operator | null | 
   if (viewer) {
     const yours = [...edits].filter(([user]) => sameOperator(s, user, viewer)).reduce((n, [, c]) => n + c, 0);
     out.your_edits = yours;
-    if (yours && yours === revisions.length) out.note = 'Only you wrote this page: it is not independent confirmation of anything.';
-    else if (yours) out.note = 'You wrote part of this page: your own text is not independent confirmation.';
+    if (yours && yours === revisions.length) out.note = 'Only your account wrote this page (maybe in an earlier session): it is not independent confirmation of anything.';
+    else if (yours) out.note = 'Your account wrote part of this page: its own text is not independent confirmation.';
   }
   if (doc?.created_by !== undefined) {
     // Distinct accounts that confirmed it, other than its creator (renames included).

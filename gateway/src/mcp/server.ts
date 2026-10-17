@@ -26,7 +26,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.7.8';
+export const VERSION = '0.7.9';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -175,8 +175,11 @@ function compactPreview(out: Record<string, unknown>): Record<string, unknown> {
     };
     return { ...p, content: take(p.content), diff: take(p.diff) };
   });
+  // Exact titles first (code pages, facts, aliases), before any preview is cut.
+  const pages = [...new Map(previews.map((p) => [p.title, p.action])).entries()].map(([title, action]) => ({ title, action }));
   return {
     ...out,
+    pages,
     preview: kept,
     aliases_previewed: redirects.length ? redirects.map((p) => p.title) : undefined,
     preview_truncated: cut || undefined,
@@ -348,8 +351,12 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('export_symbols', {
     title: 'Export a symbol script',
-    description: 'Ghidra or IDA script (or JSON) that names every known function/global/vtable of an exact build: facts plus the build\'s symbol map. Get the build from lookup_binary.',
-    inputSchema: { build: z.string(), tool: z.enum(['ghidra', 'ida', 'json']) },
+    description: 'Ghidra or IDA script, JSON, or an RGBDS-style .sym file (bank:address name, for banked ROMs and emulators) naming every known function/global/vtable: of an exact build (facts plus its symbol map; get it from lookup_binary), or of a platform\'s fixed hardware addresses (platform: "Platform:Game Boy"), the same for every program on it.',
+    inputSchema: {
+      build: z.string().optional().describe('Build: page (or a file SHA-256 via lookup_binary)'),
+      platform: z.string().optional().describe('Platform: page, for its hardware addresses (I/O registers, vectors, BIOS calls)'),
+      tool: z.enum(['ghidra', 'ida', 'json', 'sym']),
+    },
     annotations: READ,
   }, handler((a: any) => exportSymbols(s, a)));
 
@@ -394,7 +401,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
         applies_to: z.string().describe('What it holds for; for build-level facts a Build: title or the SHA-256 of one of its files (also one registered earlier in the same batch)'),
         observed_in: z.array(z.string()).optional(),
       }),
-      data: z.record(z.string(), z.unknown()).describe(`Fields by kind (examples and schemas per kind: fact_data in /tools.json). ${FACT_DATA_SUMMARY}. Addresses: rva (PE, "0x141230") or address {kind: va|file|segmented|banked, value: "0x80012345" | "0x1A2B0" | "1000:5AFA" | "03:8000"}. struct with unknown exact size: size_min + size_max. One address per fact; many names: add_symbols. Any kind also takes test_vectors [{input, expected}] (hashes, ciphers, checksums) and samples [{url, sha256, note}] (public files others can rerun the check on).`),
+      data: z.record(z.string(), z.unknown()).describe(`Fields by kind (examples and schemas per kind: fact_data in /tools.json). ${FACT_DATA_SUMMARY}. Struct fields: {offset, size, type, name, notes?, bits?: [{bit: "0" or "4-5", name, notes?}]}. Addresses: rva (PE, "0x141230") or address {kind: va|file|segmented|banked, value: "0x80012345" | "0x1A2B0" | "1000:5AFA" | "03:8000"} on a build; fixed hardware addresses (I/O registers, vectors, BIOS calls) as address {kind: "hardware", value: "0xFF46"} at scope.level platform. struct with unknown exact size: size_min + size_max. One address per fact; many names: add_symbols. Any kind also takes test_vectors [{input, expected}] (hashes, ciphers, checksums) and samples [{url, sha256, note}] (public files others can rerun the check on).`),
       key: z.string().min(2).max(60).optional().describe('Short title for the fact page, e.g. "RNG seed" (default: the name/value/bytes, else the first clause of the claim)'),
       evidence: z.array(evidenceItem).min(1),
       confidence: z.enum(['low', 'medium', 'high']),
@@ -452,7 +459,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('create_page', {
     title: 'Create a subject or topic page',
-    description: 'New article for a software, library, format, platform, technique or tool (standard sections added, duplicates checked). A title with one slash, like "Earth Defense Force 5/Weapons", creates a topic subpage of an existing subject instead: no infobox, linked from the parent\'s Topics section. Use topics when one subject has a lot to say about one area.',
+    description: 'New article for a software, library, format, platform, technique or tool (standard sections added, duplicates checked). A title with one slash, like "Earth Defense Force 5/Weapons", creates a topic subpage of an existing subject instead: no infobox, linked from the parent\'s Topics section; it lives in the parent\'s namespace (type must match the parent). Use topics when one subject has a lot to say about one area. summary: 1-3 sentences, at least 20 characters.',
     inputSchema: { dry_run: DRY_RUN,
       type: z.enum(SUBJECT_TYPES),
       title: z.string().describe('Official full name, e.g. "Earth Defense Force 5"; or "<subject>/<topic>" for a topic subpage'),
@@ -501,7 +508,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('add_code', {
     title: 'Publish code',
-    description: 'Publish code you wrote (scripts, hooks, parsers, headers, format specs) as a Code page, licensed MIT-0. To update, pass title + base_revision.',
+    description: 'Publish code you wrote (scripts, hooks, parsers, headers, format specs) as a Code page, licensed MIT-0. New pages are titled "Code:<first subject>/<name> (<Language>)" (the dry run lists the exact title). To update, pass title + base_revision.',
     inputSchema: { dry_run: DRY_RUN,
       name: z.string().optional().describe('For new pages: what it does, e.g. "SGO parser"'),
       title: z.string().optional().describe('Existing Code: page to update'),
@@ -534,7 +541,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('register_build', {
     title: 'Register a build',
-    description: 'Create a Build: page from file hashes so address facts can be attached to an exact binary. Hashes and metadata only, never the file. Facts can then refer to it by its title or by a file\'s SHA-256 (in a batch too). Without the file, a partial identity (size + PE timestamp or version text) is accepted and marked as such.',
+    description: 'Create a Build: page from file hashes (for consoles: the ROM file\'s SHA-256) so address facts can be attached to an exact binary. Hashes and metadata only, never the file. Facts can then refer to it by its title or by a file\'s SHA-256 (in a batch too). Without the file, a partial identity (size + PE timestamp or version text) is accepted and marked as such.',
     inputSchema: { dry_run: DRY_RUN,
       software: z.string(),
       version: z.string(),
