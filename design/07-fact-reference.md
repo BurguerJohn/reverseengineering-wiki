@@ -40,7 +40,7 @@ Every kind also takes `test_vectors` and `samples` (below). Every fact needs `ev
 
 ## Signatures, magics and strings
 
-- Byte patterns: `"48 89 5C 24 ?? 57"` (`??` any byte). On a function or global: `data.signature`; or a `signature` fact with `pattern` and `matches` (and `name` for its label).
+- Byte patterns: `"48 89 5C 24 ?? 57"` (`??` any byte). On a function or global: `data.signature`; or a `signature` fact with `pattern` and `matches` (and `name` for its label; `target: "function"` or `"data"` says what it names, so scripts create the function).
 - The name goes at match address + `signature_offset` (function/global) or `offset` (signature fact), negative when the pattern starts inside the object.
 - `multiple: true` names every match (thunks, inlined helpers); data tables compiled in several times get every copy named. A variant (an optional `endbr64` prefix) is a second fact with the same name.
 - Make a pattern unique: test it on several builds and on unrelated binaries. The server warns when it overlaps another subject's facts (a bundled copy: say so in the claim; otherwise lengthen it).
@@ -59,12 +59,12 @@ Names are identifiers: write what MSVC prints as ``Foo::`vftable'{for `Bar'}`` a
 ## Symbol maps
 
 - `add_symbols`: up to 5,000 names per call for one build (`rva`, or `va`, or `wasm_func`), each with `kind`, `confidence`, `source`, and when known `type` (a prototype or data type), `size` and `signature`. The same name again is a confirmation; a different name replaces the old one only with higher confidence.
-- `import_symbols`: a decompilation project's symbol file read from its repository at a pinned commit (splat `symbol_addrs.txt` and linker lists, nm output, address/name pairs). Only names, addresses, sizes and types are taken, never code or comments; the build page records where they came from.
+- `import_symbols`: a decompilation project's symbol file read from its repository at a pinned commit (splat `symbol_addrs.txt` and linker lists, decomp-toolkit `symbols.txt` for GameCube/Wii, nm output, address/name pairs). Only names, addresses, sizes and types are taken, never code or comments; the build page records where they came from.
 - Give functions their prototype (`data.prototype`, or `type` in a symbol map) and globals their type and size: build scripts apply them.
 
 ## Exports
 
-- `export_header` (subject, optional build and abi): every struct, enum, typedef and vtable fact as C; `warnings` lists what it could not express. Import it before a build script, so the types exist.
+- `export_header` (subject, optional build, abi, and `also` for pages whose types it uses): every struct, enum, typedef and vtable fact as C; `warnings` lists what it could not express. Import it before a build script, so the types exist.
 - `export_symbols`: with `build`, a Ghidra or IDA script (or JSON) naming every function and global of that exact binary, with types; with `subject` (and `also` for a parent library), a script that finds the subject's signatures in your binary; with `platform`, its hardware addresses; `tool: "sym"` writes `bank:address name` for banked ROMs; `tool: "wasm-names"` writes WebAssembly names into the module's name section.
 - `symbols` with build and rva also tells where the same name is in other builds (another version or region).
 

@@ -27,7 +27,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.25';
+export const VERSION = '0.8.26';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -398,7 +398,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
   server.registerTool('export_header', {
     title: 'Export a C header',
     description: 'C header with every struct, enum, typedef and vtable fact of a subject (optionally one build, one ABI), ready to import into Ghidra/IDA. warnings lists what it could not express (types no fact defines, sizes that disagree).',
-    inputSchema: { subject: z.string(), build: z.string().optional(), abi: z.string().optional().describe('For layouts that differ by ABI (data.abi on struct and typedef facts): "win64", "lp64", "ilp32"…') },
+    inputSchema: { subject: z.string(), build: z.string().optional(), also: z.array(z.string()).max(10).optional().describe('Other pages whose types it uses (a platform and the formats its globals are typed by)'), abi: z.string().optional().describe('For layouts that differ by ABI (data.abi on struct and typedef facts): "win64", "lp64", "ilp32"…') },
     annotations: READ,
   }, handler((a: any) => exportHeader(s, a)));
 
@@ -576,7 +576,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('import_symbols', {
     title: 'Import a decompilation symbol file',
-    description: `A decompilation project's symbol file (splat symbol_addrs.txt and linker lists, nm output, address/name pairs) read from its repository at a pinned commit into a build's symbol map: names, addresses, sizes and types only, never code (repositories without a license too). Up to 50,000 names, ${MAX_SYMBOLS_PER_CALL} per write; the dry run reads and checks the file.`,
+    description: `A decompilation project's symbol file (splat symbol_addrs.txt and linker lists, decomp-toolkit symbols.txt, nm output, address/name pairs) read from its repository at a pinned commit into a build's symbol map: names, addresses, sizes and types only, never code (repositories without a license too). Up to 50,000 names, ${MAX_SYMBOLS_PER_CALL} per write; the dry run reads and checks the file.`,
     inputSchema: { dry_run: DRY_RUN,
       build: z.string().describe('Build: page the names belong to (the exact binary the decompilation matches)'),
       url: z.string().describe('Repository URL (github.com, gitlab.com, codeberg.org)'),

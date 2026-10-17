@@ -1155,6 +1155,13 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   assert.deepEqual(listedCode.listed_on, [`Library:E2E Lib ${run}`], JSON.stringify(listedCode).slice(0, 300));
   assert.ok((await call(anon, 'read', { title: `Library:E2E Lib ${run}`, section: 'Code & repositories' })).content.includes('Listed tool'));
 
+  // A signature fact naming a function makes scripts create it; a header takes types from other pages (also).
+  await call(a, 'add_fact', { kind: 'signature', subject: `Library:E2E Lib ${run}`, claim: 'The fictional library init routine starts like this.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { pattern: '94 21 FF F0 7C 08 02 A6', matches: 'e2e_lib_init', target: 'function' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  assert.match((await call(anon, 'export_symbols', { subject: `Library:E2E Lib ${run}`, tool: 'ghidra' })).script, /\("e2e_lib_init", "94 21 FF F0 7C 08 02 A6", "function"/);
+  const withTypes = await call(anon, 'export_header', { subject: `Format:E2E Track ${run}`, also: [`Library:E2E Lib ${run}`] });
+  assert.ok(/struct E2eCounter \{/.test(withTypes.header) && /struct TrackIhdr/.test(withTypes.header) && /Also: Library:E2E Lib/.test(withTypes.header), withTypes.header.slice(0, 600));
+
   // 64-bit enum values stay exact; value ranges; size_t compiles; amend fixes a sentence without resending.
   await call(a, 'add_fact', { kind: 'enum', subject: `Library:E2E Lib ${run}`, claim: 'Fictional 64-bit filter ids and a control-byte range.', scope: { level: 'library', applies_to: 'all versions' },
     data: { name: 'E2eFilter', values: { '0x4000000000000001': 'E2E_FILTER_A', '0x4000000000000002': 'E2E_FILTER_B', '0x80-0x9F': 'E2E_CHUNK_RUN' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });

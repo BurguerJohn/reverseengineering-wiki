@@ -21,6 +21,7 @@ test('prototypes become declarations that name the function', async () => {
   assert.equal(functionDecl('main', 'int __cdecl main(int argc, char **argv)'), 'int __cdecl main(int argc, char **argv)');
   assert.equal(functionDecl('FT_Init_FreeType', 'FT_Error FT_Init_FreeType(FT_Library *alibrary);'), 'FT_Error FT_Init_FreeType(FT_Library *alibrary)');
   assert.equal(functionDecl('f', 'Entity *(int id)'), 'Entity * f(int id)');
+  assert.equal(functionDecl('decodeSZS__9JKRDecompFPUcPUcUlUl', 'void JKRDecomp::decodeSZS(u8* src, u8* dst)'), 'void decodeSZS__9JKRDecompFPUcPUcUlUl(u8* src, u8* dst)');
   assert.equal(functionDecl('f', 'not a prototype'), null);
 });
 

@@ -19,6 +19,18 @@ test('splat and linker symbol lists', () => {
   assert.equal(r.symbols.length, 4, 'one name per address');
 });
 
+test('decomp-toolkit symbols.txt', () => {
+  const r = parseSymbolFile([
+    'decodeSZS__9JKRDecompFPUcPUcUlUl = .text:0x802BEE24; // type:function size:0xE4 scope:global',
+    'lbl_803A1234 = .data:0x803A1234; // type:object size:0x10 scope:local data:string',
+    '__OSCurrHeap = .sdata:0x803F8C20; // type:object size:0x4 scope:global',
+  ].join('\n'));
+  assert.equal(r.format, 'linker');
+  assert.deepEqual(r.symbols[0], { va: '0x802BEE24', name: 'decodeSZS__9JKRDecompFPUcPUcUlUl', kind: 'function', size: 0xE4 });
+  assert.equal(r.symbols[1].kind, 'global');
+  assert.equal(r.symbols.length, 3);
+});
+
 test('nm output and address/name pairs', () => {
   const nm = parseSymbolFile('0000000000401136 0000000000000020 T main\n0000000000404028 B g_count\n                 U puts\n');
   assert.equal(nm.format, 'nm');

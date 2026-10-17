@@ -3,7 +3,7 @@
  * "name = 0x...;" lists, nm output, address/name pairs) read from the repository at a pinned
  * commit and added to a build's symbol map, 5,000 names per write.
  */
-import { MAX_SYMBOLS_PER_CALL } from '../wiki/pages.ts';
+import { MAX_SYMBOLS_PER_CALL, symbolInputSchema } from '../wiki/pages.ts';
 import { parseRepoUrl, resolveRepo, SPDX_EXPRESSION } from './repos.ts';
 import { addSymbols, recordSymbolImport } from './write.ts';
 import { ToolError, quotaError, requireWriter, type Caller, type Services } from './context.ts';
@@ -32,12 +32,13 @@ function parseLine(line: string, format: SymbolFileFormat): ParsedSymbol | null 
   const text = line.trim();
   if (!text || /^(?:#|\/\/|;)/.test(text)) return null;
   if (format === 'linker') {
-    // "func_80012345 = 0x80012345; // type:func size:0x40"
-    const m = new RegExp(String.raw`^(${NAME})\s*=\s*(0x[0-9A-Fa-f]+|\d+)\s*;?\s*(?://(.*))?$`).exec(text);
+    // "func_80012345 = 0x80012345; // type:func size:0x40" (splat), "name = .text:0x802BEE24; // type:function size:0xE4" (decomp-toolkit)
+    const m = new RegExp(String.raw`^(${NAME})\s*=\s*(?:\.?[\w.]+:)?(0x[0-9A-Fa-f]+|\d+)\s*;?\s*(?://(.*))?$`).exec(text);
     if (!m) return null;
     const attrs = Object.fromEntries([...(m[3] ?? '').matchAll(/(\w+):(\S+)/g)].map((a) => [a[1].toLowerCase(), a[2]]));
     const t = (attrs.type ?? '').toLowerCase();
     const kind = t === 'func' || t === 'function' ? 'function' : t === 'label' || t === 'jtbl' ? 'label' : t ? 'global' : /^(?:func_|fn_|sub_)/i.test(m[1]) ? 'function' : 'label';
+    // decomp-toolkit writes "type:object" for data; its size is the object's.
     const size = attrs.size ? Number(attrs.size) : undefined;
     return { va: hex(Number(m[2])), name: m[1], kind, ...(size && Number.isFinite(size) && size > 0 ? { size } : {}), ...(SPLAT_TYPES[t] ? { type: SPLAT_TYPES[t] } : {}) };
   }
@@ -102,13 +103,17 @@ export async function importSymbols(s: Services, caller: Caller, args: {
   const text = await response.text();
   if (text.length > MAX_FILE_BYTES) throw new ToolError('BAD_REQUEST', `${path} is larger than ${MAX_FILE_BYTES / 1024 / 1024} MB.`);
   const parsed = parseSymbolFile(text, args.format ?? 'auto');
-  if (!parsed.symbols.length) throw new ToolError('BAD_REQUEST', `No symbols read from ${path} (formats: linker "name = 0x80012345; // type:func size:0x40", nm "00401136 T main", pairs "0x80012345 name").`);
+  if (!parsed.symbols.length) throw new ToolError('BAD_REQUEST', `No symbols read from ${path} (formats: linker and splat "name = 0x80012345; // type:func size:0x40", decomp-toolkit "name = .text:0x80012345; // type:function size:0x40", nm "00401136 T main", pairs "0x80012345 name").`);
   if (parsed.symbols.length > MAX_IMPORT) throw new ToolError('BAD_REQUEST', `${parsed.symbols.length} symbols: at most ${MAX_IMPORT} per import. Split the file, or import its parts by path.`);
 
   // Each 5,000 names is a write: refused whole before anything is written when the hour's quota is short.
   const op = requireWriter(s, caller);
   const writes = Math.ceil(parsed.symbols.length / MAX_SYMBOLS_PER_CALL);
   if (!op.dryRun && writes > remainingWrites(s.db, op)) throw quotaError(s, op, writes);
+  // Names a symbol map cannot hold (".L_local", quoted operators): skipped and counted, not a failed import.
+  const valid = parsed.symbols.filter((x) => symbolInputSchema.shape.name.safeParse(x.name).success);
+  const skippedNames = parsed.symbols.length - valid.length;
+  parsed.symbols = valid;
   const confidence = args.confidence ?? 'medium';
   const results: Array<Record<string, unknown>> = [];
   for (let i = 0; i < parsed.symbols.length; i += MAX_SYMBOLS_PER_CALL) {
@@ -121,7 +126,7 @@ export async function importSymbols(s: Services, caller: Caller, args: {
   return {
     build: args.build, repository: { url: info.url, commit: info.commit, path, license },
     license_note: unlicensed && !args.license ? 'The repository states no license: only names, addresses, sizes and data types were imported, never code or comments; the build page records the source.' : undefined,
-    format: parsed.format, read: parsed.symbols.length, unread_lines: parsed.unread || undefined, writes: results.length, results,
+    format: parsed.format, read: parsed.symbols.length, unread_lines: parsed.unread || undefined, skipped_names: skippedNames || undefined, writes: results.length, results,
     next: `link_repo url="${info.url}" commit="${info.commit}" on the build's software page, so readers find where the names come from.`,
   };
 }

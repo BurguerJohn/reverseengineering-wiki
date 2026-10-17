@@ -175,11 +175,13 @@ function cleanTitle(raw: string, allowed: readonly PageType[]): string {
   }
 }
 
-export function exportHeader(s: Services, args: { subject: string; build?: string; abi?: string }) {
+export function exportHeader(s: Services, args: { subject: string; build?: string; abi?: string; also?: string[] }) {
   sIndex = s.index;
   const subject = s.index.resolveRedirect(cleanTitle(args.subject, SUBJECT_TYPES));
   const build = args.build ? normalizeTitle(args.build) : null;
-  const all = s.index.factsForSubject(subject, ['struct', 'enum', 'vtable', 'typedef'])
+  const also = [...new Set((args.also ?? []).map((x) => s.index.resolveRedirect(cleanTitle(x, SUBJECT_TYPES))))].filter((x) => x !== subject);
+  for (const x of also) if (!s.index.page(x)) throw new ToolError('NOT_FOUND', `"${x}" (in also) does not exist.`);
+  const all = [...also, subject].flatMap((x) => s.index.factsForSubject(x, ['struct', 'enum', 'vtable', 'typedef']))
     .filter((f) => !build || f.level !== 'build' || f.applies_to === build)
     .filter((f) => f.status !== 'rejected');
   const warnings: string[] = [];
@@ -199,7 +201,7 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
   // A format's byte order (its infobox): fields are stored that way, whatever the machine reading them.
   let endianness = '';
   try { endianness = String(JSON.parse(s.index.page(subject)?.json ?? '{}').infobox?.endianness ?? '').trim(); } catch { /* no infobox */ }
-  const lines = [`/* ${HEADER_NOTE}`, ` * Subject: ${comment(subject)}${build ? `\n * Build: ${comment(build)}` : ''}${wanted ? `\n * ABI: ${comment(wanted)}` : abis.length ? `\n * ABIs with their own layouts: ${abis.map(comment).join(', ')} (pass abi)` : ''}`,
+  const lines = [`/* ${HEADER_NOTE}`, ` * Subject: ${comment(subject)}${also.length ? `\n * Also: ${also.map(comment).join(', ')}` : ''}${build ? `\n * Build: ${comment(build)}` : ''}${wanted ? `\n * ABI: ${comment(wanted)}` : abis.length ? `\n * ABIs with their own layouts: ${abis.map(comment).join(', ')} (pass abi)` : ''}`,
     ...(endianness ? [` * Byte order of the format: ${comment(endianness)}${/big/i.test(endianness) ? ' (swap multi-byte fields on little-endian machines)' : ''}`] : []),
     ` * Generated: ${new Date().toISOString()} */`, '#pragma once', '#include <stddef.h>', '#include <stdint.h>', ''];
   const skipped: string[] = [];
@@ -490,7 +492,8 @@ function signaturesOf(s: Services, subject: string): Signature[] {
     const raw = d.signature_offset ?? (f.kind === 'signature' ? d.offset : undefined);
     const offset = typeof raw === 'string' && /^-/.test(raw.trim()) ? -(hexNum(raw.trim().slice(1)) ?? 0) : hexNum(raw) ?? 0;
     const matchesName = f.kind === 'signature' && typeof d.matches === 'string' && /^[A-Za-z_][\w:]*$/.test(d.matches.trim()) ? d.matches.trim() : undefined;
-    sigs.push({ name: qualifiedName(d.name ?? d.class ?? matchesName ?? f.title.split('/').pop(), `rewiki_${f.kind}`), pattern: pattern.trim().toUpperCase().replace(/\?\??/g, '??'), kind: f.kind, status: f.status, fact: f.title, prototype: typeof d.prototype === 'string' ? d.prototype : undefined, offset, multiple: d.multiple === true });
+    const kind = f.kind === 'signature' && d.target === 'function' ? 'function' : f.kind === 'signature' && d.target === 'data' ? 'global' : f.kind;
+    sigs.push({ name: qualifiedName(d.name ?? d.class ?? matchesName ?? f.title.split('/').pop(), `rewiki_${f.kind}`), pattern: pattern.trim().toUpperCase().replace(/\?\??/g, '??'), kind, status: f.status, fact: f.title, prototype: typeof d.prototype === 'string' ? d.prototype : undefined, offset, multiple: d.multiple === true });
   }
   return sigs;
 }
@@ -604,8 +607,8 @@ export function functionDecl(name: string, prototype: string): string | null {
   const cname = ident(name.replace(/::/g, '__'), 'func');
   const words = m[1].trim().split(/\s+/);
   const last = words[words.length - 1].replace(/^\*+/, '');
-  // "int main" names it already; "void __fastcall" or "Player *" does not.
-  const head = words.length > 1 && /^[A-Za-z_]\w*$/.test(last) && !CALLING_CONVENTION.test(last) && !TYPE_WORD.test(last)
+  // "int main" or "void Foo::Bar" names it already; "void __fastcall" or "Player *" does not.
+  const head = words.length > 1 && /^[A-Za-z_~][\w~]*(?:::[A-Za-z_~][\w~<>]*)*$/.test(last) && !CALLING_CONVENTION.test(last) && !TYPE_WORD.test(last)
     ? `${m[1].trim().slice(0, m[1].trim().length - last.length)}${cname}`
     : `${m[1].trim()} ${cname}`;
   return `${head}(${m[2].trim()})`;

@@ -150,7 +150,7 @@ export const FACT_DATA: Record<FactKind, { required: string[]; one_of?: string[]
   typedef: { required: ['name', 'type'], optional: ['abi'], example: { name: 'FT_Long', type: 'int32_t', abi: 'win64' } },
   magic: { required: ['bytes', 'offset', 'meaning'], optional: ['mask', 'relative_to'], example: { bytes: '52 41 42 00', offset: '0x0', meaning: 'RAB archive header' } },
   string: { required: ['value', 'meaning'], optional: ['encoding', 'rva', 'address'], example: { value: 'EDF5_SAVE', meaning: 'Save file tag', encoding: 'ascii' } },
-  signature: { required: ['pattern', 'matches'], optional: ['name', 'offset', 'multiple'], example: { pattern: '48 8B 05 ?? ?? ?? ?? 48 85 C0', matches: 'load of g_GameState' } },
+  signature: { required: ['pattern', 'matches'], optional: ['name', 'offset', 'multiple', 'target'], example: { pattern: '48 8B 05 ?? ?? ?? ?? 48 85 C0', matches: 'load of g_GameState' } },
   identification: { required: ['method', 'indicator'], optional: ['table'], example: { method: 'string', indicator: 'CRI Middleware' } },
   behavior: { required: [], optional: ['trigger', 'effect', 'condition', 'rva', 'rva_end', 'address', 'signature', 'function', 'setting'], example: { trigger: 'the Witch is shot by another survivor', effect: 'she switches target after a 5 s timer', function: 'Witch::OnTakeDamage', rva: '0x2A41C0', rva_end: '0x2A4230', setting: { name: 'z_witch_retarget_time', default: '5' } } },
 };
@@ -220,7 +220,7 @@ export function checkFactData(kind: FactKind, data: Record<string, unknown>): st
         if (ranged) problems.push('data.size "variable" and data.size_min/size_max are alternatives: give one of them');
       } else if (data.size !== undefined) {
         if (sizeValue(data.size) === null) problems.push('data.size must be a number or hex string (136 or "0x88"), or "variable" for records whose length depends on a count field; if the exact size is unknown, leave size out and give both size_min and size_max');
-        if (ranged) problems.push('give either data.size or data.size_min + data.size_max, not both');
+        if (ranged) problems.push('data.size is the exact size; size_min/size_max are for a size not known exactly: give one or the other, not both');
       } else if (!ranged) {
         problems.push('data.size is required for kind "struct" (if it is not known exactly: data.size_min and data.size_max)');
       } else {
