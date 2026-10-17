@@ -20,13 +20,13 @@ import { FACT_KINDS, FACT_DATA, CODE_KINDS, SYMBOL_KINDS, SYMBOL_SOURCES, MAX_SY
 
 /** "function: name, rva|address|signature (one at least), [prototype, …]" for every fact kind. */
 const FACT_DATA_SUMMARY = Object.entries(FACT_DATA).map(([kind, f]) => `${kind}: ${[...f.required, ...(f.one_of ? [`${f.one_of.join('|')} (at least one)`] : [])].join(', ') || '(free)'}${f.optional.length ? `, optional ${f.optional.join(', ')}` : ''}`).join('; ');
-import { SUBJECT_TYPES } from '../wiki/titles.ts';
+import { SUBJECT_TYPES, normalizeTitle } from '../wiki/titles.ts';
 import { DUMP_KINDS } from '../dumps.ts';
 import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.ts';
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.2';
+export const VERSION = '0.8.3';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -69,7 +69,7 @@ const evidenceItem = z.object({
   repo: z.string().optional().describe('For type source: the repository URL'),
   commit: z.string().optional().describe('The commit it was read at'),
   path: z.string().optional().describe('File path in the repository, e.g. "WinQuake/bspfile.h"'),
-  lines: z.string().optional().describe('Line or range, e.g. "120-148"'),
+  lines: z.string().optional().describe('Lines or ranges, e.g. "120-148" or "26-34, 98-101"'),
 });
 
 const DRY_RUN = z.boolean().optional().describe('Check everything (titles, schema, duplicates, policy, conflicts) and report what would happen, without publishing or using quota');
@@ -200,12 +200,13 @@ function compactPreview(out: Record<string, unknown>): Record<string, unknown> {
     return { ...p, content: take(p.content), diff: take(p.diff) };
   });
   // Exact titles first (code pages, facts, aliases), before any preview is cut.
-  const pages = [...new Map(previews.map((p) => [p.title, p.action])).entries()].map(([title, action]) => ({ title, action }));
+  const stored = (t: string) => { try { return normalizeTitle(t); } catch { return t; } };
+  const pages = [...new Map(previews.map((p) => [stored(p.title), p.action])).entries()].map(([title, action]) => ({ title, action }));
   return {
     ...out,
     pages,
     preview: kept,
-    aliases_previewed: redirects.length ? redirects.map((p) => p.title) : undefined,
+    aliases_previewed: redirects.length ? [...new Set(redirects.map((p) => stored(p.title)))] : undefined,
     preview_truncated: cut || undefined,
   };
 }
@@ -477,7 +478,8 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     description: 'Change one section (Markdown): the whole new body, or small changes with replace (each old text must occur exactly once in the section as read returns it), which is safer for fixing a sentence. Pass the revision you read as base_revision (revision ids count edits of the whole wiki). Removing >30% needs a reason. Missing sections are created. The answer shows the diff of the section. Link a section as [[Page#Section]]. Unverified claims are welcome when marked as such ("Unverified:") with how to test them. When a section grows past ~1500 words the answer suggests split_section.',
     inputSchema: { dry_run: DRY_RUN,
       title: z.string(),
-      section: z.string().describe('Heading, or "Summary" for the lead'),
+      section: z.string().describe('Heading, "Summary" for the lead, or "Infobox" with infobox'),
+      infobox: z.record(z.string(), z.string()).optional().describe('With section "Infobox": fields to set (an empty string removes one); the others stay'),
       body: z.string().optional().describe('New section body in Markdown (without the heading); or use replace'),
       replace: z.array(z.object({ old: z.string().min(1), new: z.string() })).min(1).max(20).optional()
         .describe("Small changes instead of body: each old text must occur exactly once in the section's Markdown (as read returns it)"),

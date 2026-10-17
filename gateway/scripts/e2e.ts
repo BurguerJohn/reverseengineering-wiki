@@ -864,6 +864,36 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const sub = await call(anon, 'identify', { patterns: ['E0 46 3E 28 3D 20 FD C9'] });
   assert.equal(sub.candidates[0]?.subject, `Platform:${consoleName}`, JSON.stringify(sub.candidates));
 
+  // Typed hardware blocks, enum constants that collide, a leading-digit name, "_start" keys, lower bounds, line lists, the infobox.
+  await call(a, 'batch', { operations: [
+    { tool: 'add_fact', arguments: { kind: 'struct', subject: `Platform:${consoleName}`, claim: 'The fictional video unit has two registers.', scope: { level: 'platform', applies_to: 'all models' },
+      data: { name: 'vi_regs', size_min: 8, fields: [{ offset: '0x0', size: 4, type: 'uint32_t', name: 'control' }, { offset: '0x4', size: 4, type: 'uint32_t', name: 'origin' }] },
+      evidence: [{ type: 'source', detail: 'fictional SDK header', repo: 'https://github.com/example/sdk', path: 'include/vi.h', lines: '26-34, 98-101' }], confidence: 'low' } },
+    { tool: 'add_fact', arguments: { kind: 'global', subject: `Platform:${consoleName}`, claim: 'The fictional video unit registers start at 0xA4400000.', scope: { level: 'platform', applies_to: 'all models' },
+      data: { name: 'VI_REGS', type: 'vi_regs', address: { kind: 'hardware', value: '0xA4400000' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' } },
+    { tool: 'add_fact', arguments: { kind: 'enum', subject: `Platform:${consoleName}`, claim: 'The fictional accessories enum.', scope: { level: 'platform', applies_to: 'all models' },
+      data: { name: 'Accessory', values: { 0: 'NONE', 1: '64GB_LINK_CABLE' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' } },
+    { tool: 'add_fact', arguments: { kind: 'enum', subject: `Platform:${consoleName}`, claim: 'The fictional save types enum.', scope: { level: 'platform', applies_to: 'all models' },
+      data: { name: 'SaveType', values: { 0: 'NONE', 1: 'EEPROM' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' } },
+    { tool: 'add_fact', arguments: { kind: 'behavior', subject: `Platform:${consoleName}`, key: 'Boot termination', claim: 'Writing 0x10 here ends the fictional boot ROM.', scope: { level: 'platform', applies_to: 'all models' },
+      data: { effect: 'ends the boot ROM', address: { kind: 'hardware', value: '0xBFC007FC' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' } },
+  ] });
+  const hw = (await call(anon, 'export_header', { subject: `Platform:${consoleName}` })).header;
+  assert.match(hw, /#define VI_REGS \(\(volatile vi_regs \*\)0xA4400000\)/, hw);
+  assert.match(hw, /_64GB_LINK_CABLE = 0x1/);
+  assert.match(hw, /\n {4}NONE = 0x0,/);
+  assert.match(hw, /\n {4}SaveType_NONE = 0x0,/);
+  const hwScript = (await call(anon, 'export_symbols', { platform: `Platform:${consoleName}`, tool: 'ghidra' })).script;
+  assert.match(hwScript, /"Boot termination"|"Boot_termination"/, hwScript.slice(0, 1200));
+  assert.match(hwScript, /getMemory\(\)\.getBlock\(addr\) is None/);
+  const start = await call(a, 'add_fact', { kind: 'function', subject: `Platform:${consoleName}`, claim: 'The fictional entry point.', scope: { level: 'platform', applies_to: 'all models' },
+    data: { name: '_start', signature: '3C 1D 80 00 27 BD ?? ??' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low', dry_run: true });
+  assert.match(start.title, /\/function\/start$/, start.title);
+  const consoleRead = await call(anon, 'read', { title: `Platform:${consoleName}` });
+  const ib = await call(a, 'edit_section', { title: `Platform:${consoleName}`, section: 'Infobox', infobox: { vendor: 'Fictional Corp', release: '1996' }, base_revision: consoleRead.revision, summary: 'Set vendor and release' });
+  assert.equal(ib.infobox?.vendor, 'Fictional Corp', JSON.stringify(ib).slice(0, 300));
+  assert.equal((await call(anon, 'read', { title: `Platform:${consoleName}` })).infobox?.release, '1996');
+
   // A dry run hands back a check_id: publish_checked publishes exactly that, once.
   const checkedNote = await call(a, 'add_note', { subject: cave, key: 'Checked once', body: 'Published by check_id without resending the arguments.', confidence: 'low', dry_run: true });
   assert.ok(checkedNote.check_id, JSON.stringify(checkedNote).slice(0, 200));

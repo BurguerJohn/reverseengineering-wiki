@@ -91,7 +91,7 @@ export const evidenceSchema = z.object({
   repo: z.string().max(300).optional(),
   commit: z.string().regex(/^[0-9a-fA-F]{7,40}$/).optional(),
   path: z.string().max(300).optional(),
-  lines: z.string().regex(/^\d+(?:-\d+)?$/).optional(),
+  lines: z.string().regex(/^\d+(?:-\d+)?(?:\s*,\s*\d+(?:-\d+)?)*$/).optional(),
 });
 
 export const verificationSchema = z.object({
@@ -206,9 +206,10 @@ export function checkFactData(kind: FactKind, data: Record<string, unknown>): st
       } else if (!ranged) {
         problems.push('data.size is required for kind "struct" (if it is not known exactly: data.size_min and data.size_max)');
       } else {
-        const lo = sizeValue(data.size_min);
-        const hi = sizeValue(data.size_max);
-        if (lo === null || hi === null) problems.push('give both data.size_min and data.size_max as numbers or hex strings (an upper bound you are sure of is fine), or data.size "variable"');
+        // size_min alone: "at least"; size_max alone: "at most".
+        const lo = data.size_min === undefined ? 0 : sizeValue(data.size_min);
+        const hi = data.size_max === undefined ? Infinity : sizeValue(data.size_max);
+        if (lo === null || hi === null) problems.push('data.size_min and data.size_max must be numbers or hex strings (136 or "0x88")');
         else if (lo > hi) problems.push('data.size_min must not exceed data.size_max');
       }
       break;

@@ -72,6 +72,8 @@ const BUILTIN = /^(?:const\s+)?(?:unsigned\s+|signed\s+)?(?:u?int(?:8|16|32|64)_
 function fieldName(raw: unknown): { name: string; rest?: string } {
   const text = String(raw ?? '').trim();
   if (/^[A-Za-z_]\w*$/.test(text)) return { name: text };
+  // "64GB_LINK_CABLE": an identifier but for the leading digit; keep it whole.
+  if (/^\d\w*$/.test(text)) return { name: `_${text}` };
   const first = /[A-Za-z_]\w*/.exec(text)?.[0] ?? '';
   return { name: ident(first, ''), rest: text };
 }
@@ -140,6 +142,7 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
   };
   const defined = new Set(facts.map(typeName));
   const forward = new Set<string>();
+  const enumConstants = new Set<string>();
   // Every struct is declared first, so pointers between them work in any order.
   const declared = facts.filter((f) => f.kind !== 'enum').map(typeName).filter(Boolean);
   if (declared.length) lines.push(...declared.map((t) => `typedef struct ${t} ${t};`), '');
@@ -204,7 +207,12 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
         // "MF_SPECIAL (multiplayer only)": the identifier, and the rest as a comment.
         const named = fieldName(v.name);
         const literal = v.value === null ? '' : v.value < 0 ? ` = ${v.value}` : ` = 0x${v.value.toString(16).toUpperCase()}`;
-        lines.push(`    ${ident(named.name, 'VALUE')}${literal},${named.rest ? ` /* ${comment(named.rest)} */` : ''}`);
+        // Enum constants share one C namespace: a name already used (NONE, UNKNOWN) gets the enum's name in front.
+        let id = ident(named.name, 'VALUE');
+        if (enumConstants.has(id)) id = ident(`${name}_${id}`, 'VALUE');
+        for (let n = 2; enumConstants.has(id); n++) id = `${ident(`${name}_${named.name}`, 'VALUE')}_${n}`;
+        enumConstants.add(id);
+        lines.push(`    ${id}${literal},${named.rest ? ` /* ${comment(named.rest)} */` : ''}`);
       }
       lines.push(`} ${name};`, '');
     } else if (f.kind === 'vtable') {
@@ -222,11 +230,20 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
   const hardware = s.index.factsForSubject(subject).filter((f) => f.status !== 'rejected').flatMap((f) => {
     const d = JSON.parse(f.data);
     const address = d.address?.kind === 'hardware' ? hexNum(d.address.value) : null;
-    return address === null ? [] : [{ name: ident(d.name, ''), address, status: f.status, title: f.title }];
+    return address === null ? [] : [{ name: ident(d.name, ''), address, status: f.status, title: f.title, type: cType(d.type) }];
   }).filter((h) => h.name).sort((a, b) => a.address - b.address);
   if (hardware.length) {
     lines.push('/* Hardware addresses (the same in every program on this platform) */');
-    for (const h of hardware) lines.push(`#define ${h.name} 0x${h.address.toString(16).toUpperCase()} /* [${h.status}] ${comment(h.title)} */`);
+    for (const h of hardware) {
+      const hex = `0x${h.address.toString(16).toUpperCase()}`;
+      // A register block typed by a struct defined above: a pointer to it (VI_REGS->origin).
+      // Single registers stay plain addresses, as hardware headers usually give them.
+      const base = h.type && !h.type.includes('*') ? baseType(h.type) : undefined;
+      const typed = h.type && base && !BUILTIN.test(h.type) && defined.has(base);
+      lines.push(typed
+        ? `#define ${h.name} ((volatile ${h.type} *)${hex}) /* [${h.status}] ${comment(h.title)} */`
+        : `#define ${h.name} ${hex} /* [${h.status}] ${comment(h.title)}${h.type ? `; type ${comment(h.type)}` : ''} */`);
+    }
     lines.push('');
   }
   if (!facts.length && !hardware.length) lines.push('/* No struct, enum or vtable facts for this subject yet. Add them with add_fact. */');
@@ -247,7 +264,7 @@ function exportPlatformSymbols(s: Services, args: { platform: string; tool: Symb
     const data = JSON.parse(f.data);
     if (data.address?.kind !== 'hardware') continue;
     const address = hexNum(data.address.value);
-    if (address !== null) symbols.push({ address, name: qualifiedName(data.name ?? data.class, `rewiki_${f.kind}`), kind: f.kind, status: f.status, fact: f.title });
+    if (address !== null) symbols.push({ address, name: qualifiedName(data.name ?? data.class ?? f.title.split('/').pop()?.trim(), `rewiki_${f.kind}`), kind: f.kind, status: f.status, fact: f.title });
   }
   symbols.sort((a, b) => a.address - b.address);
   const ascii = (x: string) => JSON.stringify(x.replace(/[^\x20-\x7e]/g, '?'));
@@ -264,24 +281,38 @@ SYMBOLS = [
 ${pyList}
 ]
 
+applied, unmapped = 0, []
 for address, name, kind, status, fact in SYMBOLS:
     addr = toAddr(address)
+    if currentProgram.getMemory().getBlock(addr) is None:
+        unmapped.append("0x%x %s" % (address, name))
+        continue
     createLabel(addr, name, True, SourceType.USER_DEFINED)
     setEOLComment(addr, "ReverseEngineering.wiki [%s] %s" % (status, fact))
-print("ReverseEngineering.wiki: applied %d hardware names" % len(SYMBOLS))
+    applied += 1
+print("ReverseEngineering.wiki: applied %d hardware names" % applied)
+if unmapped:
+    print("No memory block at %d addresses (add one, e.g. uninitialized, to name them): %s" % (len(unmapped), ", ".join(unmapped)))
 `;
   } else {
     script = `${head}# Run in IDA via File > Script file (IDAPython). Absolute addresses.
-import idc, ida_name
+import idc, ida_name, ida_bytes
 
 SYMBOLS = [
 ${pyList}
 ]
 
+applied, unmapped = 0, []
 for ea, name, kind, status, fact in SYMBOLS:
+    if not ida_bytes.is_mapped(ea):
+        unmapped.append("0x%x %s" % (ea, name))
+        continue
     ida_name.set_name(ea, name, ida_name.SN_NOWARN | ida_name.SN_NOCHECK | ida_name.SN_FORCE)
     idc.set_cmt(ea, "ReverseEngineering.wiki [%s] %s" % (status, fact), 1)
-print("ReverseEngineering.wiki: applied %d hardware names" % len(SYMBOLS))
+    applied += 1
+print("ReverseEngineering.wiki: applied %d hardware names" % applied)
+if unmapped:
+    print("No segment at %d addresses (add one to name them): %s" % (len(unmapped), ", ".join(unmapped)))
 `;
   }
   return {

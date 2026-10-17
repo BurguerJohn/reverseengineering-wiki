@@ -615,7 +615,9 @@ export class SearchIndex {
     const order = ['software', 'library', 'format', 'platform', 'technique', 'tool'];
     const seen = new Set<string>();
     const out: Array<{ title: string; type: string; summary: string }> = [];
+    const short = words.filter((w) => w.length <= 4).map((w) => new RegExp(`(?:^|[^\\p{L}\\p{N}])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'iu'));
     for (const r of rows) {
+      if (short.some((re) => !re.test(r.title.slice(r.title.indexOf(':') + 1)))) continue;
       const page = this.page(r.title);
       if (!page || seen.has(r.title)) continue;
       seen.add(r.title);

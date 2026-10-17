@@ -14,6 +14,7 @@ import {
 } from '../wiki/titles.ts';
 import {
   parseSections, findSection, replaceSectionBody, insertSection, joinSections, sectionBlock, wikitextToMarkdown, headingKey, type Section,
+  splitInfobox, parseInfobox, INFOBOX_FIELDS,
 } from '../wiki/wikitext.ts';
 import {
   buildArticle, redirectText, factInputSchema, checkFactData, unknownFactFields, FACT_DATA, factKey, buildInputSchema, buildTitle,
@@ -209,7 +210,8 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   assertClean(scanValue(fact, 'fact'));
 
   const buildSuffix = fact.scope.level === 'build' ? ` @ ${titleSegment(baseName(fact.scope.applies_to).split('/').slice(1).join(' '), 60)}` : '';
-  const t = normalizeTitle(`Fact:${baseName(fact.subject)}/${fact.kind}/${titleSegment(factKey(fact))}${buildSuffix}`);
+  const key = factKey(fact);
+  const t = normalizeTitle(`Fact:${baseName(fact.subject)}/${fact.kind}/${titleSegment(key.replace(/^_+|_+$/g, '')) || titleSegment(key)}${buildSuffix}`);
   const existing = await currentPage(s, t);
   if (existing) {
     let doc: Partial<FactDoc> = {};
@@ -347,9 +349,11 @@ export async function verify(s: Services, caller: Caller, args: { target: string
 
 export async function editSection(s: Services, caller: Caller, args: {
   title: string; section: string; body?: string; replace?: Array<{ old: string; new: string }>; base_revision: number; summary: string; reason?: string; create_if_missing?: boolean;
+  infobox?: Record<string, string>;
 }) {
   const op = requireWriter(s, caller);
   const t = title(s, args.title, [...SUBJECTS, 'notes']);
+  if (args.infobox || /^infobox$/i.test(args.section.trim())) return editInfobox(s, op, t, args);
   if ((args.body === undefined) === (args.replace === undefined)) {
     throw new ToolError('BAD_REQUEST', 'Give either body (the whole new section) or replace (small changes: [{old, new}]), not both.');
   }
@@ -419,6 +423,40 @@ export async function editSection(s: Services, caller: Caller, args: {
       ? `This section now has ${words} words. Move it to a topic subpage with split_section (title="${t}", section="${heading}"), which leaves a short summary and a link here.`
       : undefined,
   });
+}
+
+/** Sets or removes infobox fields; the other fields keep their text exactly. */
+async function editInfobox(s: Services, op: Writer, t: string, args: { infobox?: Record<string, string>; body?: string; replace?: unknown; base_revision: number; summary: string }) {
+  if (!args.infobox || args.body !== undefined || args.replace !== undefined) {
+    throw new ToolError('BAD_REQUEST', 'To change the infobox, send section "Infobox" with infobox: {field: "new value"} (an empty string removes a field), without body or replace.');
+  }
+  const page = await currentPage(s, t);
+  if (!page) throw new ToolError('NOT_FOUND', `"${t}" does not exist.`);
+  if (page.revid !== args.base_revision) throw new ToolError('EDIT_CONFLICT', `The page changed since revision ${args.base_revision}. Re-read it and resend.`, { current_revision: page.revid });
+  const sections = parseSections(page.content);
+  const { infobox, rest } = splitInfobox(sections[0]?.text ?? '');
+  if (!infobox) throw new ToolError('BAD_REQUEST', `${t} has no infobox (topic subpages have none: it lives on the subject page).`);
+  const changes = Object.entries(args.infobox).map(([k, v]) => [k.toLowerCase().replace(/\s+/g, '_'), String(v)] as const);
+  const bad = changes.filter(([k]) => k === 'type' || !/^[a-z_]{1,30}$/.test(k)).map(([k]) => k);
+  if (bad.length) throw new ToolError('BAD_REQUEST', `Infobox fields that cannot be set: ${bad.join(', ')}. Known fields: ${INFOBOX_FIELDS.filter((f) => f !== 'type').join(', ')}.`);
+  assertClean([...scanValue(Object.fromEntries(changes), 'summary'), ...scanText(args.summary, 'summary')]);
+  const fields = parseInfobox(page.content);
+  const lines = ['{{Infobox', `| type = ${fields.type ?? NAMESPACES[typeOfTitle(t) as SubjectType]?.name ?? ''}`];
+  const changed = new Map(changes);
+  for (const [k, v] of Object.entries(fields)) {
+    if (k === 'type') continue;
+    if (!changed.has(k)) lines.push(`| ${k} = ${v}`);
+    else if (changed.get(k)!.trim()) lines.push(`| ${k} = ${changed.get(k)!.replace(/\|/g, '{{!}}').replace(/\n/g, ' ').trim()}`);
+  }
+  for (const [k, v] of changes) if (!(k in fields) && v.trim()) lines.push(`| ${k} = ${v.replace(/\|/g, '{{!}}').replace(/\n/g, ' ').trim()}`);
+  lines.push('}}');
+  const lead = `${lines.join('\n')}\n${rest}`;
+  const r = await mwEdit(s, op, {
+    title: t, text: joinSections(sections.map((x, i) => (i === 0 ? { ...x, text: lead, body: lead } : x))), baserevid: page.revid, nocreate: true,
+    summary: `/* Infobox */ ${shortSummary(args.summary, 150)}`,
+  });
+  await afterWrite(s, op, [t]);
+  return result(s, t, r.newrevid, { section: 'Infobox', nochange: r.nochange || undefined, infobox: parseInfobox(`${lead}\n`) });
 }
 
 const STANDARD_SECTIONS = new Set([...LEADING_SECTIONS, ...TRAILING_SECTIONS, 'Topics'].map(headingKey));
@@ -870,7 +908,8 @@ export async function linkRepo(s: Services, caller: Caller, args: {
   return result(s, target, r.newrevid, {
     listed_on: pages.length > 1 ? pages.map((p) => p.target) : undefined,
     repository: info, warnings: [info.license === 'none' ? 'Repository has no license; agents cannot legally reuse it.' : null,
-      info.binaryReleaseAssets ? 'Release contains binaries; they are flagged, not linked.' : null].filter(Boolean),
+      info.binaryReleaseAssets ? 'Release contains binaries; they are flagged, not linked.' : null,
+      info.archived ? `The repository is archived (read-only${info.lastCommit ? `, last activity ${info.lastCommit.slice(0, 10)}` : ''}): its successor, if any, may be worth linking too.` : null].filter(Boolean),
   });
 }
 
