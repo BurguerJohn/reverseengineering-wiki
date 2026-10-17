@@ -166,3 +166,9 @@ Decisions taken during the loop are listed per round, with the reason, so the ow
 - Fixed for round 23 (0.8.21): 64-bit enum values stay exact in export_header (0x4000000000000001 became 0x4000000000000000 through a double: values are BigInt now); enum values may be ranges ("0x80-0x9F": the constant is the first value, the range in its comment) and the enum warning no longer takes a range for a name; "Spec 2.1.1.2", "RFC 1952 2.3.1.1", ISO/ECMA sections are not IP addresses; publish_checked takes amend {"3": [{old, new}]} (a line of an 18 KB code file was fixed by resending the whole operation); headers include <stddef.h> for size_t. Also fixed: the wasm-names unit test failed the type check (WebAssembly types).
 - Prompt: the agent called functions of an installed DLL through ctypes and kept files outside its round folder; the prompt now forbids loading installed libraries into a process and asks for every file inside the round folder.
 - Rejected: an "absent in build configuration" field (the claim states the condition; a missing table is not an error a script can explain).
+
+## Owner decisions (2026-10-17, after round 21)
+
+- 0.8.22: import_symbols accepts decompilation repositories without a license (most well-known decompilations state none): only names, addresses, sizes and data types are taken, never code or comments, and the build page records each import (repository, commit, path, license or "none stated", count, who, when) in symbol_imports.
+- Pages may name the installed product and version a claim was tested on (no paths, no user names).
+- Subagents keep the ban on loading installed libraries (ctypes).

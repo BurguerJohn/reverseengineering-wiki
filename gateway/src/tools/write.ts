@@ -751,6 +751,23 @@ function serializeSymbols(doc: SymbolsDoc): string {
   return `${head.slice(0, -1)},\n"symbols": [\n${lines.join(',\n')}\n]}\n`;
 }
 
+/** Records on the build page where an imported symbol file came from (one entry per repository and path). */
+export async function recordSymbolImport(s: Services, caller: Caller, rawBuild: string, entry: { repository: string; commit: string; path: string; license: string; symbols: number }) {
+  const op = requireWriter(s, caller);
+  const build = await buildRef(s, rawBuild);
+  const page = await currentPage(s, build);
+  if (!page) return;
+  let doc: BuildDoc;
+  try { doc = JSON.parse(page.content); } catch { return; }
+  const list = (doc.symbol_imports ?? []).filter((x) => !(x.repository === entry.repository && x.path === entry.path));
+  doc.symbol_imports = [...list, { ...entry, by: op.username, date: now().slice(0, 10) }];
+  await mwEdit(s, op, {
+    title: build, text: JSON.stringify(doc, null, 2), baserevid: page.revid || undefined, nocreate: true, tags: ['rewiki-symbols'],
+    summary: `Symbols imported from ${entry.repository} @ ${entry.commit.slice(0, 10)} (${entry.path})`,
+  });
+  if (!op.dryRun) await s.indexer.refresh([build]).catch(() => {});
+}
+
 export async function addSymbols(s: Services, caller: Caller, args: { build: string; symbols: unknown[]; force?: boolean }) {
   const op = requireWriter(s, caller);
   const build = await buildRef(s, args.build);

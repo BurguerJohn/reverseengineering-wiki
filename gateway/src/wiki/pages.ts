@@ -303,6 +303,8 @@ export interface BuildDoc extends BuildInput {
   identity?: 'sha256' | 'hash' | 'partial';
   created_by: string;
   created_at: string;
+  /** Symbol files imported into this build's map (import_symbols): where the names come from. */
+  symbol_imports?: Array<{ repository: string; commit: string; path: string; license: string; symbols: number; by: string; date: string }>;
 }
 
 /** "Build:Chrono Trigger/USA (SNES, cartridge)": version first, then platform and distribution. */

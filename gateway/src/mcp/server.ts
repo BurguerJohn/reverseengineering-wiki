@@ -27,7 +27,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.21';
+export const VERSION = '0.8.22';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -575,7 +575,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('import_symbols', {
     title: 'Import a decompilation symbol file',
-    description: `A licensed decompilation project's symbol file, read from its repository at a pinned commit and added to a build's symbol map (source "decompilation"; up to 50,000 names, ${MAX_SYMBOLS_PER_CALL} per write). Formats: linker lists and splat symbol_addrs.txt ("func_80012345 = 0x80012345; // type:func size:0x40"), nm output ("00401136 T main"), address/name pairs. Addresses are read as va (absolute; relative to the build's image_base when it declares one). The dry run reads the file and checks everything. The repository needs a license (declare it with license when GitHub missed it).`,
+    description: `A decompilation project's symbol file, read from its repository at a pinned commit and added to a build's symbol map (source "decompilation"; up to 50,000 names, ${MAX_SYMBOLS_PER_CALL} per write). Formats: linker lists and splat symbol_addrs.txt ("func_80012345 = 0x80012345; // type:func size:0x40"), nm output ("00401136 T main"), address/name pairs. Addresses are read as va (absolute; relative to the build's image_base when it declares one). The dry run reads the file and checks everything. Only names, addresses, sizes and data types are taken (never code or comments), so a repository without a license is accepted too; the build page records the repository, commit, path and license.`,
     inputSchema: { dry_run: DRY_RUN,
       build: z.string().describe('Build: page the names belong to (the exact binary the decompilation matches)'),
       url: z.string().describe('Repository URL (github.com, gitlab.com, codeberg.org)'),

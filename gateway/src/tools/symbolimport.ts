@@ -5,7 +5,7 @@
  */
 import { MAX_SYMBOLS_PER_CALL } from '../wiki/pages.ts';
 import { parseRepoUrl, resolveRepo, SPDX_EXPRESSION } from './repos.ts';
-import { addSymbols } from './write.ts';
+import { addSymbols, recordSymbolImport } from './write.ts';
 import { ToolError, quotaError, requireWriter, type Caller, type Services } from './context.ts';
 import { remainingWrites } from '../auth/trust.ts';
 
@@ -89,11 +89,11 @@ export async function importSymbols(s: Services, caller: Caller, args: {
   const path = args.path.trim().replace(/^\/+/, '');
   if (!path || path.split('/').some((x) => x === '..' || x === '.')) throw new ToolError('BAD_REQUEST', 'path is a file path inside the repository, e.g. "symbol_addrs.txt" or "config/us/symbols.txt".');
   const info = await resolveRepo(args.url, args.commit);
-  // Names from a decompilation are reused here: the repository needs a license (declared when GitHub missed it).
+  // Only names, addresses, sizes and data types are imported (never code or comments), so a repository
+  // without a license is accepted too; the build page records where they came from and under what license.
   const unlicensed = ['none', 'unknown', 'NOASSERTION'].includes(info.license) || info.license.startsWith('unrecognized');
-  if (unlicensed && !(args.license && SPDX_EXPRESSION.test(args.license.trim()))) {
-    throw new ToolError('POLICY_BLOCKED', `${info.url} has no license GitHub recognizes (${info.license}). If its license file or headers state one, pass license (SPDX id, e.g. "MIT"); without a license its symbol names are not imported.`, { license_hint: info.licenseHint });
-  }
+  if (args.license && !SPDX_EXPRESSION.test(args.license.trim())) throw new ToolError('BAD_REQUEST', 'license must be an SPDX id or expression, e.g. MIT.');
+  const license = !unlicensed ? info.license : args.license ? `${args.license.trim()} (declared by the contributor)` : `none stated (${info.license}): names and addresses only`;
   const response = await fetch(rawUrl(info.url, info.commit, path), { headers: { 'User-Agent': 'REWikiGateway/0.1' }, redirect: 'follow' });
   if (response.status === 404) throw new ToolError('NOT_FOUND', `${path} does not exist in ${info.url} at ${info.commit.slice(0, 10)}.`);
   if (!response.ok) throw new ToolError('UPSTREAM_ERROR', `The repository host answered ${response.status} for ${path}.`);
@@ -117,8 +117,10 @@ export async function importSymbols(s: Services, caller: Caller, args: {
     const r = await addSymbols(s, caller, { build: args.build, symbols: chunk, force: args.force });
     results.push({ from: i + 1, to: i + chunk.length, added: r.added, updated: r.updated, conflicts: r.conflicts_total, pages: Array.isArray(r.pages) ? r.pages.length : 0 });
   }
+  await recordSymbolImport(s, caller, args.build, { repository: info.url, commit: info.commit, path, license, symbols: parsed.symbols.length });
   return {
-    build: args.build, repository: { url: info.url, commit: info.commit, path, license: unlicensed ? `${args.license} (declared by the contributor)` : info.license },
+    build: args.build, repository: { url: info.url, commit: info.commit, path, license },
+    license_note: unlicensed && !args.license ? 'The repository states no license: only names, addresses, sizes and data types were imported, never code or comments; the build page records the source.' : undefined,
     format: parsed.format, read: parsed.symbols.length, unread_lines: parsed.unread || undefined, writes: results.length, results,
     next: `link_repo url="${info.url}" commit="${info.commit}" on the build's software page, so readers find where the names come from.`,
   };
