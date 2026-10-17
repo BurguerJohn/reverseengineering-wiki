@@ -176,7 +176,7 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
     if (f.kind === 'struct') {
       const name = ident(fieldName(data.name).name, 'UnnamedStruct');
       const size = hexNum(data.size);
-      const fields = (Array.isArray(data.fields) ? data.fields : [])
+      const allFields = (Array.isArray(data.fields) ? data.fields : [])
         .map((x: any) => {
           const named = fieldName(x.name);
           // "uint32_be[4]" → "uint32_t[4]", byte order noted.
@@ -184,10 +184,10 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
           const arrayPart = /((?:\[[^\]]*\])+)$/.exec(rawType)?.[1] ?? '';
           const std = stdType(rawType.slice(0, rawType.length - arrayPart.length));
           const typeText = std ? `${std.type}${arrayPart}` : rawType;
-          return { offset: hexNum(x.offset), size: hexNum(x.size), type: cType(typeText), rawType: typeText, name: named.name, notes: [named.rest, std?.order, x.notes].filter(Boolean).join('; '), bits: Array.isArray(x.bits) ? x.bits : [] };
-        })
-        .filter((x: any) => x.offset !== null)
-        .sort((a: any, b: any) => a.offset - b.offset);
+          return { offset: hexNum(x.offset), rawOffset: x.offset, size: hexNum(x.size), type: cType(typeText), rawType: typeText, name: named.name, notes: [named.rest, std?.order, x.notes].filter(Boolean).join('; '), bits: Array.isArray(x.bits) ? x.bits : [] };
+        });
+      const fields = allFields.filter((x: any) => x.offset !== null).sort((a: any, b: any) => a.offset - b.offset);
+      const floating = allFields.filter((x: any) => x.offset === null);
       const NATURAL: Record<string, number> = { int16_t: 2, uint16_t: 2, int32_t: 4, uint32_t: 4, float: 4, int64_t: 8, uint64_t: 8, double: 8 };
       const misaligned = fields.some((x: any) => {
         const n = x.type ? NATURAL[x.type.replace(/^const\s+/, '')] : undefined;
@@ -254,6 +254,11 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
         warnings.push(`${name}: declared size 0x${size.toString(16).toUpperCase()}, but the flexible array starts at 0x${cursor.toString(16).toUpperCase()} (size is the fixed part, or "variable").`);
       }
       if (size !== null && size > cursor && !flexible) lines.push(`    uint8_t _pad_${cursor.toString(16).toUpperCase()}[0x${(size - cursor).toString(16).toUpperCase()}];`);
+      if (floating.length) {
+        // C has no field at "16+n": the fields after a variable-length one, as documented.
+        lines.push(`    /* then, after the variable-length part: ${floating.map((x: any) => `${comment(x.name || '?')} (${comment(x.rawType || '?')}) at ${comment(String(x.rawOffset ?? '?'))}`).join('; ')} */`);
+        warnings.push(`${name}: ${floating.length} field(s) with offsets that are not numbers (${floating.map((x: any) => comment(x.name || '?')).join(', ')}) are comments at the end of the struct.`);
+      }
       lines.push(`};${size !== null ? ` /* size 0x${size.toString(16).toUpperCase()} */` : data.size === 'variable' ? ' /* variable size */' : ''}`);
       if (packed) lines.push('#pragma pack(pop)');
       lines.push('');
@@ -263,7 +268,7 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
       const values = enumValues(data.values).map((v) => ({ ...v, named: fieldName(v.name) }));
       // Enum constants share one C namespace: when any constant of this enum is already used (NONE, OP_MOVE
       // in two opcode tables), all of its constants get the enum's name in front, so the names stay regular.
-      const prefixAll = values.some((v) => enumConstants.has(ident(v.named.name, 'VALUE')));
+      const prefixAll = values.some((v) => enumConstants.has(ident(v.named.name, 'VALUE')) || defined.has(ident(v.named.name, 'VALUE')));
       for (const v of values) {
         // "MF_SPECIAL (multiplayer only)": the identifier, and the rest as a comment.
         const named = v.named;

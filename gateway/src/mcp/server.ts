@@ -26,7 +26,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.14';
+export const VERSION = '0.8.15';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -464,6 +464,8 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       evidence: z.array(evidenceItem).min(1),
       confidence: z.enum(['low', 'medium', 'high']),
       related: z.array(z.string()).optional(),
+      test_vectors: z.array(z.unknown()).optional().describe('Belongs in data.test_vectors; moved there if given here'),
+      samples: z.array(z.unknown()).optional().describe('Belongs in data.samples; moved there if given here'),
     },
     annotations: WRITE,
   }, (c, a) => write.addFact(s, c, a));

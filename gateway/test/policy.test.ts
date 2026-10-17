@@ -45,6 +45,7 @@ test('version numbers are not IP addresses', () => {
   assert.ok(!rules('Written by Pillow 12.3.0 (libjpeg-turbo 3.1.4.1) on Windows.', 'article').includes('public-ipv4'));
   assert.ok(!rules('The string reads "3.1.4.1 (build 20240508)".', 'article').includes('public-ipv4'));
   assert.ok(rules('the game-server 8.8.8.8 answered', 'article').includes('public-ipv4'));
+  assert.ok(!rules('Reference assemblies, `mscorlib 4.0.0.0` and System.Runtime 8.0.1.2, Libjpeg 6.2.0.1.', 'article').includes('public-ipv4'));
   assert.ok(rules('it connects to 93.184.216.34 first', 'article').includes('public-ipv4'));
 });
 

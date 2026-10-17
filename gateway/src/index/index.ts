@@ -724,7 +724,7 @@ export class SearchIndex {
     for (const r of rows) {
       const target = this.resolveRedirect(r.other);
       const page = this.page(target);
-      if (!page || target === title || !['format', 'platform', 'library', 'technique', 'tool'].includes(page.type) || out.some((o) => o.title === target)) continue;
+      if (!page || target === title || subjectRoot(target) === title || !['format', 'platform', 'library', 'technique', 'tool'].includes(page.type) || out.some((o) => o.title === target)) continue;
       const facts = (this.db.prepare('select count(*) as n from facts where subject = ?').get(target) as { n: number }).n;
       const code = (this.db.prepare("select count(*) as n from edges where dst = ? and rel = 'code_for'").get(target) as { n: number }).n;
       out.push({ title: target, type: page.type, summary: page.summary.slice(0, 160), facts, code });

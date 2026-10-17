@@ -170,6 +170,17 @@ export async function addNote(s: Services, caller: Caller, args: { subject: stri
 
 export async function addFact(s: Services, caller: Caller, input: unknown) {
   const op = requireWriter(s, caller);
+  // test_vectors and samples sent next to data belong inside it (the description lists them with data).
+  const raw = (input && typeof input === 'object' ? { ...(input as Record<string, unknown>) } : input) as Record<string, any>;
+  const lifted = ['test_vectors', 'samples'].filter((k) => raw?.[k] !== undefined);
+  if (lifted.length) {
+    raw.data = { ...(raw.data ?? {}) };
+    for (const k of lifted) {
+      if (raw.data[k] === undefined) raw.data[k] = raw[k];
+      delete raw[k];
+    }
+    input = raw;
+  }
   const parsed = factInputSchema.safeParse(input);
   if (!parsed.success) throw new ToolError('SCHEMA_INVALID', `Fact does not match rewiki.fact/1: ${issueList(parsed.error.issues)}.`, { issues: parsed.error.issues });
   const fact = parsed.data;
@@ -227,8 +238,9 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
     if (!ct || !(await currentPage(s, ct))) missingCode.push(c);
   }
   const sampleNote = missingCode.length ? `samples name Code pages that do not exist: ${missingCode.join(', ')}. Publish the generator with add_code first (a batch runs add_code before add_fact).` : undefined;
-  const warnings = unknown.length || subjectNote || enumNote || underscoreNote || sampleNote
-    ? [...(subjectNote ? [subjectNote] : []), ...(enumNote ? [enumNote] : []), ...(underscoreNote ? [underscoreNote] : []), ...(sampleNote ? [sampleNote] : []), ...(unknown.length ? [`data.${unknown.join(', data.')} ${unknown.length > 1 ? 'are' : 'is'} not standard for kind "${fact.kind}" (standard: ${[...FACT_DATA[fact.kind].required, ...(FACT_DATA[fact.kind].one_of ?? []), ...FACT_DATA[fact.kind].optional].join(', ')}). Kept, but tools like export_symbols and export_header only use standard fields. Several related addresses? One fact per address, or add_symbols for many names with their signatures.`] : [])]
+  const liftedNote = lifted.length ? `${lifted.join(' and ')} moved into data (they are data fields).` : undefined;
+  const warnings = unknown.length || subjectNote || enumNote || underscoreNote || sampleNote || liftedNote
+    ? [...(liftedNote ? [liftedNote] : []), ...(subjectNote ? [subjectNote] : []), ...(enumNote ? [enumNote] : []), ...(underscoreNote ? [underscoreNote] : []), ...(sampleNote ? [sampleNote] : []), ...(unknown.length ? [`data.${unknown.join(', data.')} ${unknown.length > 1 ? 'are' : 'is'} not standard for kind "${fact.kind}" (standard: ${[...FACT_DATA[fact.kind].required, ...(FACT_DATA[fact.kind].one_of ?? []), ...FACT_DATA[fact.kind].optional].join(', ')}). Kept, but tools like export_symbols and export_header only use standard fields. Several related addresses? One fact per address, or add_symbols for many names with their signatures.`] : [])]
     : undefined;
   const partialBuild = fact.scope.level === 'build' ? buildIdentity(await currentPage(s, fact.scope.applies_to)) === 'partial' : false;
   assertClean(scanValue(fact, 'fact'));
@@ -963,8 +975,8 @@ export async function linkRepo(s: Services, caller: Caller, args: {
       summary: `${replaced ? 'Update pinned commit of' : 'Link repository'} ${info.url} @ ${info.commit.slice(0, 10)}`,
     });
     if (target === pages[0].target) r = edit;
-    await afterWrite(s, op, [target]);
   }
+  await afterWrite(s, op, pages.map((p) => p.target));
   const target = pages[0].target;
   return result(s, target, r.newrevid, {
     listed_on: pages.length > 1 ? pages.map((p) => p.target) : undefined,

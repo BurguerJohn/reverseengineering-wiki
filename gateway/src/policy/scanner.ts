@@ -85,11 +85,13 @@ const VERSION_BEFORE = /(?:\b(?:version|ver|v|patch|build|update|release|revisio
  */
 // A library or tool name right before ("libjpeg-turbo 3.1.4.1", "libpng 1.6.43.1"), or a build string after
 // ("3.1.4.1 (build 20240508)"): a version. Network words in the name keep the address rule.
-const NAME_BEFORE = /\b(lib[\w+]*|[A-Za-z][\w+]*(?:-[A-Za-z0-9+]+)+)\s+$/i;
+const NAME_BEFORE = /\b([Ll]ib[\w+]*|[A-Za-z][\w+]*(?:-[A-Za-z0-9+]+)+|[A-Za-z]\w*lib|[A-Z][\w]*(?:\.[A-Z][\w]*)+|[\w.-]+\.(?:dll|exe|so|dylib))\s+$/;
 const NETWORK_WORD = /ip|addr|host|server|dns|proxy|gateway|router|peer|client|node/i;
 const BUILD_AFTER = /^\s*\(?build\b/i;
 function namedVersion(text: string, index: number, length: number): boolean {
   const name = NAME_BEFORE.exec(text.slice(Math.max(0, index - 40), index))?.[1];
+  // x.y.0.0 is how assembly and file versions are written; as an address it names a network, not a host.
+  if (/\.0\.0$/.test(text.slice(index, index + length))) return true;
   return (!!name && !NETWORK_WORD.test(name)) || BUILD_AFTER.test(text.slice(index + length, index + length + 12));
 }
 

@@ -1110,6 +1110,21 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const withAlso = await call(anon, 'export_symbols', { subject: `Format:E2E Track ${run}`, also: [`Library:E2E Lib ${run}`], tool: 'json' });
   assert.ok(withAlso.also?.length === 1 && /e2e_zigzag/.test(withAlso.script) && /trk_gamma_table/.test(withAlso.script), JSON.stringify(withAlso).slice(0, 400));
 
+  // test_vectors next to data move into it; fields after a variable part stay as comments; enum constants named like types are prefixed.
+  const liftedFact = await call(a, 'add_fact', { kind: 'behavior', subject: `Library:E2E Lib ${run}`, claim: 'The fictional library checksum is a byte sum.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { algorithm: 'sum' }, test_vectors: [{ input: '01 02', expected: '03' }], evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low', dry_run: true });
+  assert.ok(liftedFact.warnings?.some((w: string) => /test_vectors moved into data/.test(w)) && !liftedFact.ignored_arguments, JSON.stringify(liftedFact).slice(0, 500));
+  assert.ok(JSON.stringify(liftedFact.preview).includes('expected'), JSON.stringify(liftedFact.preview).slice(0, 500));
+  await call(a, 'add_fact', { kind: 'struct', subject: `Library:E2E Lib ${run}`, claim: 'The fictional stream root has a variable-length name.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { name: 'E2eRoot', size: 'variable', fields: [{ offset: 0, size: 4, type: 'uint32_t', name: 'length' }, { offset: '4', type: 'char[length]', name: 'version' }, { offset: '4+length', size: 2, type: 'uint16_t', name: 'flags' }] },
+    evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  await call(a, 'add_fact', { kind: 'enum', subject: `Library:E2E Lib ${run}`, claim: 'Fictional table ids, one named like a struct.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { name: 'E2eTable', values: { 0: 'E2eRoot', 1: 'E2eOther' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const rootHeader = await call(anon, 'export_header', { subject: `Library:E2E Lib ${run}` });
+  assert.match(rootHeader.header, /then, after the variable-length part: flags \(uint16_t\) at 4\+length/, rootHeader.header);
+  assert.match(rootHeader.header, /E2eTable_E2eRoot = 0x0,/, rootHeader.header);
+  assert.ok(rootHeader.warnings?.some((w: string) => /E2eRoot: 1 field/.test(w)), JSON.stringify(rootHeader.warnings));
+
   // A dry run hands back a check_id: publish_checked publishes exactly that, once.
   const checkedNote = await call(a, 'add_note', { subject: cave, key: 'Checked once', body: 'Published by check_id without resending the arguments.', confidence: 'low', dry_run: true });
   assert.ok(checkedNote.check_id, JSON.stringify(checkedNote).slice(0, 200));
