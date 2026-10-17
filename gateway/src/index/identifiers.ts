@@ -107,6 +107,9 @@ export function extractFromText(text: string): Identifier[] {
     else add(out, 'string', normalizeString(inner));
   }
   for (const m of text.matchAll(/"([^"\n]{4,120})"/g)) add(out, 'string', normalizeString(m[1]));
+  for (const m of text.matchAll(/(?<![\w./\\-])(?:[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+|[a-z]+[A-Z][A-Za-z0-9]*|[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*){2,})(?![\w/\\-])/g)) {
+    if (m[0].length >= 6) add(out, 'symbol', normalizeSymbol(m[0]));
+  }
   return [...out.values()];
 }
 
@@ -135,6 +138,9 @@ export function extractFromFactData(data: Record<string, unknown>): Identifier[]
   for (const key of ['value', 'indicator', 'string']) {
     const v = str(data[key]);
     if (v) add(out, 'string', normalizeString(v));
+  }
+  if (typeof data.indicator === 'string' && /export|import|symbol|name/i.test(String(data.method ?? ''))) {
+    for (const name of data.indicator.split(/[\s,;]+/)) if (/^[A-Za-z_?@][\w:@?$<>~.]{2,}$/.test(name)) add(out, 'symbol', normalizeSymbol(name));
   }
   const address = data.address as { value?: unknown } | undefined;
   if (address && typeof address.value === 'string') {
@@ -195,7 +201,7 @@ export function evidenceTokens(e: Evidence): Array<Identifier & { input: string;
   }
   for (const m of e.magic ?? []) {
     const token = normalizeBytes(m);
-    if (token) out.push({ kind: 'bytes', token, input: m, weight: 3, prefix: true });
+    if (token) out.push({ kind: 'bytes', token, input: m, weight: token.length > 2 ? 3 : 0.5, prefix: true });
   }
   for (const p of e.patterns ?? []) {
     const token = normalizeBytes(p);

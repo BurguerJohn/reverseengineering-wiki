@@ -45,6 +45,8 @@ Every kind also takes `test_vectors` and `samples` (below). Every fact needs `ev
 - `multiple: true` names every match (thunks, inlined helpers); data tables compiled in several times get every copy named. A variant (an optional `endbr64` prefix) is a second fact with the same name.
 - Make a pattern unique: test it on several builds and on unrelated binaries. The server warns when it overlaps another subject's facts (a bundled copy: say so in the claim; otherwise lengthen it).
 - Magic: `bytes`, `offset`, `meaning`, optional `mask`; `relative_to` when the offset counts from a table or section, not the file start.
+- Identification by exports or imports: list the names in `indicator` (comma-separated) with `method: "exports"`; `identify` also finds names in builds' symbol maps and code-like names in article text.
+- String facts (ASCII, 8+ characters, no `*`) are byte signatures too: subject scripts name where the string sits.
 - Strings: `*` for a variable part (`"Copyright (C) 1991-* The libjpeg-turbo Project"`); `identify` also matches versions and years with other digits.
 
 ## Test vectors and samples

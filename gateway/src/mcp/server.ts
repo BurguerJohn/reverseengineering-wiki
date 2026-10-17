@@ -27,7 +27,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.26';
+export const VERSION = '0.8.27';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -187,7 +187,7 @@ function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Ca
  * What dry runs checked, so it can be published as checked without resending it (publish_checked).
  * In memory: one process, and a check is only good for a short while anyway.
  */
-const CHECKED = new Map<string, { tool: string; args: Record<string, unknown>; operatorId: number; at: number }>();
+const CHECKED = new Map<string, { tool: string; args: Record<string, unknown>; operatorId: number; at: number; published?: Result }>();
 const CHECK_TTL_MS = 30 * 60_000;
 
 function rememberCheck(tool: string, args: Record<string, unknown>, operatorId: number): string {
@@ -716,6 +716,14 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     if (!checked || checked.operatorId !== caller.operator?.id || Date.now() - checked.at > CHECK_TTL_MS) {
       return fail(new ToolError('CHECK_EXPIRED', 'Unknown or expired check_id (they last 30 minutes, for the account that ran the dry run). Run the dry run again.'));
     }
+    // Retried after a lost answer: what it published, never a second publication.
+    if (checked.published && !a.dry_run) {
+      const first = checked.published.content?.[0];
+      const text = first && 'text' in first ? first.text : '{}';
+      let previous: unknown = text;
+      try { previous = JSON.parse(text); } catch { /* keep text */ }
+      return ok({ already_published: true, note: 'This check_id was already published; nothing was written again. The first answer follows.', result: previous });
+    }
     let args = checked.args;
     if (a.replace && Object.keys(a.replace).length) {
       const ops = Array.isArray(args.operations) ? [...(args.operations as Array<{ tool: string; arguments: Record<string, unknown> }>)] : null;
@@ -745,7 +753,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       if (ops) args = { ...args, operations: ops };
     }
     const result = await handlers.get(checked.tool)!({ ...args, ...(a.dry_run ? { dry_run: true, ...(a.quiet ? { quiet: true } : {}) } : {}), ...(a.review_id ? { review_id: a.review_id } : {}) }, extra);
-    if (!result.isError && !a.dry_run) CHECKED.delete(String(a.check_id));
+    if (!result.isError && !a.dry_run) checked.published = result;
     return result;
   }) as any);
 

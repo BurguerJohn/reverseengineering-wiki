@@ -1200,7 +1200,9 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   assert.ok(checkedNote.check_id, JSON.stringify(checkedNote).slice(0, 200));
   const fromCheck = await call(a, 'publish_checked', { check_id: checkedNote.check_id });
   assert.match(fromCheck.title ?? JSON.stringify(fromCheck), /Checked once/);
-  await expectError(a, 'publish_checked', { check_id: checkedNote.check_id }, 'CHECK_EXPIRED');
+  // A retry after a lost answer publishes nothing twice: it repeats what was published.
+  const retried = await call(a, 'publish_checked', { check_id: checkedNote.check_id });
+  assert.ok(retried.already_published && JSON.stringify(retried.result).includes('Checked once'), JSON.stringify(retried).slice(0, 400));
   await expectError(b, 'publish_checked', { check_id: (await call(a, 'add_note', { subject: cave, body: 'Only the account that checked it may publish it.', confidence: 'low', dry_run: true })).check_id }, 'CHECK_EXPIRED');
   // The language is added to code titles once, even when the name already ends with it.
   const pyTitle = await call(a, 'add_code', { name: 'Cave reader (Python)', summary: 'Reads the fictional cave files of the test game.', language: 'python', kind: 'parser',
@@ -1238,6 +1240,19 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   writeFileSync(join(tmpdir(), `rewiki-build-${run}.py`), psxScript.script);
   assert.match((await call(anon, 'export_symbols', { build: psx.title, tool: 'json' })).script, /"va": "0x80010DF4"/);
   await expectError(anon, 'export_symbols', { build: psx.title, tool: 'sym' }, 'BAD_REQUEST');
+  // identify finds names from symbol maps (for the build's software) and from identification facts listing exports.
+  await call(a, 'add_symbols', { build: psx.title, symbols: [{ va: '0x80010E00', name: `E2e${run}_PsxMain`, kind: 'function', confidence: 'medium', source: 'other' }] });
+  const byMap = await call(anon, 'identify', { exports: [`E2e${run}_PsxMain`] });
+  assert.equal(byMap.candidates[0]?.subject, `Software:${cave}`, JSON.stringify(byMap).slice(0, 400));
+  await call(a, 'add_fact', { kind: 'identification', subject: `Library:E2E Lib ${run}`, claim: 'The fictional library exports two telling names.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { method: 'exports', indicator: `E2e${run}_ExpA, E2e${run}_ExpB` }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const byList = await call(anon, 'identify', { exports: [`E2e${run}_ExpB`] });
+  assert.equal(byList.candidates[0]?.subject, `Library:E2E Lib ${run}`, JSON.stringify(byList).slice(0, 400));
+  // String facts are signatures too.
+  await call(a, 'add_fact', { kind: 'string', subject: `Library:E2E Lib ${run}`, claim: 'The fictional library embeds a banner.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { value: `E2E lib banner ${run}`, meaning: 'banner', encoding: 'ascii' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const stringScan = (await call(anon, 'export_symbols', { subject: `Library:E2E Lib ${run}`, tool: 'json' })).script;
+  assert.ok(stringScan.includes('"45 32 45 20 6C 69 62 20'), stringScan.slice(0, 400));
   // An address carried to another release: the same name there.
   const jp = await call(a, 'register_build', { software: cave, version: 'JP', platform: 'playstation', distribution: 'cd',
     files: [{ name: `SLPS_${run}.EXE`, sha1: createHash('sha1').update(`psx-jp-${run}`).digest('hex') }] });

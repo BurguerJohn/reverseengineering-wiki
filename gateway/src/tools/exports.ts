@@ -486,6 +486,11 @@ function signaturesOf(s: Services, subject: string): Signature[] {
   const sigs: Signature[] = [];
   for (const f of s.index.factsForSubject(subject).filter((x) => x.status !== 'rejected')) {
     const d = JSON.parse(f.data);
+    if (f.kind === 'string' && typeof d.value === 'string' && d.value.length >= 8 && !d.value.includes('*') && !/utf-?16|wide|ucs/i.test(String(d.encoding ?? '')) && /^[\x20-\x7e]+$/.test(d.value)) {
+      const bytes = [...d.value.slice(0, 64)].map((c) => c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join(' ');
+      sigs.push({ name: qualifiedName(d.name ?? `str_${ident(f.title.split('/').pop(), 'string')}`, 'rewiki_string'), pattern: bytes, kind: 'global', status: f.status, fact: f.title, offset: 0, multiple: false });
+      continue;
+    }
     const pattern = typeof d.signature === 'string' ? d.signature : typeof d.pattern === 'string' ? d.pattern : null;
     if (!pattern || !/^(?:[0-9A-Fa-f]{2}|\?\??)(?:\s+(?:[0-9A-Fa-f]{2}|\?\??))+$/.test(pattern.trim())) continue;
     // The name goes at match start + offset: signature_offset (function/global), or offset of a signature fact; negative = before.

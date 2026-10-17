@@ -41,7 +41,11 @@ function title(s: Services, raw: string, allowed: readonly PageType[]): string {
 }
 
 function shortSummary(text: string, max = 200): string {
-  return text.replace(/\s+/g, ' ').trim().slice(0, max);
+  const flat = text.replace(/\s+/g, ' ').trim();
+  if (flat.length <= max) return flat;
+  const cut = flat.slice(0, max - 1);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.-]+$/, '')}…`;
 }
 
 async function currentPage(s: Services, t: string) {

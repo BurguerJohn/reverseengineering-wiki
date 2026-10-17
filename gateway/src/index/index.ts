@@ -89,6 +89,7 @@ create table if not exists symbols (
 );
 create index if not exists symbols_build_rva on symbols(build, rva);
 create index if not exists symbols_name on symbols(name);
+create index if not exists symbols_lname on symbols(lower(name));
 create index if not exists symbols_title on symbols(title);
 create table if not exists moves (
   old text primary key,
@@ -358,7 +359,9 @@ export class SearchIndex {
     }
     if (infobox.magic) {
       for (const part of infobox.magic.split(/[,;]/)) {
-        const bytes = normalizeBytes(part.replace(/[`"]/g, ''));
+        const clean = part.replace(/<\/?(?:code|nowiki)>/g, '').replace(/[`"]/g, '');
+        const runs = [clean, ...(clean.match(/(?:\b[0-9A-Fa-f]{2}\b\s*){2,}/g) ?? [])];
+        const bytes = runs.map((r) => normalizeBytes(r.trim())).find((b) => b);
         if (bytes) this.ids(p.title, 'Infobox', [{ kind: 'bytes', token: bytes }]);
       }
     }
@@ -625,6 +628,11 @@ export class SearchIndex {
       } else {
         rows = this.db.prepare(`select i.title, p.subject from identifiers i join pages p on p.title = i.title
           where i.kind = ? and i.token = ? limit 100`).all(t.kind, t.token) as any[];
+        if (t.kind === 'symbol') {
+          const mapped = this.db.prepare(`select distinct s.title, b.software as subject from symbols s join builds b on b.title = s.build
+            where lower(s.name) = ? limit 50`).all(t.token) as any[];
+          rows = [...rows, ...mapped];
+        }
       }
       if (!rows.length) continue;
       const bySubject = perInput.get(t.input) ?? new Map<string, Set<string>>();
