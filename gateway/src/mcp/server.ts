@@ -26,7 +26,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.12';
+export const VERSION = '0.8.13';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -67,7 +67,7 @@ const evidenceItem = z.object({
   type: z.enum(['string_xref', 'byte_pattern', 'rtti', 'symbol', 'xref', 'runtime_test', 'documentation', 'debugger', 'comparison', 'source', 'other']),
   detail: z.string().describe('How you know: the string referenced, the pattern, the test you ran…'),
   repo: z.string().optional().describe('For type source: the repository URL'),
-  commit: z.string().optional().describe('The commit it was read at'),
+  commit: z.string().optional().describe('The commit hash it was read at (7-40 hex digits; a tag name goes in detail)'),
   path: z.string().optional().describe('File path in the repository, e.g. "WinQuake/bspfile.h"'),
   lines: z.string().optional().describe('Lines or ranges, e.g. "120-148" or "26-34, 98-101"'),
 });
@@ -163,7 +163,7 @@ function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Ca
       const full = compactPreview(ran);
       // quiet: what would be written, without echoing it (publish_checked still publishes exactly what was checked).
       const checked = quiet && Array.isArray(full.preview)
-        ? { ...full, preview: (full.preview as Preview[]).map((p) => ({ title: p.title, action: p.action, characters: (p.content ?? p.diff ?? '').length })) }
+        ? { ...full, preview: undefined, aliases_previewed: undefined, pages: (full.preview as Preview[]).map((p) => ({ title: p.title, action: p.action, characters: (p.content ?? p.diff ?? '').length })) }
         : full;
       if (!caller.operator) return checked;
       return { ...checked, check_id: rememberCheck(name, rest, caller.operator.id), publish_with: `publish_checked with this check_id publishes exactly what was checked, without resending it (valid 30 minutes).${name === 'batch' ? ' To change some operations first (after a warning), pass replace = {"<operation number>": {corrected arguments}} with dry_run true.' : ''}` };
@@ -407,6 +407,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       build: z.string().optional().describe('Build: page (or a file SHA-256 via lookup_binary)'),
       platform: z.string().optional().describe('Platform: page, for its hardware addresses (I/O registers, vectors, BIOS calls)'),
       subject: z.string().optional().describe('A software, library or format page: a script that finds its signature facts in your binary'),
+      also: z.array(z.string()).max(10).optional().describe('With subject: more pages whose signatures to include (a fork\'s parent library); the answer lists connected pages that have some'),
       tool: z.enum(['ghidra', 'ida', 'json', 'sym']),
     },
     annotations: READ,
@@ -458,7 +459,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
         applies_to: z.string().describe('What it holds for; for build-level facts a Build: title or the SHA-256 of one of its files (also one registered earlier in the same batch)'),
         observed_in: z.array(z.string()).optional(),
       }),
-      data: z.record(z.string(), z.unknown()).describe(`Fields by kind (examples and schemas per kind: fact_data in /tools.json). ${FACT_DATA_SUMMARY}. Struct fields: {offset, size, type, name, notes?, bits?: [{bit: "0" or "4-5", name, notes?}]}; the last field may be "T[]" or "T[count_field]" (entries after a header, a trailing name: a C flexible array member; data.size is then the fixed part or "variable"). Addresses: rva (PE, "0x141230") or address {kind: va|file|segmented|banked, value: "0x80012345" | "0x1A2B0" | "1000:5AFA" | "03:8000"} on a build; fixed hardware addresses (I/O registers, vectors, BIOS calls) as address {kind: "hardware", value: "0xFF46"} at scope.level platform. struct with unknown exact size: size_min and/or size_max. Signatures (data.signature, or a signature fact's pattern): the name goes at match address + signature_offset (offset on a signature fact), negative when the pattern starts inside the object; multiple: true names every match (thunks); a variant (an optional endbr64 prefix) is a second signature fact with the same name; a signature fact takes a name for its label. One address per fact; many names: add_symbols. Any kind also takes test_vectors [{input, expected}] (hashes, ciphers, checksums) and samples [{url, sha256, note}] (public files others can rerun the check on) or [{code: "Code:…", args, sha256}] (a sample a published script generates).`),
+      data: z.record(z.string(), z.unknown()).describe(`Fields by kind (examples and schemas per kind: fact_data in /tools.json). ${FACT_DATA_SUMMARY}. Struct fields: {offset, size, type, name, notes?, bits?: [{bit: "0" or "4-5", name, notes?}]}; the last field may be "T[]" or "T[count_field]" (entries after a header, a trailing name: a C flexible array member; data.size is then the fixed part or "variable"). Addresses: rva (PE, "0x141230") or address {kind: va|file|segmented|banked, value: "0x80012345" | "0x1A2B0" | "1000:5AFA" | "03:8000"} on a build; fixed hardware addresses (I/O registers, vectors, BIOS calls) as address {kind: "hardware", value: "0xFF46"} at scope.level platform. struct with unknown exact size: size_min and/or size_max. Signatures (data.signature, or a signature fact's pattern): the name goes at match address + signature_offset (offset on a signature fact), negative when the pattern starts inside the object; multiple: true names every match (thunks); a variant (an optional endbr64 prefix) is a second signature fact with the same name; string facts may use * for a variable part ("Copyright (C) 1991-* The libjpeg-turbo Project"), and identify matches versions and years with other digits anyway; a signature fact takes a name for its label. One address per fact; many names: add_symbols. Any kind also takes test_vectors [{input, expected}] (hashes, ciphers, checksums) and samples [{url, sha256, note}] (public files others can rerun the check on) or [{code: "Code:…", args, sha256}] (a sample a published script generates).`),
       key: z.string().min(2).max(60).optional().describe('Short title for the fact page, e.g. "RNG seed" (default: the name/value/bytes, else the first clause of the claim). MediaWiki shows "_" as a space in titles; data keeps identifiers as written.'),
       evidence: z.array(evidenceItem).min(1),
       confidence: z.enum(['low', 'medium', 'high']),
@@ -683,6 +684,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     description: 'Publish exactly what an earlier dry run (of any write tool or batch) checked, by the check_id it returned, without resending the arguments. Good for 30 minutes, for the same account. A batch dry run with failures also returns a check_id: pass replace with the corrected arguments of the failing operations (by number) and dry_run true to check again.',
     inputSchema: { check_id: z.string(), dry_run: DRY_RUN,
       replace: z.record(z.string(), z.record(z.string(), z.unknown())).optional().describe('Batches only: {"3": {corrected arguments of operation 3}}; the tool stays the same'),
+      quiet: z.boolean().optional().describe('With dry_run: list the pages without their contents'),
       ...(review ? { review_id: REVIEW_ID } : {}) },
     annotations: WRITE,
   }, (async (a: any, extra: Extra) => {
@@ -701,7 +703,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       }
       args = { ...args, operations: ops };
     }
-    const result = await handlers.get(checked.tool)!({ ...args, ...(a.dry_run ? { dry_run: true } : {}), ...(a.review_id ? { review_id: a.review_id } : {}) }, extra);
+    const result = await handlers.get(checked.tool)!({ ...args, ...(a.dry_run ? { dry_run: true, ...(a.quiet ? { quiet: true } : {}) } : {}), ...(a.review_id ? { review_id: a.review_id } : {}) }, extra);
     if (!result.isError && !a.dry_run) CHECKED.delete(String(a.check_id));
     return result;
   }) as any);

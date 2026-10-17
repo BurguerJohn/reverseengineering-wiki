@@ -41,6 +41,11 @@ test('version numbers are not IP addresses', () => {
   assert.ok(!rules('TAGS = ["3.6.2", "3.6.3", "3.6.3.1", "3.6.4"]', 'code').includes('public-ipv4'));
   assert.ok(rules('SERVERS = ["8.8.8.8", "1.1.1.1"]', 'code').includes('public-ipv4'));
   assert.ok(!rules('See the PNG specification section 11.3.6.2 and § 4.1.2.3.', 'fact').includes('public-ipv4'));
+  // A library name before, or a build string after: a version.
+  assert.ok(!rules('Written by Pillow 12.3.0 (libjpeg-turbo 3.1.4.1) on Windows.', 'article').includes('public-ipv4'));
+  assert.ok(!rules('The string reads "3.1.4.1 (build 20240508)".', 'article').includes('public-ipv4'));
+  assert.ok(rules('the game-server 8.8.8.8 answered', 'article').includes('public-ipv4'));
+  assert.ok(rules('it connects to 93.184.216.34 first', 'article').includes('public-ipv4'));
 });
 
 test('code rules', () => {

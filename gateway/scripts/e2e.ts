@@ -1033,7 +1033,7 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const quietRun = await call(a, 'batch', { dry_run: true, quiet: true, operations: [
     { tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A quiet fictional note whose text is not echoed back.', confidence: 'low' } },
   ] });
-  assert.ok(quietRun.check_id && quietRun.preview?.length === 1 && quietRun.preview[0].content === undefined && quietRun.preview[0].characters > 0, JSON.stringify(quietRun).slice(0, 400));
+  assert.ok(quietRun.check_id && quietRun.preview === undefined && quietRun.pages?.length === 1 && quietRun.pages[0].characters > 0, JSON.stringify(quietRun).slice(0, 400));
   const halfBatch = await call(a, 'batch', { operations: [
     { tool: 'edit_fact', arguments: { target: `Fact:E2E Track ${run}/signature/does not exist`, base_revision: 1, summary: 'fictional correction', claim: 'Nothing at all to correct.' } },
     { tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A fictional note published before the failing edit.', confidence: 'low' } },
@@ -1084,6 +1084,26 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
     data: { method: 'import', indicator: `e2e${run}_start_main@E2ETRK_2.34` }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
   const byImport = await call(anon, 'identify', { imports: [`e2e${run}_start_main`] });
   assert.equal(byImport.candidates[0]?.subject, `Format:E2E Track ${run}`, JSON.stringify(byImport).slice(0, 400));
+
+  // Qualified pointers stay pointers, pointer typedefs become void *, enum notes are kept, mismatches are reported.
+  await call(a, 'add_fact', { kind: 'struct', subject: `Library:E2E Lib ${run}`, claim: 'The fictional error manager of the library.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { name: 'E2eErrMgr', size: 24, fields: [{ offset: 0, size: 8, type: 'const char * const *', name: 'table' }, { offset: 8, size: 8, type: 'e2e_common_ptr', name: 'owner' }, { offset: 16, size: 4, type: 'E2eMystery', name: 'mystery' }, { offset: 20, size: 4, type: 'int', name: 'last' }] },
+    evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  await call(a, 'add_fact', { kind: 'struct', subject: `Library:E2E Lib ${run}`, claim: 'The fictional frame header ends in components.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { name: 'E2eFrame', size: 20, fields: [{ offset: 0, size: 2, type: 'uint16_t', name: 'count' }, { offset: 2, type: 'uint8_t[]', name: 'components' }] },
+    evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  await call(a, 'add_fact', { kind: 'enum', subject: `Library:E2E Lib ${run}`, claim: 'Fictional message codes moved between API levels.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { name: 'E2eMsg', values: [{ name: 'E2EMSG_FIRST', value: 0 }, { name: 'E2EMSG_ARITH', value: 3, notes: 'API 6b: 2' }] }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const libHeader = await call(anon, 'export_header', { subject: `Library:E2E Lib ${run}` });
+  assert.match(libHeader.header, /\/\* 0x00 \*\/ const char \* const \* table;/, libHeader.header);
+  assert.match(libHeader.header, /\/\* 0x08 \*\/ void \* owner; \/\* e2e_common_ptr \(a pointer typedef not defined here\) \*\//, libHeader.header);
+  assert.match(libHeader.header, /E2EMSG_ARITH = 0x3, \/\* API 6b: 2 \*\//, libHeader.header);
+  assert.ok(libHeader.warnings?.some((w: string) => /E2eMystery/.test(w)) && libHeader.warnings?.some((w: string) => /E2eFrame: declared size 0x14, but the flexible array starts at 0x2/.test(w)), JSON.stringify(libHeader.warnings));
+  // A subject's signatures together with another page's (a fork and its parent library).
+  await call(a, 'add_fact', { kind: 'signature', subject: `Library:E2E Lib ${run}`, claim: 'The fictional library zigzag table starts like this.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { pattern: '00 01 08 10 09 02 03 0A', matches: 'e2e_zigzag' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const withAlso = await call(anon, 'export_symbols', { subject: `Format:E2E Track ${run}`, also: [`Library:E2E Lib ${run}`], tool: 'json' });
+  assert.ok(withAlso.also?.length === 1 && /e2e_zigzag/.test(withAlso.script) && /trk_gamma_table/.test(withAlso.script), JSON.stringify(withAlso).slice(0, 400));
 
   // A dry run hands back a check_id: publish_checked publishes exactly that, once.
   const checkedNote = await call(a, 'add_note', { subject: cave, key: 'Checked once', body: 'Published by check_id without resending the arguments.', confidence: 'low', dry_run: true });

@@ -33,13 +33,13 @@ function hexNum(raw: unknown): number | null {
   return null;
 }
 
-const C_TYPE = /^(?:const\s+)?(?:(?:struct|enum|union)\s+)?(?:unsigned\s+|signed\s+)?[A-Za-z_][\w]*(?:\s*\*+)?$/;
+const C_TYPE = /^(?:const\s+)?(?:(?:struct|enum|union)\s+)?(?:unsigned\s+|signed\s+)?[A-Za-z_][\w]*(?:\s*\*+(?:\s*const\b)?)*\s*$/;
 /** "void (*)(void)", "int (*)(Entity *, int)": a function pointer type. */
 const FN_POINTER = /^[A-Za-z_][\w\s*]*\(\s*\*\s*\)\s*\([\w\s*,.]*\)$/;
 
 /** The type name a field uses by value or through a pointer ("struct Entity *" → Entity). */
 function baseType(type: string): string {
-  return type.replace(/^const\s+/, '').replace(/^(?:struct|enum|union)\s+/, '').replace(/\s*\*+$/, '').trim();
+  return type.replace(/^const\s+/, '').replace(/^(?:struct|enum|union)\s+/, '').replace(/\s*\*.*$/, '').trim();
 }
 
 /**
@@ -111,9 +111,10 @@ function signedNum(raw: unknown): number | null {
   return hexNum(raw);
 }
 
-function enumValues(raw: unknown): Array<{ name: string; value: number | null }> {
+function enumValues(raw: unknown): Array<{ name: string; value: number | null; notes?: string }> {
+  const notesOf = (v: any) => (v && typeof v === 'object' && typeof v.notes === 'string' ? v.notes : undefined);
   if (Array.isArray(raw)) {
-    return raw.map((v, i) => (typeof v === 'string' ? { name: v, value: i } : { name: String(v?.name ?? ''), value: signedNum(v?.value) }));
+    return raw.map((v, i) => (typeof v === 'string' ? { name: v, value: i } : { name: String(v?.name ?? ''), value: signedNum(v?.value), notes: notesOf(v) }));
   }
   if (raw && typeof raw === 'object') {
     return Object.entries(raw as Record<string, unknown>).map(([k, v]) => {
@@ -121,6 +122,7 @@ function enumValues(raw: unknown): Array<{ name: string; value: number | null }>
       if (keyNumber !== null && typeof v === 'string') return { name: v, value: keyNumber };
       const valueNumber = signedNum(v);
       if (valueNumber !== null) return { name: k, value: valueNumber };
+      if (v && typeof v === 'object' && 'value' in v) return { name: k, value: signedNum((v as any).value), notes: notesOf(v) };
       return { name: k, value: null };
     }).sort((a, b) => (a.value ?? 0) - (b.value ?? 0));
   }
@@ -149,6 +151,8 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
   const lines = [`/* ${HEADER_NOTE}`, ` * Subject: ${comment(subject)}${build ? `\n * Build: ${comment(build)}` : ''}`,
     ` * Generated: ${new Date().toISOString()} */`, '#pragma once', '#include <stdint.h>', ''];
   const skipped: string[] = [];
+  const warnings: string[] = [];
+  const unknownTypes = new Set<string>();
   // Types defined in this header; others come from other pages and must still compile here.
   const typeName = (f: { kind: string; data: string }) => {
     try {
@@ -224,9 +228,15 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
         const base = type ? baseType(type) : undefined;
         if (type && base && !BUILTIN.test(type) && !defined.has(base)) {
           if (type.includes('*')) forward.add(base);
-          else {
+          else if (!knownStructs.has(base) && (field.size === 4 || field.size === 8) && /(?:_ptr|Ptr|_p|_handle|HANDLE)$/.test(base) && !array) {
+            // A pointer typedef from elsewhere (j_common_ptr, HANDLE): a pointer, so the next offsets stay right.
+            note = [`${field.rawType} (a pointer typedef not defined here)`, note].filter(Boolean).join('; ');
+            type = 'void *';
+            unknownTypes.add(base);
+          } else {
             // A type this header does not define, by value: its bytes, with the type named in a comment.
             note = [`${field.rawType} (${knownStructs.has(base) ? 'defined on another page' : 'type not defined here'})`, note].filter(Boolean).join('; ');
+            if (!knownStructs.has(base)) unknownTypes.add(base);
             type = null;
           }
         }
@@ -236,7 +246,12 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
         lines.push(`    /* 0x${field.offset.toString(16).toUpperCase().padStart(2, '0')} */ ${decl}${note ? ` /* ${comment(note)} */` : ''}`);
         // Bit fields as comments under the field (C bit-field layout is not portable).
         for (const b of field.bits) lines.push(`    /*        bit ${comment(b?.bit)}: ${comment(b?.name)}${b?.notes ? ` (${comment(b.notes)})` : ''} */`);
-        cursor = field.offset + (field.size ?? (field.type ? 0 : 1));
+        cursor = flex ? field.offset : field.offset + (field.size ?? (field.type ? 0 : 1));
+      }
+      if (size !== null && cursor > size) warnings.push(`${name}: the fields end at 0x${cursor.toString(16).toUpperCase()}, past the declared size 0x${size.toString(16).toUpperCase()}.`);
+      if (flexible && size !== null && size !== cursor) {
+        lines.push(`    /* declared size 0x${size.toString(16).toUpperCase()}; the flexible array starts at 0x${cursor.toString(16).toUpperCase()} */`);
+        warnings.push(`${name}: declared size 0x${size.toString(16).toUpperCase()}, but the flexible array starts at 0x${cursor.toString(16).toUpperCase()} (size is the fixed part, or "variable").`);
       }
       if (size !== null && size > cursor && !flexible) lines.push(`    uint8_t _pad_${cursor.toString(16).toUpperCase()}[0x${(size - cursor).toString(16).toUpperCase()}];`);
       lines.push(`};${size !== null ? ` /* size 0x${size.toString(16).toUpperCase()} */` : data.size === 'variable' ? ' /* variable size */' : ''}`);
@@ -257,7 +272,8 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
         let id = prefixAll ? ident(`${name}_${named.name}`, 'VALUE') : ident(named.name, 'VALUE');
         for (let n = 2; enumConstants.has(id); n++) id = `${ident(`${name}_${named.name}`, 'VALUE')}_${n}`;
         enumConstants.add(id);
-        lines.push(`    ${id}${literal},${named.rest ? ` /* ${comment(named.rest)} */` : ''}`);
+        const notes = [named.rest, v.notes].filter(Boolean).join('; ');
+        lines.push(`    ${id}${literal},${notes ? ` /* ${comment(notes)} */` : ''}`);
       }
       lines.push(`} ${name};`, '');
     } else if (f.kind === 'vtable') {
@@ -295,7 +311,8 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
   // Pointers to types from other pages: forward declarations right after the includes.
   const elsewhere = [...forward].filter((t) => !defined.has(t));
   if (elsewhere.length) lines.splice(6, 0, ...elsewhere.map((t) => `typedef struct ${t} ${t}; /* defined on another page */`), '');
-  return { subject, build, facts: facts.length, header: lines.join('\n') };
+  if (unknownTypes.size) warnings.push(`Types not defined by any fact: ${[...unknownTypes].join(', ')}. Fields of these types are bytes (or void * for pointer typedefs); add struct facts for them, or write the field as a stdint type.`);
+  return { subject, build, facts: facts.length, warnings: warnings.length ? warnings : undefined, header: lines.join('\n') };
 }
 
 type SymbolTool = 'ghidra' | 'ida' | 'json' | 'sym';
@@ -371,10 +388,22 @@ if unmapped:
  * Signature facts of a subject as a script that scans the user's own binary: each pattern found
  * exactly once gets its name. Knowledge from source releases and other builds applies to any build.
  */
-function exportSignatureScan(s: Services, args: { subject: string; tool: SymbolTool }) {
+type Signature = { name: string; pattern: string; kind: string; status: string; fact: string; prototype?: string; offset: number; multiple: boolean };
+
+function exportSignatureScan(s: Services, args: { subject: string; tool: SymbolTool; also?: string[] }) {
   const subject = s.index.resolveRedirect(cleanTitle(args.subject, SUBJECT_TYPES));
   if (!s.index.page(subject)) throw new ToolError('NOT_FOUND', `"${subject}" does not exist.`);
-  const sigs: Array<{ name: string; pattern: string; kind: string; status: string; fact: string; prototype?: string; offset: number; multiple: boolean }> = [];
+  const also = [...new Set((args.also ?? []).map((x) => s.index.resolveRedirect(cleanTitle(x, SUBJECT_TYPES))))].filter((x) => x !== subject);
+  for (const x of also) if (!s.index.page(x)) throw new ToolError('NOT_FOUND', `"${x}" (in also) does not exist.`);
+  const sigs = [subject, ...also].flatMap((x) => signaturesOf(s, x));
+  // Connected libraries and formats with signatures of their own (a fork's parent library).
+  const connected = s.index.generalNeighbors(subject).filter((n) => !also.includes(n.title))
+    .map((n) => ({ subject: n.title, signatures: signaturesOf(s, n.title).length })).filter((n) => n.signatures > 0);
+  return signatureScript(s, { subject, also, sigs, connected, tool: args.tool });
+}
+
+function signaturesOf(s: Services, subject: string): Signature[] {
+  const sigs: Signature[] = [];
   for (const f of s.index.factsForSubject(subject).filter((x) => x.status !== 'rejected')) {
     const d = JSON.parse(f.data);
     const pattern = typeof d.signature === 'string' ? d.signature : typeof d.pattern === 'string' ? d.pattern : null;
@@ -385,11 +414,16 @@ function exportSignatureScan(s: Services, args: { subject: string; tool: SymbolT
     const matchesName = f.kind === 'signature' && typeof d.matches === 'string' && /^[A-Za-z_][\w:]*$/.test(d.matches.trim()) ? d.matches.trim() : undefined;
     sigs.push({ name: qualifiedName(d.name ?? d.class ?? matchesName ?? f.title.split('/').pop(), `rewiki_${f.kind}`), pattern: pattern.trim().toUpperCase().replace(/\?\??/g, '??'), kind: f.kind, status: f.status, fact: f.title, prototype: typeof d.prototype === 'string' ? d.prototype : undefined, offset, multiple: d.multiple === true });
   }
+  return sigs;
+}
+
+function signatureScript(s: Services, args: { subject: string; also: string[]; sigs: Signature[]; connected: Array<{ subject: string; signatures: number }>; tool: SymbolTool }) {
+  const { subject, sigs } = args;
   const ascii = (x: string) => JSON.stringify(x.replace(/[^\x20-\x7e]/g, '?'));
   const list = sigs.map((x) => `    (${ascii(x.name)}, ${ascii(x.pattern)}, ${ascii(x.kind)}, ${ascii(x.status)}, ${ascii(x.fact)}, ${x.offset}, ${x.multiple ? 'True' : 'False'}),`).join('\n');
-  const head = `# ${HEADER_NOTE}\n# Signatures of: ${comment(subject)}\n# Generated: ${new Date().toISOString()}\n`;
+  const head = `# ${HEADER_NOTE}\n# Signatures of: ${[subject, ...args.also].map(comment).join(', ')}\n# Generated: ${new Date().toISOString()}\n`;
   let script: string;
-  if (args.tool === 'json' || args.tool === 'sym') script = JSON.stringify({ subject, signatures: sigs }, null, 2);
+  if (args.tool === 'json' || args.tool === 'sym') script = JSON.stringify({ subject, also: args.also.length ? args.also : undefined, signatures: sigs }, null, 2);
   else if (args.tool === 'ghidra') {
     script = `${head}# Run in Ghidra's Script Manager (Jython or PyGhidra) with your program open. It searches the program
 # for each signature and names a match only when it is unique; data tables (kind "global") compiled in
@@ -470,15 +504,17 @@ print("ReverseEngineering.wiki: named %d of %d signatures" % (named, len(SIGNATU
 `;
   }
   return {
-    subject, tool: args.tool, signatures: sigs.length, script,
+    subject, also: args.also.length ? args.also : undefined, tool: args.tool, signatures: sigs.length, script,
+    connected: args.connected.length
+      ? { pages: args.connected, how: `Pages connected to ${subject} with signatures of their own: add them with also=[...] (a fork and its parent library).` } : undefined,
     hint: sigs.length ? undefined : 'No signature facts on this subject yet: add_fact with data.signature (bytes with ?? wildcards).',
     warning: 'Review generated scripts before running. A function signature that matches more than once is reported, not applied; data tables name every copy.',
   };
 }
 
-export function exportSymbols(s: Services, args: { build?: string; platform?: string; subject?: string; tool: SymbolTool }) {
+export function exportSymbols(s: Services, args: { build?: string; platform?: string; subject?: string; also?: string[]; tool: SymbolTool }) {
   if (!args.build && !args.platform && !args.subject) throw new ToolError('BAD_REQUEST', 'Give build (an exact binary), platform (its fixed hardware addresses) or subject (a script that finds its signatures in your binary).');
-  if (args.subject && !args.build) return exportSignatureScan(s, { subject: args.subject, tool: args.tool });
+  if (args.subject && !args.build) return exportSignatureScan(s, { subject: args.subject, tool: args.tool, also: args.also });
   if (args.platform && !args.build) return exportPlatformSymbols(s, { platform: args.platform, tool: args.tool });
   const build = s.index.resolveRedirect(cleanTitle(args.build!, ['build']));
   if (!s.index.page(build)) throw new ToolError('NOT_FOUND', `"${build}" is not a known build. Use lookup_binary or register_build.`);

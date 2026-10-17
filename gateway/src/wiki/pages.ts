@@ -38,9 +38,10 @@ export function buildArticle(opts: {
 
 /** Standard sections of a subject type that a page does not have yet, in canonical order. */
 export function suggestedSections(type: SubjectType, sections: Section[]): string[] {
-  const have = new Set(sections.filter((s) => s.level > 0).map((s) => headingKey(s.heading)));
+  const have = sections.filter((s) => s.level > 0).map((s) => headingKey(s.heading));
+  const covered = (h: string) => have.some((k) => k === h || (Math.min(k.length, h.length) >= 6 && (k.endsWith(h) || h.endsWith(k))));
   return [...LEADING_SECTIONS, ...TYPE_SECTIONS[type], 'Pitfalls', 'Open questions', 'Evidence & references']
-    .filter((h) => !have.has(headingKey(h)));
+    .filter((h) => !covered(headingKey(h)));
 }
 
 export function redirectText(target: string): string {
@@ -89,7 +90,7 @@ export const evidenceSchema = z.object({
   detail: z.string().min(3).max(1000),
   // A source citation that can be checked again: repository, commit, file and lines.
   repo: z.string().max(300).optional(),
-  commit: z.string().regex(/^[0-9a-fA-F]{7,40}$/).optional(),
+  commit: z.string().regex(/^[0-9a-fA-F]{7,40}$/, 'a commit hash (7-40 hex digits), not a tag or branch: name the tag in detail').optional(),
   path: z.string().max(300).optional(),
   lines: z.string().regex(/^\d+(?:-\d+)?(?:\s*,\s*\d+(?:-\d+)?)*$/).optional(),
 });

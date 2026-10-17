@@ -83,6 +83,16 @@ const VERSION_BEFORE = /(?:\b(?:version|ver|v|patch|build|update|release|revisio
  * "pairs from 1.2.0 to 1.3.0.1", "`1.2.11.1`", ["3.6.3", "3.6.3.1"]: a dotted quad next to two- or three-part version numbers,
  * or in backticks, is a version. Lists of IP addresses do not qualify (their neighbours have four parts).
  */
+// A library or tool name right before ("libjpeg-turbo 3.1.4.1", "libpng 1.6.43.1"), or a build string after
+// ("3.1.4.1 (build 20240508)"): a version. Network words in the name keep the address rule.
+const NAME_BEFORE = /\b(lib[\w+]*|[A-Za-z][\w+]*(?:-[A-Za-z0-9+]+)+)\s+$/i;
+const NETWORK_WORD = /ip|addr|host|server|dns|proxy|gateway|router|peer|client|node/i;
+const BUILD_AFTER = /^\s*\(?build\b/i;
+function namedVersion(text: string, index: number, length: number): boolean {
+  const name = NAME_BEFORE.exec(text.slice(Math.max(0, index - 40), index))?.[1];
+  return (!!name && !NETWORK_WORD.test(name)) || BUILD_AFTER.test(text.slice(index + length, index + length + 12));
+}
+
 const LIST_SEP = String.raw`\s*(?:,|;|/|-|–|\bto\b|\band\b|\bor\b|\bthrough\b|\bthen\b)\s*`;
 const SHORT_VERSION = String.raw`\d{1,3}\.\d{1,3}(?:\.\d{1,3})?`;
 const QUOTE = `["'\`]?`;
@@ -110,7 +120,7 @@ export function scanText(text: string, context: ScanContext, fileName?: string):
       const all = new RegExp(rule.regex.source, `${rule.regex.flags}g`);
       m = null;
       for (let hit = all.exec(text); hit; hit = all.exec(text)) {
-        if (!VERSION_BEFORE.test(text.slice(Math.max(0, hit.index - 24), hit.index)) && !amongVersions(text, hit.index, hit[0].length)) {
+        if (!VERSION_BEFORE.test(text.slice(Math.max(0, hit.index - 24), hit.index)) && !amongVersions(text, hit.index, hit[0].length) && !namedVersion(text, hit.index, hit[0].length)) {
           m = hit;
           break;
         }

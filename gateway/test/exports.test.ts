@@ -4,7 +4,7 @@ import { exportSymbols } from '../src/tools/exports.ts';
 import type { Services } from '../src/tools/context.ts';
 
 const fact = { title: 'Fact:X/function/P Random', kind: 'function', status: 'claimed', level: 'software', applies_to: 'all', data: JSON.stringify({ name: 'P_Random', signature: '48 89 5C 24 ?? 57' }) };
-const s = { index: { resolveRedirect: (t: string) => t, page: () => ({ type: 'software' }), factsForSubject: () => [fact] } } as unknown as Services;
+const s = { index: { resolveRedirect: (t: string) => t, page: () => ({ type: 'software' }), factsForSubject: () => [fact], generalNeighbors: () => [] } } as unknown as Services;
 
 test('signature scan scripts escape bytes the way Python and Ghidra read them', () => {
   const ghidra = exportSymbols(s, { subject: 'Software:X', tool: 'ghidra' }).script;

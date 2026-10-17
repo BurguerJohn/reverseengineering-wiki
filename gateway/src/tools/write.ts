@@ -933,7 +933,8 @@ export async function linkRepo(s: Services, caller: Caller, args: {
     if (!SPDX_EXPRESSION.test(args.license.trim())) {
       throw new ToolError('BAD_REQUEST', 'license must be an SPDX id or expression, e.g. MIT, GPL-2.0-only, "Apache-2.0 WITH LLVM-exception" or "MIT OR Apache-2.0".');
     }
-    info.license = `${args.license} (declared: the detector found none; check the repository)`;
+    const file = /^unrecognized \(([^)]+)\)/.exec(info.license)?.[1];
+    info.license = `${args.license} (declared by the contributor; GitHub's detector did not recognize ${file ?? 'a license file'})`;
   }
   const checked = [
     `checked ${new Date().toISOString().slice(0, 10)}`,
