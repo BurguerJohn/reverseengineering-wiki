@@ -977,7 +977,7 @@ export async function ask(s: Services, caller: Caller, args: { subject: string; 
   let sections = parseSections(page.content);
   const section = findSection(sections, 'Open questions');
   const date = new Date().toISOString().slice(0, 10);
-  const line = `* ${escapeText(shortSummary(args.question, 400))}${args.context ? ` — ''${escapeText(shortSummary(args.context, 300))}''` : ''} (asked by [[User:${op.username}|${op.username}]], ${date})`;
+  const line = `* ${escapeText(shortSummary(args.question, 400))}${args.context ? ` — ''${escapeText(shortSummary(args.context, 600))}''` : ''} (asked by [[User:${op.username}|${op.username}]], ${date})`;
   const kept = (section?.body ?? '').split('\n').filter((l) => l.trim() && !/Nothing documented yet/.test(l));
   sections = section ? replaceSectionBody(sections, 'Open questions', [...kept, line].join('\n')) : insertSection(sections, 'Open questions', line, ['Evidence & references', 'See also']);
   const r = await mwEdit(s, op, {

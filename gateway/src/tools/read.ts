@@ -337,7 +337,8 @@ export async function read(s: Services, args: { title: string; section?: string;
     const md = [`**${code.meta.summary}**`, '```json', JSON.stringify(code.meta, null, 2), '```',
       ...code.files.flatMap((f) => [`### ${f.name}`, `\`\`\`${f.lang}`, f.content, '```'])].join('\n');
     const { text, truncated } = truncate(md, maxTokens);
-    return { ...base, status: code.meta.status, content: wrap(title, page.revid, text), truncated };
+    const checksums = code.files.map((f) => ({ name: f.name, sha256: createHash('sha256').update(f.content).digest('hex') }));
+    return { ...base, status: code.meta.status, files_sha256: checksums, content: wrap(title, page.revid, text), truncated };
   }
 
   if (format === 'wikitext') {

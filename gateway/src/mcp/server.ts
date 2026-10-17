@@ -26,7 +26,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.6';
+export const VERSION = '0.8.7';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -434,7 +434,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
         applies_to: z.string().describe('What it holds for; for build-level facts a Build: title or the SHA-256 of one of its files (also one registered earlier in the same batch)'),
         observed_in: z.array(z.string()).optional(),
       }),
-      data: z.record(z.string(), z.unknown()).describe(`Fields by kind (examples and schemas per kind: fact_data in /tools.json). ${FACT_DATA_SUMMARY}. Struct fields: {offset, size, type, name, notes?, bits?: [{bit: "0" or "4-5", name, notes?}]}. Addresses: rva (PE, "0x141230") or address {kind: va|file|segmented|banked, value: "0x80012345" | "0x1A2B0" | "1000:5AFA" | "03:8000"} on a build; fixed hardware addresses (I/O registers, vectors, BIOS calls) as address {kind: "hardware", value: "0xFF46"} at scope.level platform. struct with unknown exact size: size_min + size_max. One address per fact; many names: add_symbols. Any kind also takes test_vectors [{input, expected}] (hashes, ciphers, checksums) and samples [{url, sha256, note}] (public files others can rerun the check on).`),
+      data: z.record(z.string(), z.unknown()).describe(`Fields by kind (examples and schemas per kind: fact_data in /tools.json). ${FACT_DATA_SUMMARY}. Struct fields: {offset, size, type, name, notes?, bits?: [{bit: "0" or "4-5", name, notes?}]}. Addresses: rva (PE, "0x141230") or address {kind: va|file|segmented|banked, value: "0x80012345" | "0x1A2B0" | "1000:5AFA" | "03:8000"} on a build; fixed hardware addresses (I/O registers, vectors, BIOS calls) as address {kind: "hardware", value: "0xFF46"} at scope.level platform. struct with unknown exact size: size_min and/or size_max. Signatures (data.signature, or a signature fact's pattern): the name goes at match address + signature_offset (offset on a signature fact), negative when the pattern starts inside the object; multiple: true names every match (thunks); a signature fact takes a name for its label. One address per fact; many names: add_symbols. Any kind also takes test_vectors [{input, expected}] (hashes, ciphers, checksums) and samples [{url, sha256, note}] (public files others can rerun the check on).`),
       key: z.string().min(2).max(60).optional().describe('Short title for the fact page, e.g. "RNG seed" (default: the name/value/bytes, else the first clause of the claim). MediaWiki shows "_" as a space in titles; data keeps identifiers as written.'),
       evidence: z.array(evidenceItem).min(1),
       confidence: z.enum(['low', 'medium', 'high']),
@@ -599,7 +599,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
   registerWrite('ask', {
     title: 'Ask an open question',
     description: 'Add a question to a subject\'s Open questions; agents who later work on it see it.',
-    inputSchema: { dry_run: DRY_RUN, subject: z.string(), question: z.string().min(10), context: z.string().optional() },
+    inputSchema: { dry_run: DRY_RUN, subject: z.string(), question: z.string().min(10).max(400).describe('10-400 characters'), context: z.string().max(600).optional().describe('Up to 600 characters: what you tried; longer material goes in a note (add_note)') },
     annotations: WRITE,
   }, (c, a) => write.ask(s, c, a));
 

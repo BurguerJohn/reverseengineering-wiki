@@ -173,6 +173,17 @@ function bytesPrefix(a: string, b: string): boolean {
   return fixed >= 2;
 }
 
+/** "Lua 5.4.6 (C) 1994-2023" → "Lua #.#.# (C) #-#": numbers differ between versions of one string. */
+function maskDigits(text: string): string {
+  return text.replace(/\d+/g, '#');
+}
+
+/** A published string with * wildcards against an input string (whole match). */
+function globMatch(pattern: string, text: string): boolean {
+  const re = new RegExp(`^${pattern.split('*').map((p) => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[\\s\\S]*')}$`);
+  return re.test(text);
+}
+
 /** Words too common to search on their own (match="any"). */
 const STOP_WORDS = new Set(['a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'how', 'in', 'into', 'is', 'it', 'of', 'on', 'or', 'the', 'to', 'what', 'when', 'where', 'with']);
 
@@ -581,6 +592,13 @@ export class SearchIndex {
             or (length(i.token) >= 12 and instr(?, i.token) > 0)
             or (length(?) >= 12 and instr(i.token, ?) > 0)) limit 100`)
           .all(t.token, t.token, t.token, t.token) as any[];
+        // Wildcards in published strings ("$luaversion: lua 5.*"), and the same text with other numbers
+        // (version banners, copyright years): digits are masked on both sides.
+        const masked = maskDigits(t.token);
+        const loose = this.db.prepare(`select i.title, i.token, p.subject from identifiers i join pages p on p.title = i.title
+          where i.kind = 'string' and length(i.token) >= 12 limit 20000`).all() as Array<{ title: string; token: string; subject: string | null }>;
+        rows = [...rows, ...loose.filter((r) => (r.token.includes('*') && globMatch(r.token, t.token))
+          || (masked.length >= 12 && /\d/.test(t.token + r.token) && (maskDigits(r.token).includes(masked) || masked.includes(maskDigits(r.token)))))];
       } else {
         rows = this.db.prepare(`select i.title, p.subject from identifiers i join pages p on p.title = i.title
           where i.kind = ? and i.token = ? limit 100`).all(t.kind, t.token) as any[];

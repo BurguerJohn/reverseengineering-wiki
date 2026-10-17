@@ -214,13 +214,15 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
     } else if (f.kind === 'enum') {
       const name = ident(fieldName(data.name).name.replace(/_+$/, ''), 'UnnamedEnum');
       lines.push(`typedef enum ${name} {`);
-      for (const v of enumValues(data.values)) {
+      const values = enumValues(data.values).map((v) => ({ ...v, named: fieldName(v.name) }));
+      // Enum constants share one C namespace: when any constant of this enum is already used (NONE, OP_MOVE
+      // in two opcode tables), all of its constants get the enum's name in front, so the names stay regular.
+      const prefixAll = values.some((v) => enumConstants.has(ident(v.named.name, 'VALUE')));
+      for (const v of values) {
         // "MF_SPECIAL (multiplayer only)": the identifier, and the rest as a comment.
-        const named = fieldName(v.name);
+        const named = v.named;
         const literal = v.value === null ? '' : v.value < 0 ? ` = ${v.value}` : ` = 0x${v.value.toString(16).toUpperCase()}`;
-        // Enum constants share one C namespace: a name already used (NONE, UNKNOWN) gets the enum's name in front.
-        let id = ident(named.name, 'VALUE');
-        if (enumConstants.has(id)) id = ident(`${name}_${id}`, 'VALUE');
+        let id = prefixAll ? ident(`${name}_${named.name}`, 'VALUE') : ident(named.name, 'VALUE');
         for (let n = 2; enumConstants.has(id); n++) id = `${ident(`${name}_${named.name}`, 'VALUE')}_${n}`;
         enumConstants.add(id);
         lines.push(`    ${id}${literal},${named.rest ? ` /* ${comment(named.rest)} */` : ''}`);

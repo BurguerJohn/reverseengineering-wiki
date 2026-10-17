@@ -951,6 +951,19 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const noisy = await call(anon, 'identify', { patterns: ['E8 ?? ?? ?? ?? 90 90 90'] });
   assert.ok(!noisy.candidates.some((c: any) => c.subject === `Format:E2E Track ${run}`), JSON.stringify(noisy).slice(0, 500));
 
+  // Version banners match across versions; a colliding enum is prefixed whole.
+  await call(a, 'add_fact', { kind: 'identification', subject: `Format:E2E Track ${run}`, claim: 'Fictional track tools embed a version banner.', scope: { level: 'format', applies_to: 'all versions' },
+    data: { method: 'string', indicator: `$TrackVersion: Track 2.1.4 (C) 1994-2012 E2E${run} $` }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const banner = await call(anon, 'identify', { strings: [`$TrackVersion: Track 3.0.1 (C) 1994-2023 E2E${run} $`] });
+  assert.equal(banner.candidates[0]?.subject, `Format:E2E Track ${run}`, JSON.stringify(banner).slice(0, 400));
+  await call(a, 'add_fact', { kind: 'enum', subject: `Format:E2E Track ${run}`, claim: 'The fictional second save types enum.', scope: { level: 'format', applies_to: 'all versions' },
+    data: { name: 'SaveType2', values: { 0: 'CC_CDECL', 1: 'SAVE_FLASH' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const prefixed = (await call(anon, 'export_header', { subject: `Format:E2E Track ${run}` })).header;
+  assert.match(prefixed, /SaveType2_CC_CDECL = 0x0,\n {4}SaveType2_SAVE_FLASH = 0x1,/, prefixed);
+  // Over the context limit: refused by the input schema (MCP error), never stored cut short.
+  const tooLong = await a.callTool({ name: 'ask', arguments: { subject: `Format:E2E Track ${run}`, question: 'Is the fictional banner always present?', context: 'x'.repeat(700), dry_run: true } }) as any;
+  assert.ok(tooLong.isError && /context/i.test(JSON.stringify(tooLong.content)), JSON.stringify(tooLong).slice(0, 300));
+
   // A dry run hands back a check_id: publish_checked publishes exactly that, once.
   const checkedNote = await call(a, 'add_note', { subject: cave, key: 'Checked once', body: 'Published by check_id without resending the arguments.', confidence: 'low', dry_run: true });
   assert.ok(checkedNote.check_id, JSON.stringify(checkedNote).slice(0, 200));
