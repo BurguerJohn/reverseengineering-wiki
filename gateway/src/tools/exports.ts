@@ -96,7 +96,7 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
     const data = JSON.parse(f.data);
     lines.push(`/* [${f.status}] ${comment(f.title)} */`);
     if (f.kind === 'struct') {
-      const name = ident(data.name, 'UnnamedStruct');
+      const name = ident(fieldName(data.name).name, 'UnnamedStruct');
       const size = hexNum(data.size);
       const fields = (Array.isArray(data.fields) ? data.fields : [])
         .map((x: any) => {
@@ -115,18 +115,24 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
           continue;
         }
         const fieldId = field.name || `field_${field.offset.toString(16).toUpperCase()}`;
-        let type = field.type;
+        // "int16_t[2][4]", "char[8]": typed arrays; a symbolic length ("[width]") stays bytes with a note.
+        const array = /^(.*?)\s*((?:\[[^\]]*\])+)$/.exec(field.rawType.trim());
+        const dims = array ? [...array[2].matchAll(/\[\s*([^\]]*?)\s*\]/g)].map((d) => d[1]) : [];
+        const numericDims = dims.length > 0 && dims.every((d) => /^(?:0x[0-9a-f]+|\d+)$/i.test(d));
+        let type = array ? cType(array[1]) : field.type;
         let note = field.notes;
+        if (array && !numericDims) { note = [`${field.rawType}`, note].filter(Boolean).join('; '); type = null; }
         const base = type?.replace(/^const\s+/, '').replace(/\s*\*+$/, '');
         if (type && base && !BUILTIN.test(type) && !defined.has(base)) {
           if (type.includes('*')) forward.add(base);
           else {
             // A type from another page, by value: its bytes, with the type named in a comment.
-            note = [`${base} (defined on another page)`, note].filter(Boolean).join('; ');
+            note = [`${field.rawType} (defined on another page)`, note].filter(Boolean).join('; ');
             type = null;
           }
         }
-        const decl = type ? `${type} ${fieldId};` : `uint8_t ${fieldId}[0x${(field.size ?? 1).toString(16).toUpperCase()}];`;
+        const suffix = type && numericDims ? dims.map((d) => `[${d}]`).join('') : '';
+        const decl = type ? `${type} ${fieldId}${suffix};` : `uint8_t ${fieldId}[0x${(field.size ?? 1).toString(16).toUpperCase()}];`;
         lines.push(`    /* 0x${field.offset.toString(16).toUpperCase().padStart(2, '0')} */ ${decl}${note ? ` /* ${comment(note)} */` : ''}`);
         // Bit fields as comments under the field (C bit-field layout is not portable).
         for (const b of field.bits) lines.push(`    /*        bit ${comment(b?.bit)}: ${comment(b?.name)}${b?.notes ? ` (${comment(b.notes)})` : ''} */`);
@@ -135,10 +141,12 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
       if (size !== null && size > cursor) lines.push(`    uint8_t _pad_${cursor.toString(16).toUpperCase()}[0x${(size - cursor).toString(16).toUpperCase()}];`);
       lines.push(`} ${name};${size !== null ? ` /* size 0x${size.toString(16).toUpperCase()} */` : ''}`, '');
     } else if (f.kind === 'enum') {
-      const name = ident(data.name, 'UnnamedEnum');
+      const name = ident(fieldName(data.name).name, 'UnnamedEnum');
       lines.push(`typedef enum ${name} {`);
       for (const v of enumValues(data.values)) {
-        lines.push(`    ${ident(v.name, 'VALUE')}${v.value !== null ? ` = 0x${v.value.toString(16).toUpperCase()}` : ''},`);
+        // "MF_SPECIAL (multiplayer only)": the identifier, and the rest as a comment.
+        const named = fieldName(v.name);
+        lines.push(`    ${ident(named.name, 'VALUE')}${v.value !== null ? ` = 0x${v.value.toString(16).toUpperCase()}` : ''},${named.rest ? ` /* ${comment(named.rest)} */` : ''}`);
       }
       lines.push(`} ${name};`, '');
     } else if (f.kind === 'vtable') {
@@ -224,8 +232,99 @@ print("ReverseEngineering.wiki: applied %d hardware names" % len(SYMBOLS))
   };
 }
 
-export function exportSymbols(s: Services, args: { build?: string; platform?: string; tool: SymbolTool }) {
-  if (!args.build && !args.platform) throw new ToolError('BAD_REQUEST', 'Give build (an exact binary) or platform (its fixed hardware addresses).');
+/**
+ * Signature facts of a subject as a script that scans the user's own binary: each pattern found
+ * exactly once gets its name. Knowledge from source releases and other builds applies to any build.
+ */
+function exportSignatureScan(s: Services, args: { subject: string; tool: SymbolTool }) {
+  const subject = s.index.resolveRedirect(cleanTitle(args.subject, SUBJECT_TYPES));
+  if (!s.index.page(subject)) throw new ToolError('NOT_FOUND', `"${subject}" does not exist.`);
+  const sigs: Array<{ name: string; pattern: string; kind: string; status: string; fact: string; prototype?: string }> = [];
+  for (const f of s.index.factsForSubject(subject).filter((x) => x.status !== 'rejected')) {
+    const d = JSON.parse(f.data);
+    const pattern = typeof d.signature === 'string' ? d.signature : typeof d.pattern === 'string' ? d.pattern : null;
+    if (!pattern || !/^(?:[0-9A-Fa-f]{2}|\?\??)(?:\s+(?:[0-9A-Fa-f]{2}|\?\??))+$/.test(pattern.trim())) continue;
+    sigs.push({ name: qualifiedName(d.name ?? d.class ?? f.title.split('/').pop(), `rewiki_${f.kind}`), pattern: pattern.trim().toUpperCase().replace(/\?\??/g, '??'), kind: f.kind, status: f.status, fact: f.title, prototype: typeof d.prototype === 'string' ? d.prototype : undefined });
+  }
+  const ascii = (x: string) => JSON.stringify(x.replace(/[^\x20-\x7e]/g, '?'));
+  const list = sigs.map((x) => `    (${ascii(x.name)}, ${ascii(x.pattern)}, ${ascii(x.kind)}, ${ascii(x.status)}, ${ascii(x.fact)}),`).join('\n');
+  const head = `# ${HEADER_NOTE}\n# Signatures of: ${comment(subject)}\n# Generated: ${new Date().toISOString()}\n`;
+  let script: string;
+  if (args.tool === 'json' || args.tool === 'sym') script = JSON.stringify({ subject, signatures: sigs }, null, 2);
+  else if (args.tool === 'ghidra') {
+    script = `${head}# Run in Ghidra's Script Manager (Jython or PyGhidra) with your program open. It searches the program
+# for each signature and names a match only when it is unique.
+from ghidra.program.model.symbol import SourceType
+
+SIGNATURES = [
+${list}
+]
+
+def to_regex(pattern):
+    return "".join("[\\\\x00-\\\\xff]" if b == "??" else "\\\\x" + b for b in pattern.split())
+
+named = 0
+for name, pattern, kind, status, fact in SIGNATURES:
+    hits = findBytes(currentProgram.getMinAddress(), to_regex(pattern), 2)
+    if len(hits) != 1:
+        print("%s: %d matches, not named" % (name, len(hits)))
+        continue
+    addr = hits[0]
+    if kind == "function" and getFunctionAt(addr) is None:
+        createFunction(addr, name)
+    createLabel(addr, name, True, SourceType.USER_DEFINED)
+    setPlateComment(addr, "ReverseEngineering.wiki [%s] %s (signature match)" % (status, fact))
+    named += 1
+print("ReverseEngineering.wiki: named %d of %d signatures" % (named, len(SIGNATURES)))
+`;
+  } else {
+    script = `${head}# Run in IDA via File > Script file (IDAPython) with your database open. It searches for each signature
+# and names a match only when it is unique.
+import idaapi, idc, ida_bytes, ida_funcs, ida_name
+
+SIGNATURES = [
+${list}
+]
+
+def find_all(pattern, limit=2):
+    hits, ea, end = [], idaapi.inf_get_min_ea(), idaapi.inf_get_max_ea()
+    pat = pattern.replace("??", "?")
+    while len(hits) < limit:
+        try:
+            ea = ida_bytes.find_bytes(pat, ea, range_end=end)
+        except AttributeError:
+            ea = idc.find_binary(ea, idc.SEARCH_DOWN, pat)
+        if ea == idaapi.BADADDR:
+            break
+        hits.append(ea)
+        ea += 1
+    return hits
+
+named = 0
+for name, pattern, kind, status, fact in SIGNATURES:
+    hits = find_all(pattern)
+    if len(hits) != 1:
+        print("%s: %d matches, not named" % (name, len(hits)))
+        continue
+    ea = hits[0]
+    if kind == "function":
+        ida_funcs.add_func(ea)
+    ida_name.set_name(ea, name, ida_name.SN_NOWARN | ida_name.SN_NOCHECK | ida_name.SN_FORCE)
+    idc.set_cmt(ea, "ReverseEngineering.wiki [%s] %s (signature match)" % (status, fact), 1)
+    named += 1
+print("ReverseEngineering.wiki: named %d of %d signatures" % (named, len(SIGNATURES)))
+`;
+  }
+  return {
+    subject, tool: args.tool, signatures: sigs.length, script,
+    hint: sigs.length ? undefined : 'No signature facts on this subject yet: add_fact with data.signature (bytes with ?? wildcards).',
+    warning: 'Review generated scripts before running. A signature that matches more than once is reported, not applied.',
+  };
+}
+
+export function exportSymbols(s: Services, args: { build?: string; platform?: string; subject?: string; tool: SymbolTool }) {
+  if (!args.build && !args.platform && !args.subject) throw new ToolError('BAD_REQUEST', 'Give build (an exact binary), platform (its fixed hardware addresses) or subject (a script that finds its signatures in your binary).');
+  if (args.subject && !args.build) return exportSignatureScan(s, { subject: args.subject, tool: args.tool });
   if (args.platform && !args.build) return exportPlatformSymbols(s, { platform: args.platform, tool: args.tool });
   const build = s.index.resolveRedirect(cleanTitle(args.build!, ['build']));
   if (!s.index.page(build)) throw new ToolError('NOT_FOUND', `"${build}" is not a known build. Use lookup_binary or register_build.`);

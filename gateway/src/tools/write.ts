@@ -754,7 +754,10 @@ export async function addCode(s: Services, caller: Caller, args: {
     baseRev = page.revid;
   } else {
     if (!args.name) throw new ToolError('BAD_REQUEST', 'name is required for a new Code page (e.g. "SGO parser").');
-    t = normalizeTitle(`Code:${baseName(subjects[0])}/${titleSegment(args.name, 80)} (${titleSegment(languageName(args.language), 20)})`);
+    const lang = languageName(args.language);
+    // "WAD inspector (Python)" with language python: the language is added once.
+    const bare = args.name.replace(/\s*\(([^)]*)\)\s*$/, (m, inner: string) => (languageName(inner).toLowerCase() === lang.toLowerCase() ? '' : m));
+    t = normalizeTitle(`Code:${baseName(subjects[0])}/${titleSegment(bare, 80)} (${titleSegment(lang, 20)})`);
     if (await currentPage(s, t)) {
       throw new ToolError('DUPLICATE_SUSPECTED', `"${t}" already exists. Read it, then update it with title and base_revision.`, { existing: t, url: link(s, t) });
     }

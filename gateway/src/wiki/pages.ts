@@ -192,15 +192,18 @@ export function checkFactData(kind: FactKind, data: Record<string, unknown>): st
       need('name'); need('fields');
       if (data.fields !== undefined && !Array.isArray(data.fields)) problems.push('data.fields must be an array of {offset, size, type, name}');
       const ranged = data.size_min !== undefined || data.size_max !== undefined;
-      if (data.size !== undefined) {
-        if (sizeValue(data.size) === null) problems.push('data.size must be a number or hex string (136 or "0x88"); if the exact size is unknown, leave size out and give size_min and size_max');
+      if (data.size === 'variable') {
+        // Variable-length records (a count field followed by entries): fine, say how long in notes.
+        if (ranged) problems.push('give either data.size "variable" or data.size_min + data.size_max, not both');
+      } else if (data.size !== undefined) {
+        if (sizeValue(data.size) === null) problems.push('data.size must be a number or hex string (136 or "0x88"), or "variable" for records whose length depends on a count field; if the exact size is unknown, leave size out and give both size_min and size_max');
         if (ranged) problems.push('give either data.size or data.size_min + data.size_max, not both');
       } else if (!ranged) {
         problems.push('data.size is required for kind "struct" (if it is not known exactly: data.size_min and data.size_max)');
       } else {
         const lo = sizeValue(data.size_min);
         const hi = sizeValue(data.size_max);
-        if (lo === null || hi === null) problems.push('data.size_min and data.size_max must both be numbers or hex strings');
+        if (lo === null || hi === null) problems.push('give both data.size_min and data.size_max as numbers or hex strings (an upper bound you are sure of is fine), or data.size "variable"');
         else if (lo > hi) problems.push('data.size_min must not exceed data.size_max');
       }
       break;

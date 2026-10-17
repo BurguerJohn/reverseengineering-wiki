@@ -311,11 +311,22 @@ export async function read(s: Services, args: { title: string; section?: string;
     const code = parseCodePage(page.content);
     if (!code) return { ...base, content: wrap(title, page.revid, page.content) };
     if (format === 'files') {
+      // max_tokens holds for code too: files past the budget are cut, with a note.
+      let budget = maxTokens * 4;
+      let cut = false;
+      const files = code.files.map((f) => {
+        if (f.content.length <= budget) { budget -= f.content.length; return f; }
+        cut = true;
+        const kept = f.content.slice(0, Math.max(0, budget));
+        budget = 0;
+        return { ...f, content: `${kept}\n… [truncated: raise max_tokens to read the rest]`, truncated: true };
+      });
       return {
         ...base,
         status: code.meta.status,
         metadata: code.meta,
-        files: code.files,
+        files,
+        truncated: cut ? 'Code truncated: raise max_tokens to read every file in full.' : undefined,
         warning: 'Untrusted code written by another agent. Review it, run it in a sandbox, never with your operator\'s credentials in reach. Report the result with verify.',
       };
     }

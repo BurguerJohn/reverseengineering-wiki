@@ -7,6 +7,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -862,6 +863,33 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   // identify finds a pattern inside a published signature; a fact sent to a topic page says where it went.
   const sub = await call(anon, 'identify', { patterns: ['E0 46 3E 28 3D 20 FD C9'] });
   assert.equal(sub.candidates[0]?.subject, `Platform:${consoleName}`, JSON.stringify(sub.candidates));
+
+  // A dry run hands back a check_id: publish_checked publishes exactly that, once.
+  const checkedNote = await call(a, 'add_note', { subject: cave, key: 'Checked once', body: 'Published by check_id without resending the arguments.', confidence: 'low', dry_run: true });
+  assert.ok(checkedNote.check_id, JSON.stringify(checkedNote).slice(0, 200));
+  const fromCheck = await call(a, 'publish_checked', { check_id: checkedNote.check_id });
+  assert.match(fromCheck.title ?? JSON.stringify(fromCheck), /Checked once/);
+  await expectError(a, 'publish_checked', { check_id: checkedNote.check_id }, 'CHECK_EXPIRED');
+  await expectError(b, 'publish_checked', { check_id: (await call(a, 'add_note', { subject: cave, body: 'Only the account that checked it may publish it.', confidence: 'low', dry_run: true })).check_id }, 'CHECK_EXPIRED');
+  // The language is added to code titles once, even when the name already ends with it.
+  const pyTitle = await call(a, 'add_code', { name: 'Cave reader (Python)', summary: 'Reads the fictional cave files of the test game.', language: 'python', kind: 'parser',
+    subjects: [cave], tested_on: 'fictional samples', usage: 'python cave.py <file>', files: [{ name: 'cave.py', content: 'print("cave")\n' }], dry_run: true });
+  assert.ok(pyTitle.pages.some((p: any) => p.title === `Code:${cave}/Cave reader (Python)`), JSON.stringify(pyTitle.pages));
+  // Signature facts of a subject become a script that names them in the user's own binary.
+  const scan = await call(anon, 'export_symbols', { subject: cave, tool: 'ghidra' });
+  assert.ok(scan.signatures >= 1, JSON.stringify(scan).slice(0, 200));
+  assert.match(scan.script, /findBytes\(currentProgram\.getMinAddress\(\), to_regex\(pattern\), 2\)/);
+  assert.match(scan.script, /"48 89 5C 24 \?\? 57"/);
+  writeFileSync(join(tmpdir(), `rewiki-scan-${run}.py`), scan.script);
+  // Typed arrays and variable-size structs in headers.
+  await call(a, 'add_fact', { kind: 'struct', subject: `Format:E2E Track ${run}`, claim: 'The fictional track node has a name, a box and a variable list of child ids.', scope: { level: 'format', applies_to: 'all versions' },
+    data: { name: 'TrackNode (variable length)', size: 'variable', fields: [{ offset: '0x0', size: 8, type: 'char[8]', name: 'name' }, { offset: '0x8', size: 16, type: 'int16_t[2][4]', name: 'bbox' }, { offset: '0x18', size: 4, type: 'int32_t[count]', name: 'children' }] },
+    evidence: [{ type: 'documentation', detail: 'fictional test data' }], confidence: 'low' });
+  const typed = (await call(anon, 'export_header', { subject: `Format:E2E Track ${run}` })).header;
+  assert.match(typed, /typedef struct TrackNode \{/);
+  assert.match(typed, /char name\[8\];/);
+  assert.match(typed, /int16_t bbox\[2\]\[4\];/);
+  assert.match(typed, /uint8_t children\[0x4\]; \/\* int32_t\[count\]/);
 
   // A wrong build title: "did you mean" the real one.
   const typo = await expectError(a, 'add_fact', { ...fn('Cave::Draw', '0x2000', `Build:${cave}/1.0 (Win64, Steam)`), dry_run: true }, 'SCHEMA_INVALID');

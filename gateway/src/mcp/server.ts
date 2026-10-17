@@ -8,7 +8,7 @@ import { resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ElicitResultSchema, type ElicitRequest, type ServerNotification, type ServerRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { REPO_DIR } from '../config.ts';
 import { ToolError, batchContext, quotaError, requireWriter, type Caller, type Preview, type Services } from '../tools/context.ts';
@@ -26,7 +26,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.7.9';
+export const VERSION = '0.8.0';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -142,13 +142,33 @@ function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Ca
     const { dry_run: dryRun, review_id: reviewId, ...rest } = args ?? {};
     const mode = caller.operator ? s.db.operatorById(caller.operator.id)?.mode : undefined;
     const reviewed = !!review && mode === 'review';
-    if (dryRun) return compactPreview(await dryRunOf(s, caller, fn, rest, reviewed));
+    if (dryRun) {
+      const checked = compactPreview(await dryRunOf(s, caller, fn, rest, reviewed));
+      if (!caller.operator) return checked;
+      return { ...checked, check_id: rememberCheck(name, rest, caller.operator.id), publish_with: 'publish_checked with this check_id publishes exactly what was checked, without resending it (valid 30 minutes).' };
+    }
     if (!reviewed) return fn(caller, rest);
     const how = await approve(s, review!, caller.operator!.id, name, rest, await dryRunOf(s, caller, fn, rest, true), typeof reviewId === 'string' ? reviewId : undefined, extra);
     const out = await fn({ ...caller, approved: how }, rest);
     // The agent does not see the client's prompt: tell it the approval happened.
     return { ...out, review: how === 'client' ? 'Approved by your operator in their MCP client (that prompt is shown to them, not to you).' : 'Approved by your operator on the review page.' };
   });
+}
+
+/**
+ * What dry runs checked, so it can be published as checked without resending it (publish_checked).
+ * In memory: one process, and a check is only good for a short while anyway.
+ */
+const CHECKED = new Map<string, { tool: string; args: Record<string, unknown>; operatorId: number; at: number }>();
+const CHECK_TTL_MS = 30 * 60_000;
+
+function rememberCheck(tool: string, args: Record<string, unknown>, operatorId: number): string {
+  const now = Date.now();
+  for (const [id, c] of CHECKED) if (now - c.at > CHECK_TTL_MS) CHECKED.delete(id);
+  if (CHECKED.size > 5000) CHECKED.delete(CHECKED.keys().next().value!);
+  const id = randomBytes(12).toString('base64url');
+  CHECKED.set(id, { tool, args, operatorId, at: now });
+  return id;
 }
 
 const PREVIEW_PER_PAGE = 3000;
@@ -351,10 +371,11 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('export_symbols', {
     title: 'Export a symbol script',
-    description: 'Ghidra or IDA script, JSON, or an RGBDS-style .sym file (bank:address name, for banked ROMs and emulators) naming every known function/global/vtable: of an exact build (facts plus its symbol map; get it from lookup_binary), or of a platform\'s fixed hardware addresses (platform: "Platform:Game Boy"), the same for every program on it.',
+    description: 'Ghidra or IDA script, JSON, or an RGBDS-style .sym file (bank:address name, for banked ROMs and emulators) naming every known function/global/vtable: of an exact build (facts plus its symbol map; get it from lookup_binary); of a platform\'s fixed hardware addresses (platform: "Platform:Game Boy"); or, for any subject (subject: "Software:Doom", a library or format), a script that searches YOUR binary for every published byte signature of that subject and names what it finds once (the binary never leaves your machine).',
     inputSchema: {
       build: z.string().optional().describe('Build: page (or a file SHA-256 via lookup_binary)'),
       platform: z.string().optional().describe('Platform: page, for its hardware addresses (I/O registers, vectors, BIOS calls)'),
+      subject: z.string().optional().describe('A software, library or format page: a script that finds its signature facts in your binary'),
       tool: z.enum(['ghidra', 'ida', 'json', 'sym']),
     },
     annotations: READ,
@@ -365,11 +386,15 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
   // Every write tool is registered once and kept here, so batch can validate and run it.
   type Run = (c: Caller, args: any) => Promise<Record<string, unknown>> | Record<string, unknown>;
   const writeTools = new Map<string, { schema: z.ZodTypeAny; run: Run }>();
+  // The wrapped handler of every write tool, for publish_checked.
+  const handlers = new Map<string, (args: any, extra: Extra) => Promise<Result>>();
   const registerWrite = (name: string, config: { inputSchema: Record<string, z.ZodTypeAny> } & Record<string, unknown>, run: Run) => {
     const { dry_run: _unused, ...shape } = config.inputSchema;
     writeTools.set(name, { schema: z.object(shape), run });
     const inputSchema = review ? { ...config.inputSchema, review_id: REVIEW_ID } : config.inputSchema;
-    server.registerTool(name, { ...config, inputSchema } as any, writeHandler(s, caller, name, run, review) as any);
+    const wrapped = writeHandler(s, caller, name, run, review);
+    handlers.set(name, wrapped);
+    server.registerTool(name, { ...config, inputSchema } as any, wrapped as any);
   };
 
   if (review) registerAccountTools(s, server, caller, opts.accounts);
@@ -402,7 +427,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
         observed_in: z.array(z.string()).optional(),
       }),
       data: z.record(z.string(), z.unknown()).describe(`Fields by kind (examples and schemas per kind: fact_data in /tools.json). ${FACT_DATA_SUMMARY}. Struct fields: {offset, size, type, name, notes?, bits?: [{bit: "0" or "4-5", name, notes?}]}. Addresses: rva (PE, "0x141230") or address {kind: va|file|segmented|banked, value: "0x80012345" | "0x1A2B0" | "1000:5AFA" | "03:8000"} on a build; fixed hardware addresses (I/O registers, vectors, BIOS calls) as address {kind: "hardware", value: "0xFF46"} at scope.level platform. struct with unknown exact size: size_min + size_max. One address per fact; many names: add_symbols. Any kind also takes test_vectors [{input, expected}] (hashes, ciphers, checksums) and samples [{url, sha256, note}] (public files others can rerun the check on).`),
-      key: z.string().min(2).max(60).optional().describe('Short title for the fact page, e.g. "RNG seed" (default: the name/value/bytes, else the first clause of the claim)'),
+      key: z.string().min(2).max(60).optional().describe('Short title for the fact page, e.g. "RNG seed" (default: the name/value/bytes, else the first clause of the claim). MediaWiki shows "_" as a space in titles; data keeps identifiers as written.'),
       evidence: z.array(evidenceItem).min(1),
       confidence: z.enum(['low', 'medium', 'high']),
       related: z.array(z.string()).optional(),
@@ -608,7 +633,26 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       })).min(1).max(MAX_BATCH),
     },
     annotations: WRITE,
-  }, writeHandler(s, caller, 'batch', (c, a) => runBatch(s, c, a.operations, writeTools), review));
+  }, (() => {
+    const wrapped = writeHandler(s, caller, 'batch', (c, a) => runBatch(s, c, a.operations, writeTools), review);
+    handlers.set('batch', wrapped);
+    return wrapped;
+  })());
+
+  server.registerTool('publish_checked', {
+    title: 'Publish what a dry run checked',
+    description: 'Publish exactly what an earlier dry run (of any write tool or batch) checked, by the check_id it returned, without resending the arguments. Good for 30 minutes, for the same account.',
+    inputSchema: { check_id: z.string(), dry_run: DRY_RUN, ...(review ? { review_id: REVIEW_ID } : {}) },
+    annotations: WRITE,
+  }, (async (a: any, extra: Extra) => {
+    const checked = CHECKED.get(String(a.check_id));
+    if (!checked || checked.operatorId !== caller.operator?.id || Date.now() - checked.at > CHECK_TTL_MS) {
+      return fail(new ToolError('CHECK_EXPIRED', 'Unknown or expired check_id (they last 30 minutes, for the account that ran the dry run). Run the dry run again.'));
+    }
+    const result = await handlers.get(checked.tool)!({ ...checked.args, ...(a.dry_run ? { dry_run: true } : {}), ...(a.review_id ? { review_id: a.review_id } : {}) }, extra);
+    if (!result.isError && !a.dry_run) CHECKED.delete(String(a.check_id));
+    return result;
+  }) as any);
 
   return withResources(server);
 }
