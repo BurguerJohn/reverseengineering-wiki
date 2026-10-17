@@ -338,22 +338,29 @@ if unmapped:
 function exportSignatureScan(s: Services, args: { subject: string; tool: SymbolTool }) {
   const subject = s.index.resolveRedirect(cleanTitle(args.subject, SUBJECT_TYPES));
   if (!s.index.page(subject)) throw new ToolError('NOT_FOUND', `"${subject}" does not exist.`);
-  const sigs: Array<{ name: string; pattern: string; kind: string; status: string; fact: string; prototype?: string }> = [];
+  const sigs: Array<{ name: string; pattern: string; kind: string; status: string; fact: string; prototype?: string; offset: number }> = [];
   for (const f of s.index.factsForSubject(subject).filter((x) => x.status !== 'rejected')) {
     const d = JSON.parse(f.data);
     const pattern = typeof d.signature === 'string' ? d.signature : typeof d.pattern === 'string' ? d.pattern : null;
     if (!pattern || !/^(?:[0-9A-Fa-f]{2}|\?\??)(?:\s+(?:[0-9A-Fa-f]{2}|\?\??))+$/.test(pattern.trim())) continue;
-    sigs.push({ name: qualifiedName(d.name ?? d.class ?? f.title.split('/').pop(), `rewiki_${f.kind}`), pattern: pattern.trim().toUpperCase().replace(/\?\??/g, '??'), kind: f.kind, status: f.status, fact: f.title, prototype: typeof d.prototype === 'string' ? d.prototype : undefined });
+    // The name goes at match start + offset: signature_offset (function/global), or offset of a signature fact; negative = before.
+    const raw = d.signature_offset ?? (f.kind === 'signature' ? d.offset : undefined);
+    const offset = typeof raw === 'string' && /^-/.test(raw.trim()) ? -(hexNum(raw.trim().slice(1)) ?? 0) : hexNum(raw) ?? 0;
+    sigs.push({ name: qualifiedName(d.name ?? d.class ?? f.title.split('/').pop(), `rewiki_${f.kind}`), pattern: pattern.trim().toUpperCase().replace(/\?\??/g, '??'), kind: f.kind, status: f.status, fact: f.title, prototype: typeof d.prototype === 'string' ? d.prototype : undefined, offset });
   }
   const ascii = (x: string) => JSON.stringify(x.replace(/[^\x20-\x7e]/g, '?'));
-  const list = sigs.map((x) => `    (${ascii(x.name)}, ${ascii(x.pattern)}, ${ascii(x.kind)}, ${ascii(x.status)}, ${ascii(x.fact)}),`).join('\n');
+  const list = sigs.map((x) => `    (${ascii(x.name)}, ${ascii(x.pattern)}, ${ascii(x.kind)}, ${ascii(x.status)}, ${ascii(x.fact)}, ${x.offset}),`).join('\n');
   const head = `# ${HEADER_NOTE}\n# Signatures of: ${comment(subject)}\n# Generated: ${new Date().toISOString()}\n`;
   let script: string;
   if (args.tool === 'json' || args.tool === 'sym') script = JSON.stringify({ subject, signatures: sigs }, null, 2);
   else if (args.tool === 'ghidra') {
     script = `${head}# Run in Ghidra's Script Manager (Jython or PyGhidra) with your program open. It searches the program
-# for each signature and names a match only when it is unique.
+# for each signature and names a match only when it is unique; data tables (kind "global") compiled in
+# more than once get every copy named (_2, _3...). Set LABEL_ALL = True to do that for functions too.
 from ghidra.program.model.symbol import SourceType
+
+LABEL_ALL = False
+MAX_COPIES = 16
 
 SIGNATURES = [
 ${list}
@@ -363,23 +370,30 @@ def to_regex(pattern):
     return "".join("[\\\\x00-\\\\xff]" if b == "??" else "\\\\x" + b for b in pattern.split())
 
 named = 0
-for name, pattern, kind, status, fact in SIGNATURES:
-    hits = findBytes(currentProgram.getMinAddress(), to_regex(pattern), 2)
-    if len(hits) != 1:
+for name, pattern, kind, status, fact, offset in SIGNATURES:
+    every = LABEL_ALL or kind == "global"
+    hits = findBytes(currentProgram.getMinAddress(), to_regex(pattern), MAX_COPIES if every else 2)
+    if not hits or (len(hits) > 1 and not every):
         print("%s: %d matches, not named" % (name, len(hits)))
         continue
-    addr = hits[0]
-    if kind == "function" and getFunctionAt(addr) is None:
-        createFunction(addr, name)
-    createLabel(addr, name, True, SourceType.USER_DEFINED)
-    setPlateComment(addr, "ReverseEngineering.wiki [%s] %s (signature match)" % (status, fact))
+    for i, hit in enumerate(hits):
+        addr = hit.add(offset)
+        label = name if i == 0 else "%s_%d" % (name, i + 1)
+        if kind == "function" and getFunctionAt(addr) is None:
+            createFunction(addr, label)
+        createLabel(addr, label, True, SourceType.USER_DEFINED)
+        setPlateComment(addr, "ReverseEngineering.wiki [%s] %s (signature match)" % (status, fact))
     named += 1
 print("ReverseEngineering.wiki: named %d of %d signatures" % (named, len(SIGNATURES)))
 `;
   } else {
     script = `${head}# Run in IDA via File > Script file (IDAPython) with your database open. It searches for each signature
-# and names a match only when it is unique.
+# and names a match only when it is unique; data tables (kind "global") compiled in more than once get
+# every copy named (_2, _3...). Set LABEL_ALL = True to do that for functions too.
 import idaapi, idc, ida_bytes, ida_funcs, ida_name
+
+LABEL_ALL = False
+MAX_COPIES = 16
 
 SIGNATURES = [
 ${list}
@@ -400,16 +414,19 @@ def find_all(pattern, limit=2):
     return hits
 
 named = 0
-for name, pattern, kind, status, fact in SIGNATURES:
-    hits = find_all(pattern)
-    if len(hits) != 1:
+for name, pattern, kind, status, fact, offset in SIGNATURES:
+    every = LABEL_ALL or kind == "global"
+    hits = find_all(pattern, MAX_COPIES if every else 2)
+    if not hits or (len(hits) > 1 and not every):
         print("%s: %d matches, not named" % (name, len(hits)))
         continue
-    ea = hits[0]
-    if kind == "function":
-        ida_funcs.add_func(ea)
-    ida_name.set_name(ea, name, ida_name.SN_NOWARN | ida_name.SN_NOCHECK | ida_name.SN_FORCE)
-    idc.set_cmt(ea, "ReverseEngineering.wiki [%s] %s (signature match)" % (status, fact), 1)
+    for i, hit in enumerate(hits):
+        ea = hit + offset
+        label = name if i == 0 else "%s_%d" % (name, i + 1)
+        if kind == "function":
+            ida_funcs.add_func(ea)
+        ida_name.set_name(ea, label, ida_name.SN_NOWARN | ida_name.SN_NOCHECK | ida_name.SN_FORCE)
+        idc.set_cmt(ea, "ReverseEngineering.wiki [%s] %s (signature match)" % (status, fact), 1)
     named += 1
 print("ReverseEngineering.wiki: named %d of %d signatures" % (named, len(SIGNATURES)))
 `;
@@ -417,7 +434,7 @@ print("ReverseEngineering.wiki: named %d of %d signatures" % (named, len(SIGNATU
   return {
     subject, tool: args.tool, signatures: sigs.length, script,
     hint: sigs.length ? undefined : 'No signature facts on this subject yet: add_fact with data.signature (bytes with ?? wildcards).',
-    warning: 'Review generated scripts before running. A signature that matches more than once is reported, not applied.',
+    warning: 'Review generated scripts before running. A function signature that matches more than once is reported, not applied; data tables name every copy.',
   };
 }
 

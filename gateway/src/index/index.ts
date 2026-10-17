@@ -695,11 +695,14 @@ export class SearchIndex {
   }
 
   /** Every page of some types, by title (search with query "*"). */
-  listPages(types: string[], offset: number, limit: number): { hits: Array<{ title: string; type: string; summary: string; status: string | null; revision: number }>; total: number } {
+  listPages(types: string[], offset: number, limit: number, subject?: string): { hits: Array<{ title: string; type: string; summary: string; status: string | null; revision: number }>; total: number } {
     const placeholders = types.map(() => '?').join(', ');
-    const total = (this.db.prepare(`select count(*) as n from pages where redirect_to is null and type in (${placeholders})`).get(...types) as { n: number }).n;
-    const hits = this.db.prepare(`select title, type, summary, status, revision from pages where redirect_to is null and type in (${placeholders}) order by title limit ? offset ?`)
-      .all(...types, limit, offset) as any[];
+    // With a subject: its own pages (facts, notes, code, builds of it).
+    const where = `redirect_to is null and type in (${placeholders})${subject ? ' and (subject = ? or title = ?)' : ''}`;
+    const params = [...types, ...(subject ? [subject, subject] : [])];
+    const total = (this.db.prepare(`select count(*) as n from pages where ${where}`).get(...params) as { n: number }).n;
+    const hits = this.db.prepare(`select title, type, summary, status, revision from pages where ${where} order by title limit ? offset ?`)
+      .all(...params, limit, offset) as any[];
     return { hits: hits.map((h) => ({ ...h, summary: String(h.summary ?? '').slice(0, 200) })), total };
   }
 

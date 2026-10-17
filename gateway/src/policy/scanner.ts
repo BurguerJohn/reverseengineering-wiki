@@ -79,6 +79,19 @@ function codeBlocks(text: string): Array<{ body: string; start: number }> {
 /** "version 2.2.4.3", "patch 1.0.0.12", "build 10.2.0.1": dotted version numbers, not IP addresses. */
 const VERSION_BEFORE = /\b(?:version|ver|v|patch|build|update|release|revision|rev|exe|game|engine|sdk|driver|firmware)\s*[:=#]?\s*$/i;
 
+/**
+ * "pairs from 1.2.0 to 1.3.0.1", "`1.2.11.1`": a dotted quad next to two- or three-part version numbers,
+ * or in backticks, is a version. Lists of IP addresses do not qualify (their neighbours have four parts).
+ */
+const LIST_SEP = String.raw`\s*(?:,|;|/|-|–|\bto\b|\band\b|\bor\b|\bthrough\b|\bthen\b)\s*`;
+const SHORT_VERSION = String.raw`\d{1,3}\.\d{1,3}(?:\.\d{1,3})?`;
+const VERSION_THEN = new RegExp(String.raw`(?<![\d.])${SHORT_VERSION}${LIST_SEP}$`, 'i');
+const THEN_VERSION = new RegExp(String.raw`^${LIST_SEP}${SHORT_VERSION}(?![\d.])`, 'i');
+function amongVersions(text: string, index: number, length: number): boolean {
+  if (VERSION_THEN.test(text.slice(Math.max(0, index - 40), index)) || THEN_VERSION.test(text.slice(index + length, index + length + 40))) return true;
+  return text[index - 1] === '`' && text[index + length] === '`';
+}
+
 /** A few words before a finding, so the writer can find it; the matched value itself is never echoed. */
 function contextBefore(text: string, index: number): string {
   const start = text.lastIndexOf('\n', index - 1) + 1;
@@ -96,7 +109,7 @@ export function scanText(text: string, context: ScanContext, fileName?: string):
       const all = new RegExp(rule.regex.source, `${rule.regex.flags}g`);
       m = null;
       for (let hit = all.exec(text); hit; hit = all.exec(text)) {
-        if (!VERSION_BEFORE.test(text.slice(Math.max(0, hit.index - 24), hit.index))) {
+        if (!VERSION_BEFORE.test(text.slice(Math.max(0, hit.index - 24), hit.index)) && !amongVersions(text, hit.index, hit[0].length)) {
           m = hit;
           break;
         }

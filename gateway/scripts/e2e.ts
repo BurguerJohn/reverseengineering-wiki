@@ -924,6 +924,18 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const trackRaw = await call(anon, 'read', { title: `Format:E2E Track ${run}`, format: 'wikitext' });
   assert.match(trackRaw.content ?? JSON.stringify(trackRaw), /== Container ==\n\nSee also \[\[/, JSON.stringify(trackRaw).slice(0, 600));
 
+  // Browsing one subject; signatures whose name sits before the match; data tables named in every copy.
+  const ofTrack = await call(anon, 'search', { query: '*', subject: `Format:E2E Track ${run}`, limit: 50 });
+  assert.ok(ofTrack.total >= 5 && ofTrack.hits.every((h: any) => h.title.includes(`E2E Track ${run}`)), JSON.stringify(ofTrack).slice(0, 500));
+  await call(a, 'add_fact', { kind: 'global', subject: `Format:E2E Track ${run}`, claim: 'The fictional length table sits 4 bytes before this pattern.', scope: { level: 'format', applies_to: 'all versions' },
+    data: { name: 'track_lext', type: 'uint16_t[31]', signature: '10 00 10 00 11 00 ?? 00', signature_offset: '-4' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const sigScan = (await call(anon, 'export_symbols', { subject: `Format:E2E Track ${run}`, tool: 'ghidra' })).script;
+  assert.match(sigScan, /\("track_lext", "10 00 10 00 11 00 \?\? 00", "global", "claimed", "[^"]+", -4\),/, sigScan.slice(0, 1500));
+  assert.match(sigScan, /every = LABEL_ALL or kind == "global"/);
+  assert.match(sigScan, /addr = hit\.add\(offset\)/);
+  writeFileSync(join(tmpdir(), `rewiki-sigscan-${run}.py`), sigScan);
+  writeFileSync(join(tmpdir(), `rewiki-sigscan-ida-${run}.py`), (await call(anon, 'export_symbols', { subject: `Format:E2E Track ${run}`, tool: 'ida' })).script);
+
   // A dry run hands back a check_id: publish_checked publishes exactly that, once.
   const checkedNote = await call(a, 'add_note', { subject: cave, key: 'Checked once', body: 'Published by check_id without resending the arguments.', confidence: 'low', dry_run: true });
   assert.ok(checkedNote.check_id, JSON.stringify(checkedNote).slice(0, 200));
@@ -938,7 +950,7 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   // Signature facts of a subject become a script that names them in the user's own binary.
   const scan = await call(anon, 'export_symbols', { subject: cave, tool: 'ghidra' });
   assert.ok(scan.signatures >= 1, JSON.stringify(scan).slice(0, 200));
-  assert.match(scan.script, /findBytes\(currentProgram\.getMinAddress\(\), to_regex\(pattern\), 2\)/);
+  assert.match(scan.script, /findBytes\(currentProgram\.getMinAddress\(\), to_regex\(pattern\), MAX_COPIES if every else 2\)/);
   assert.match(scan.script, /"48 89 5C 24 \?\? 57"/);
   writeFileSync(join(tmpdir(), `rewiki-scan-${run}.py`), scan.script);
   // Typed arrays and variable-size structs in headers.

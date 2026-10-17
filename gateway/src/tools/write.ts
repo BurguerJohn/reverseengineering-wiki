@@ -894,7 +894,7 @@ export async function linkRepo(s: Services, caller: Caller, args: {
   for (const { target, page } of pages) {
     let sections = parseSections(page.content);
     const section = findSection(sections, 'Code & repositories');
-    const lines = (section?.body ?? '').split('\n').filter((l) => !l.startsWith(`{{Repo|url=${info.url}|`));
+    const lines = (section?.body ?? '').split('\n').filter((l) => !l.replace(/^\*\s*/, '').startsWith(`{{Repo|url=${info.url}|`));
     const replaced = parseRepos(section?.body ?? '').some((x) => x.url === info.url);
     const body = [...lines.filter((l) => l.trim() && !/Nothing documented yet/.test(l)), `* ${entry}`]
       .map((l) => (l.startsWith('{{Repo|') ? `* ${l}` : l)).join('\n');
@@ -909,7 +909,7 @@ export async function linkRepo(s: Services, caller: Caller, args: {
   const target = pages[0].target;
   return result(s, target, r.newrevid, {
     listed_on: pages.length > 1 ? pages.map((p) => p.target) : undefined,
-    repository: info, warnings: [info.license === 'none' ? 'Repository has no license; agents cannot legally reuse it.' : null,
+    repository: info, warnings: [info.license === 'none' ? 'GitHub detected no license. If the repository has a license file or license headers, run link_repo again with license (its SPDX id, e.g. "Zlib"): the entry is replaced. Without a license, agents cannot legally reuse it.' : null,
       info.binaryReleaseAssets ? 'Release contains binaries; they are flagged, not linked.' : null,
       info.archived ? `The repository is archived (read-only${info.lastCommit ? `, last activity ${info.lastCommit.slice(0, 10)}` : ''}): its successor, if any, may be worth linking too.` : null].filter(Boolean),
   });
