@@ -438,6 +438,10 @@ export async function editSection(s: Services, caller: Caller, args: {
 
   let sections = parseSections(page.content);
   const target = findSection(sections, args.section);
+  const usedReplace = !!args.replace;
+  // Only this batch's own earlier operations changed the page since base_revision (link_repo and add_code list
+  // their entries in "Code & repositories"): a replace applies on top of them.
+  const ownChanges = page.revid !== args.base_revision && batchContext.getStore()?.before?.get(t) === args.base_revision;
   if (args.replace) {
     // Small changes on the section as read returns it (Markdown); the rest stays as it is.
     if (!target) throw new ToolError('BAD_REQUEST', `replace works on an existing section; "${args.section}" does not exist (send body to create it).`);
@@ -462,7 +466,10 @@ export async function editSection(s: Services, caller: Caller, args: {
     if (!base || normalizeTitle(base.title) !== t) throw new ToolError('BAD_REQUEST', 'base_revision does not belong to this page.');
     const baseSection = findSection(parseSections(base.content), args.section);
     // Blank lines added at its end (a section inserted after it) are not a change to it.
-    if ((baseSection?.text ?? '').trimEnd() !== (target?.text ?? '').trimEnd()) {
+    if ((baseSection?.text ?? '').trimEnd() !== (target?.text ?? '').trimEnd() && !(ownChanges && usedReplace)) {
+      if (ownChanges) {
+        throw new ToolError('EDIT_CONFLICT', `An earlier operation of this batch changed section "${args.section}" (link_repo and add_code add their lines there): send this change as replace [{old, new}], which applies on top of it, or leave those lines to them.`, { current_revision: page.revid });
+      }
       const patch = createTwoFilesPatch('base', 'current', `${baseSection?.text ?? ''}\n`, `${target?.text ?? ''}\n`, '', '', { context: 2 });
       throw new ToolError('EDIT_CONFLICT', `Section "${args.section}" changed since revision ${args.base_revision}. Re-read it and re-apply your change.`, {
         current_revision: page.revid, section_diff: patch.split('\n').slice(2).join('\n'),

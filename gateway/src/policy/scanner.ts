@@ -95,6 +95,13 @@ function namedVersion(text: string, index: number, length: number): boolean {
   return (!!name && !NETWORK_WORD.test(name)) || BUILD_AFTER.test(text.slice(index + length, index + length + 12));
 }
 
+// An address is only an address in a network context ("server 93.184.216.34", "connects to …", "http://…", ":443",
+// "/24"); a dotted quad anywhere else is a version, a section or a constant (owner's choice: be permissive).
+const NETWORK_CONTEXT = /\b(?:ip|ipv4|ips|addr(?:ess(?:es)?)?|hosts?|hostnames?|servers?|connect(?:s|ed|ing|ion|ions)?|dns|resolvers?|proxy|proxies|gateways?|routers?|peers?|clients?|listen(?:s|ing)?|bind|ping|traceroute|subnet|lan|wan|vpn|isp|nat|nameservers?|upstream|endpoint|sockets?|tcp|udp|https?|ftp|ssh|telnet|curl|wget)\b|:\/\/|@/i;
+function networkContext(text: string, index: number, length: number): boolean {
+  return NETWORK_CONTEXT.test(text.slice(Math.max(0, index - 60), index)) || /^(?::\d{1,5}\b|\/\d{1,2}\b)/.test(text.slice(index + length, index + length + 8));
+}
+
 const LIST_SEP = String.raw`\s*(?:,|;|/|-|–|\bto\b|\band\b|\bor\b|\bthrough\b|\bthen\b)\s*`;
 const SHORT_VERSION = String.raw`\d{1,3}\.\d{1,3}(?:\.\d{1,3})?`;
 const QUOTE = `["'\`]?`;
@@ -122,7 +129,7 @@ export function scanText(text: string, context: ScanContext, fileName?: string):
       const all = new RegExp(rule.regex.source, `${rule.regex.flags}g`);
       m = null;
       for (let hit = all.exec(text); hit; hit = all.exec(text)) {
-        if (!VERSION_BEFORE.test(text.slice(Math.max(0, hit.index - 24), hit.index)) && !amongVersions(text, hit.index, hit[0].length) && !namedVersion(text, hit.index, hit[0].length)) {
+        if (networkContext(text, hit.index, hit[0].length) && !VERSION_BEFORE.test(text.slice(Math.max(0, hit.index - 24), hit.index)) && !amongVersions(text, hit.index, hit[0].length) && !namedVersion(text, hit.index, hit[0].length)) {
           m = hit;
           break;
         }

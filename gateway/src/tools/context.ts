@@ -57,6 +57,8 @@ export interface BatchStore {
   refresh?: Set<string>;
   /** Topic lines to add to each parent's Topics section, in one edit per parent at the end. */
   topicLinks?: Map<string, string[]>;
+  /** The revision each page had before this batch first edited it: later operations may still name it as base_revision. */
+  before?: Map<string, number>;
   /** An approved batch is charged once: the operator, not the hourly quota, paces it. */
   chargeOnce?: boolean;
   charged?: boolean;
@@ -178,6 +180,7 @@ export async function mwEdit(s: Services, op: Writer, params: EditParams): Promi
     return { title: params.title, nochange: false };
   }
   if (store && params.createonly && params.text !== undefined) store.created.set(params.title, params.text);
+  if (store?.before && params.baserevid && !store.before.has(params.title)) store.before.set(params.title, params.baserevid);
   store?.pageCache?.delete(params.title);
   const mw = await s.sessions.forOperator(op);
   try {

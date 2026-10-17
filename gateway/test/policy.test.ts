@@ -48,6 +48,10 @@ test('version numbers are not IP addresses', () => {
   assert.ok(!rules('# Spec 2.1.1.2: sizes, see RFC 1952 2.3.1.1', 'code').includes('public-ipv4'));
   assert.ok(!rules('Reference assemblies, `mscorlib 4.0.0.0` and System.Runtime 8.0.1.2, Libjpeg 6.2.0.1.', 'article').includes('public-ipv4'));
   assert.ok(rules('it connects to 93.184.216.34 first', 'article').includes('public-ipv4'));
+  // Without a network context a dotted quad is a version or a section.
+  assert.ok(!rules('3.9.0 had a fourth component (3.8.7.1 was the last).', 'article').includes('public-ipv4'));
+  assert.ok(rules('My home IP is 93.184.216.34.', 'article').includes('public-ipv4'));
+  assert.ok(rules('GET http://93.184.216.34/index.html', 'code').includes('public-ipv4'));
 });
 
 test('code rules', () => {

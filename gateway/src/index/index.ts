@@ -181,7 +181,8 @@ function maskDigits(text: string): string {
 
 /** A published string with * wildcards against an input string (whole match). */
 function globMatch(pattern: string, text: string): boolean {
-  const re = new RegExp(`^${pattern.split('*').map((p) => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[\\s\\S]*')}$`);
+  // "*" any run, "?" one character ("fts5: ????-??-?? *").
+  const re = new RegExp(`^${pattern.split('*').map((p) => p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\?/g, '.')).join('[\\s\\S]*')}$`);
   return re.test(text);
 }
 
@@ -618,7 +619,7 @@ export class SearchIndex {
         // (version banners, copyright years): digits are masked on both sides.
         const masked = maskDigits(t.token);
         const loose = this.db.prepare(`select i.title, i.token, p.subject from identifiers i join pages p on p.title = i.title
-          where i.kind = 'string' and length(i.token) >= 12 limit 20000`).all() as Array<{ title: string; token: string; subject: string | null }>;
+          where i.kind = 'string' and (length(i.token) >= 12 or (instr(i.token, '*') > 0 and length(replace(replace(i.token, '*', ''), '?', '')) >= 5)) limit 20000`).all() as Array<{ title: string; token: string; subject: string | null }>;
         rows = [...rows, ...loose.filter((r) => {
           if (r.token.includes('*') && globMatch(r.token, t.token)) return true;
           // Both sides keep 12+ characters once masked ("1234567890..." test vectors mask to "#").
@@ -747,7 +748,7 @@ export class SearchIndex {
       const target = this.resolveRedirect(r.other);
       const page = this.page(target);
       if (!page || target === title || subjectRoot(target) === title || !['format', 'platform', 'library', 'technique', 'tool'].includes(page.type) || out.some((o) => o.title === target)) continue;
-      const facts = (this.db.prepare('select count(*) as n from facts where subject = ?').get(target) as { n: number }).n;
+      const facts = (this.db.prepare("select count(*) as n from edges where dst = ? and rel = 'fact_of'").get(target) as { n: number }).n;
       const code = (this.db.prepare("select count(*) as n from edges where dst = ? and rel = 'code_for'").get(target) as { n: number }).n;
       out.push({ title: target, type: page.type, summary: page.summary.slice(0, 160), facts, code });
     }

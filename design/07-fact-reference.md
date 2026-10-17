@@ -36,7 +36,7 @@ Every kind also takes `test_vectors` and `samples` (below). Every fact needs `ev
 - Exact size unknown: `size_min` and/or `size_max`. Entries after a header or a trailing name: the last field typed `T[]` or `T[count_field]` (a C flexible array member; `size` is then the fixed part or `"variable"`). A field after a variable part can have an offset like `"4+length"`: it is written as a comment.
 - Library types (`FT_Long`, `DWORD`, `j_common_ptr`): one `typedef` fact each (`{name, type}`), so headers use them instead of bytes.
 - Layouts that differ by ABI: `data.abi` (`"win64"`, `"lp64"`, `"ilp32"`) on struct and typedef facts, one fact per ABI; `export_header` takes `abi`.
-- Enum values: `{"0": "NAME"}`, `{"NAME": "0x10"}`, `[{name, value, notes}]`, negative (`"-0x7000"`), 64-bit (`"0x4000000000000001"`, kept exact), character codes (`"'A'"`) and ranges (`"0x80-0x9F"`). Keep names C identifiers; explanations go in `notes`.
+- Enum values: `{"0": "NAME"}`, `{"NAME": "0x10"}`, `[{name, value, notes}]`, negative (`"-0x7000"`), 64-bit (`"0x4000000000000001"`, kept exact), character codes (`"'A'"`) and ranges (`"0x80-0x9F"`: exported as the first value, with the range in a comment). Keep names C identifiers; explanations go in `notes`.
 
 ## Signatures, magics and strings
 
@@ -47,7 +47,7 @@ Every kind also takes `test_vectors` and `samples` (below). Every fact needs `ev
 - Magic: `bytes`, `offset`, `meaning`, optional `mask`; `relative_to` when the offset counts from a table or section, not the file start.
 - Identification by exports or imports: list the names in `indicator` (comma-separated) with `method: "exports"`; `identify` also finds names in builds' symbol maps and code-like names in article text.
 - String facts (ASCII, 8+ characters, no `*`) are byte signatures too: subject scripts name where the string sits.
-- Strings: `*` for a variable part (`"Copyright (C) 1991-* The libjpeg-turbo Project"`); `identify` also matches versions and years with other digits.
+- Strings: `*` for a variable part and `?` for one character (`"fts5: ????-??-?? *"`) (`"Copyright (C) 1991-* The libjpeg-turbo Project"`); `identify` also matches versions and years with other digits.
 
 ## Test vectors and samples
 
@@ -72,6 +72,6 @@ Names are identifiers: write what MSVC prints as ``Foo::`vftable'{for `Bar'}`` a
 
 ## Batches and dry runs
 
-- `batch`: up to 50 writes in dependency order (pages, topics, builds, facts/code/notes/symbols, edits, reviews); later operations may refer to what earlier ones create. A real run stops at the first error and says what was published and what did not run. Keep one call under ~20 KB of arguments.
+- `batch`: up to 50 writes in dependency order (pages, topics, builds, facts/code/notes/symbols, edits, reviews); later operations may refer to what earlier ones create. A real run stops at the first error and says what was published and what did not run. A later `edit_section` with `replace` applies on top of what earlier operations of the same batch wrote on that page. Keep one call under ~20 KB of arguments.
 - A dry run returns a `check_id`: `publish_checked` publishes exactly that. Pass `replace: {"3": {arguments}}` to swap an operation, or `amend: {"3": [{old, new}]}` for a small text fix; `quiet: true` lists pages without their contents.
 - Each write counts against the hourly quota (`account_status`); a batch over it is refused whole, and a dry run says how many operations fit now.

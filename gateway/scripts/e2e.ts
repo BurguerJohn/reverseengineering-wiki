@@ -1162,6 +1162,21 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const withTypes = await call(anon, 'export_header', { subject: `Format:E2E Track ${run}`, also: [`Library:E2E Lib ${run}`] });
   assert.ok(/struct E2eCounter \{/.test(withTypes.header) && /struct TrackIhdr/.test(withTypes.header) && /Also: Library:E2E Lib/.test(withTypes.header), withTypes.header.slice(0, 600));
 
+  // A batch's later edit applies on top of what its own earlier operations wrote (add_code lists itself in the section).
+  const rebasePage = await call(a, 'create_page', { type: 'library', title: `E2E Rebase ${run}`, summary: 'A fictional library for batch rebasing.', body: '## Overview\n\nFictional.\n\n## Code & repositories\n\nNone yet, see below.' });
+  const rebased = await call(a, 'batch', { operations: [
+    { tool: 'add_code', arguments: { name: 'Rebase tool', summary: 'A fictional tool listed by the batch.', language: 'python', kind: 'parser', subjects: [rebasePage.title], tested_on: 'fictional', usage: 'python r.py', files: [{ name: 'r.py', content: 'print(1)\n' }] } },
+    { tool: 'edit_section', arguments: { title: rebasePage.title, section: 'Code & repositories', replace: [{ old: 'None yet, see below.', new: 'A fictional tool is listed below.' }], base_revision: rebasePage.revision, summary: 'fictional wording' } },
+  ] });
+  assert.ok(!rebased.error && rebased.operations === 2, JSON.stringify(rebased).slice(0, 500));
+  const rebasedText = (await call(anon, 'read', { title: rebasePage.title, section: 'Code & repositories' })).content;
+  assert.ok(rebasedText.includes('A fictional tool is listed below.') && rebasedText.includes('Rebase tool'), rebasedText);
+  // Short wildcard strings ("fts5: *") and "?" for one character.
+  await call(a, 'add_fact', { kind: 'string', subject: `Library:E2E Lib ${run}`, claim: 'The fictional library stamps a dated id.', scope: { level: 'library', applies_to: 'all versions' },
+    data: { value: `z${run}: ????-??-?? *`, meaning: 'source id' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });
+  const stamped = await call(anon, 'identify', { strings: [`z${run}: 2024-08-13 11:22:33 1e33`] });
+  assert.equal(stamped.candidates[0]?.subject, `Library:E2E Lib ${run}`, JSON.stringify(stamped).slice(0, 400));
+
   // 64-bit enum values stay exact; value ranges; size_t compiles; amend fixes a sentence without resending.
   await call(a, 'add_fact', { kind: 'enum', subject: `Library:E2E Lib ${run}`, claim: 'Fictional 64-bit filter ids and a control-byte range.', scope: { level: 'library', applies_to: 'all versions' },
     data: { name: 'E2eFilter', values: { '0x4000000000000001': 'E2E_FILTER_A', '0x4000000000000002': 'E2E_FILTER_B', '0x80-0x9F': 'E2E_CHUNK_RUN' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });

@@ -27,7 +27,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.27';
+export const VERSION = '0.8.28';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -831,7 +831,7 @@ async function runBatch(
 
   const done: Array<Record<string, unknown>> = [];
   let followUp: string[] = [];
-  return batchContext.run({ created: new Map(), dryRun: !!caller.dryRun, pageCache: new Map(), refresh: new Set(), topicLinks: new Map(), chargeOnce: !!caller.approved }, async () => {
+  return batchContext.run({ created: new Map(), dryRun: !!caller.dryRun, pageCache: new Map(), refresh: new Set(), topicLinks: new Map(), before: new Map(), chargeOnce: !!caller.approved }, async () => {
     try {
     // A dry run checks every operation and reports all failures at once; a real run stops at the first.
     const failures: Array<{ operation: number; tool: string; error: string; message: string; names: string[] }> = [];
