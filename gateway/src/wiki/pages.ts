@@ -266,21 +266,24 @@ export const buildInputSchema = z.object({
   distribution: z.string().min(2).max(40).describe('e.g. steam, epic, gog, retail, disc'),
   files: z.array(z.object({
     name: z.string().min(1).max(200),
-    sha256: z.string().regex(/^[0-9a-fA-F]{64}$/).optional().describe('Strongly preferred. Without it the build has a partial identity: give size plus pe_timestamp or version_string'),
+    sha256: z.string().regex(/^[0-9a-fA-F]{64}$/).optional().describe('Strongly preferred'),
+    sha1: z.string().regex(/^[0-9a-fA-F]{40}$/).optional().describe('As ROM/disc databases and decompilation projects publish it'),
+    md5: z.string().regex(/^[0-9a-fA-F]{32}$/).optional(),
+    crc32: z.string().regex(/^(?:0x)?[0-9a-fA-F]{8}$/).optional().describe('Weak alone: with size'),
     size: z.number().int().nonnegative().optional().describe('Bytes; optional when sha256 is given'),
     pe_timestamp: hex.optional(),
     image_base: hex.optional(),
     version_string: z.string().max(120).optional().describe('Version resource or in-binary version text, e.g. "1.0.3 (Jan 17 1992)"'),
   })).min(1),
-  release_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  release_date: z.string().regex(/^\d{4}(?:-\d{2}(?:-\d{2})?)?$/).optional().describe('YYYY, YYYY-MM or YYYY-MM-DD'),
   notes: z.string().max(2000).optional(),
 });
 export type BuildInput = z.infer<typeof buildInputSchema>;
 
 export interface BuildDoc extends BuildInput {
   schema: 'rewiki.build/1';
-  /** sha256: every file hashed; partial: identified by size + timestamp or version text only. */
-  identity?: 'sha256' | 'partial';
+  /** sha256: every file hashed; hash: SHA-1/MD5 for some; partial: size + timestamp, version text or CRC32 only. */
+  identity?: 'sha256' | 'hash' | 'partial';
   created_by: string;
   created_at: string;
 }
@@ -301,7 +304,10 @@ const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 } as const;
 export const MAX_SYMBOLS_PER_CALL = 5000;
 
 export const symbolInputSchema = z.object({
-  rva: hex.describe('RVA, e.g. 0x141230'),
+  rva: hex.describe('RVA, e.g. 0x141230 (or give va instead)'),
+  /** Set by the server for va entries on builds without an image base: the address is absolute. */
+  absolute: z.boolean().optional(),
+  overlay: z.string().max(40).optional().describe('Overlay or segment the address belongs to, when several share it'),
   name: z.string().min(1).max(200).regex(/^[A-Za-z_~?@$][\w:~<>,.*&@$?\- ]*$/, 'a symbol name: C/C++ identifier, scopes (Foo::Bar), templates or decorated names'),
   kind: z.enum(SYMBOL_KINDS),
   type: z.string().max(300).optional().describe('C prototype or type, e.g. "int __fastcall(Weapon *this, int id)"'),

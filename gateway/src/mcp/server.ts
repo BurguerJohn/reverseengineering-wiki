@@ -26,7 +26,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.0';
+export const VERSION = '0.8.1';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -282,9 +282,12 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('lookup_binary', {
     title: 'Look up a binary',
-    description: 'Everything known about an exact file: pass its SHA-256 (preferred) or name + size + PE timestamp.',
+    description: 'Everything known about an exact file: pass its SHA-256 (preferred), SHA-1, MD5 or CRC32 (ROM and disc databases), or name + size + PE timestamp.',
     inputSchema: {
       sha256: z.string().regex(/^[0-9a-fA-F]{64}$/).optional(),
+      sha1: z.string().regex(/^[0-9a-fA-F]{40}$/).optional(),
+      md5: z.string().regex(/^[0-9a-fA-F]{32}$/).optional(),
+      crc32: z.string().regex(/^(?:0x)?[0-9a-fA-F]{8}$/).optional(),
       name: z.string().optional(),
       size: z.number().int().optional(),
       pe_timestamp: z.string().optional(),
@@ -517,7 +520,9 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     inputSchema: { dry_run: DRY_RUN,
       build: z.string().describe('Build: page (register_build first)'),
       symbols: z.array(z.object({
-        rva: z.string().describe('RVA, e.g. 0x141230'),
+        rva: z.string().optional().describe('RVA relative to the image base, e.g. 0x141230 (PE)'),
+        va: z.string().optional().describe("Absolute address instead of rva, e.g. 0x80010DF4 (PlayStation, consoles, fixed images): relative to the build's image_base if it declares one, else kept absolute"),
+        overlay: z.string().optional().describe('Overlay or segment, when several share the address'),
         name: z.string(),
         kind: z.enum(SYMBOL_KINDS),
         type: z.string().optional().describe('C prototype or type'),
@@ -566,14 +571,15 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('register_build', {
     title: 'Register a build',
-    description: 'Create a Build: page from file hashes (for consoles: the ROM file\'s SHA-256) so address facts can be attached to an exact binary. Hashes and metadata only, never the file. Facts can then refer to it by its title or by a file\'s SHA-256 (in a batch too). Without the file, a partial identity (size + PE timestamp or version text) is accepted and marked as such.',
+    description: 'Create a Build: page, titled "Build:<software>/<version> (<platform>, <distribution>)" (the dry run lists it), from file hashes (for consoles: the ROM or executable hashes; SHA-1/MD5 accepted) so address facts can be attached to an exact binary. Hashes and metadata only, never the file. Facts can then refer to it by its title or by a file\'s SHA-256 (in a batch too). Without the file, a partial identity (size + PE timestamp or version text) is accepted and marked as such.',
     inputSchema: { dry_run: DRY_RUN,
       software: z.string(),
       version: z.string(),
       platform: z.string(),
       distribution: z.string(),
       files: z.array(z.object({
-        name: z.string(), sha256: z.string().optional().describe('Strongly preferred; without it the build has a partial identity (give pe_timestamp or version_string)'),
+        name: z.string(), sha256: z.string().optional().describe('Strongly preferred'),
+        sha1: z.string().optional().describe('As ROM/disc databases publish it'), md5: z.string().optional(), crc32: z.string().optional().describe('Weak alone: with size'),
         size: z.number().int().optional().describe('Bytes; optional when sha256 is given'), pe_timestamp: z.string().optional(), image_base: z.string().optional(),
         version_string: z.string().optional().describe('Version resource or in-binary version text'),
       })).min(1),

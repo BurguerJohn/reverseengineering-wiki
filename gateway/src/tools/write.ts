@@ -130,6 +130,14 @@ function languageName(raw: string): string {
   return known ?? (raw.trim() ? raw.trim()[0].toUpperCase() + raw.trim().slice(1) : raw);
 }
 
+/** "0x80010DF4", "80010DF4" or a number. */
+function hexToNumber(raw: unknown): number | null {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw !== 'string') return null;
+  const v = raw.trim().replace(/^0x/i, '');
+  return /^[0-9a-f]+$/i.test(v) ? parseInt(v, 16) : null;
+}
+
 function result(s: Services, t: string, revision: number | undefined, extra: Record<string, unknown> = {}) {
   return { title: t, revision, url: link(s, t), ...extra };
 }
@@ -187,9 +195,15 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   if (problems.length) throw new ToolError('SCHEMA_INVALID', problems.join(' '), { problems });
   fact.scope.observed_in = await Promise.all(fact.scope.observed_in.map((o) => (SHA256_REF.test(o.trim()) ? buildRef(s, o) : s.index.resolveRedirect(normalizeTitle(o)))));
   const unknown = unknownFactFields(fact.kind, fact.data);
+  const enumNote = fact.kind === 'enum' && (() => {
+    const values = fact.data.values;
+    const names = Array.isArray(values) ? values.map((v: any) => (typeof v === 'string' ? v : v?.name)) : values && typeof values === 'object' ? Object.entries(values).map(([k, v]) => (typeof v === 'string' ? v : k)) : [];
+    const odd = names.filter((n) => typeof n === 'string' && !/^[A-Za-z_]\w*$/.test(n));
+    return odd.length ? `Enum value names that are not C identifiers (${odd.slice(0, 3).join('; ')}) export as their first word plus a comment; put explanations in the claim or notes and keep values as identifiers.` : undefined;
+  })();
   const subjectNote = askedSubject !== fact.subject ? `Stored on ${fact.subject}: facts attach to the subject page, not to its topic pages; mention the fact on ${askedSubject} with a link if useful.` : undefined;
-  const warnings = unknown.length || subjectNote
-    ? [...(subjectNote ? [subjectNote] : []), ...(unknown.length ? [`data.${unknown.join(', data.')} ${unknown.length > 1 ? 'are' : 'is'} not standard for kind "${fact.kind}" (standard: ${[...FACT_DATA[fact.kind].required, ...(FACT_DATA[fact.kind].one_of ?? []), ...FACT_DATA[fact.kind].optional].join(', ')}). Kept, but tools like export_symbols and export_header only use standard fields. Several related addresses? One fact per address, or add_symbols for many names with their signatures.`] : [])]
+  const warnings = unknown.length || subjectNote || enumNote
+    ? [...(subjectNote ? [subjectNote] : []), ...(enumNote ? [enumNote] : []), ...(unknown.length ? [`data.${unknown.join(', data.')} ${unknown.length > 1 ? 'are' : 'is'} not standard for kind "${fact.kind}" (standard: ${[...FACT_DATA[fact.kind].required, ...(FACT_DATA[fact.kind].one_of ?? []), ...FACT_DATA[fact.kind].optional].join(', ')}). Kept, but tools like export_symbols and export_header only use standard fields. Several related addresses? One fact per address, or add_symbols for many names with their signatures.`] : [])]
     : undefined;
   const partialBuild = fact.scope.level === 'build' ? buildIdentity(await currentPage(s, fact.scope.applies_to)) === 'partial' : false;
   assertClean(scanValue(fact, 'fact'));
@@ -634,13 +648,29 @@ export async function addSymbols(s: Services, caller: Caller, args: { build: str
   const op = requireWriter(s, caller);
   const build = await buildRef(s, args.build);
   await mustExist(s, build, 'Call register_build first.');
+  const buildPageContent = (await currentPage(s, build))?.content;
   if (!Array.isArray(args.symbols) || !args.symbols.length) throw new ToolError('BAD_REQUEST', 'symbols must be a non-empty array.');
   if (args.symbols.length > MAX_SYMBOLS_PER_CALL) throw new ToolError('BAD_REQUEST', `At most ${MAX_SYMBOLS_PER_CALL} symbols per call; send the rest in further calls.`);
   if (args.force && !atLeast(op, 'established')) throw new ToolError('FORBIDDEN', `force (overwriting names with equal or higher confidence) requires trust "established" (yours: ${op.trust}).`);
 
+  // va (absolute addresses: PlayStation, consoles, fixed images): relative to the build's image base
+  // when it declares one, else kept absolute; scripts place both right.
+  const buildDoc = (() => { try { return JSON.parse((buildPageContent) ?? '{}') as BuildDoc; } catch { return null; } })();
+  const imageBase = hexToNumber(buildDoc?.files?.find((f) => f.image_base)?.image_base);
+  const looksAbsolute: string[] = [];
   const valid: SymbolInput[] = [];
   const issues: string[] = [];
-  args.symbols.forEach((raw, i) => {
+  args.symbols.forEach((rawInput, i) => {
+    let raw = rawInput as Record<string, unknown>;
+    if (raw && typeof raw === 'object' && raw.va !== undefined && raw.rva === undefined) {
+      const va = hexToNumber(raw.va);
+      const { va: _va, ...rest } = raw;
+      raw = va === null ? raw : imageBase !== null && va >= imageBase
+        ? { ...rest, rva: `0x${(va - imageBase).toString(16).toUpperCase()}` }
+        : { ...rest, rva: `0x${va.toString(16).toUpperCase()}`, absolute: true };
+    } else if (raw && typeof raw === 'object' && typeof raw.rva === 'string' && (hexToNumber(raw.rva) ?? 0) >= 0x10000000 && looksAbsolute.length < 3) {
+      looksAbsolute.push(String(raw.rva));
+    }
     const parsed = symbolInputSchema.safeParse(raw);
     if (parsed.success) valid.push(parsed.data);
     else if (issues.length < 20) issues.push(`symbols[${i}]: ${parsed.error.issues.map((x) => `${x.path.join('.')}: ${x.message}`).join('; ')}`);
@@ -703,6 +733,9 @@ export async function addSymbols(s: Services, caller: Caller, args: { build: str
     conflicts: conflicts.length ? conflicts.slice(0, 100) : undefined,
     conflicts_total: conflicts.length || undefined,
     pages,
+    warning: looksAbsolute.length
+      ? `rva ${looksAbsolute.join(', ')} look like absolute addresses. If they are (PlayStation, consoles, fixed images), send them as va instead: they are stored relative to the build's image_base, or absolute when it has none, and scripts place them right.`
+      : undefined,
     next: conflicts.length
       ? 'Conflicts were kept as they are: the existing name has equal or higher confidence. If yours is right, add a fact with evidence (add_fact) or resend with higher confidence; trusted operators can pass force=true.'
       : 'export_symbols now includes these names; important ones deserve a fact with evidence (add_fact).',
@@ -843,9 +876,10 @@ export async function registerBuild(s: Services, caller: Caller, input: unknown)
   await mustExist(s, b.software, 'Create the Software: page first (create_page with type software).');
   b.files = b.files.map((f) => ({ ...f, sha256: f.sha256?.toLowerCase() }));
   // Without a hash, a file is identified by its size plus a timestamp or version text: weaker.
-  const weak = b.files.filter((f) => !f.sha256 && (f.size === undefined || (!f.pe_timestamp && !f.version_string)));
+  const strong = (f: (typeof b.files)[number]) => !!(f.sha256 || f.sha1 || f.md5);
+  const weak = b.files.filter((f) => !strong(f) && (f.size === undefined || (!f.pe_timestamp && !f.version_string && !f.crc32)));
   if (weak.length) {
-    throw new ToolError('SCHEMA_INVALID', `${weak.map((f) => f.name).join(', ')}: without sha256, give size plus pe_timestamp or version_string so the build can still be recognized. A SHA-256 is far better (with it, size is optional): compute it if you have the file.`);
+    throw new ToolError('SCHEMA_INVALID', `${weak.map((f) => f.name).join(', ')}: give a hash (sha256 best; sha1 or md5 as ROM and disc databases publish them), or size plus pe_timestamp, version_string or crc32, so the build can still be recognized.`);
   }
   assertClean(scanValue({ ...b, files: b.files.map((f) => ({ name: f.name, version_string: f.version_string })) }, 'build'));
   for (const f of b.files) {
@@ -860,7 +894,7 @@ export async function registerBuild(s: Services, caller: Caller, input: unknown)
     throw new ToolError('BAD_TITLE', (error as Error).message);
   }
   if (await currentPage(s, t)) throw new ToolError('DUPLICATE_SUSPECTED', `"${t}" already exists.`, { existing: t, url: link(s, t) });
-  const identity = b.files.every((f) => f.sha256) ? 'sha256' : 'partial';
+  const identity = b.files.every((f) => f.sha256) ? 'sha256' : b.files.every(strong) ? 'hash' : 'partial';
   const doc: BuildDoc = { schema: 'rewiki.build/1', ...b, identity, created_by: op.username, created_at: now() };
   const r = await mwEdit(s, op, { title: t, text: JSON.stringify(doc, null, 2), createonly: true, summary: `Build of [[${b.software}]] ${shortSummary(b.version, 60)}` });
   await afterWrite(s, op, [t]);
@@ -868,7 +902,7 @@ export async function registerBuild(s: Services, caller: Caller, input: unknown)
   return result(s, t, r.newrevid, {
     identity,
     next: `Use this title${sha ? ` (or the SHA-256 ${sha.slice(0, 12)}…)` : ''} as scope.applies_to for address facts.`,
-    warning: identity === 'partial' ? 'Partial identity (no SHA-256): agents with the file cannot match it by hash. Add the hashes when you have the binary.' : undefined,
+    warning: identity === 'partial' ? 'Partial identity (no SHA-256, SHA-1 or MD5): agents with the file cannot match it by hash. Add the hashes when you have the binary.' : undefined,
   });
 }
 
@@ -1022,7 +1056,7 @@ export async function flag(s: Services, caller: Caller, args: { title: string; r
 }
 
 /** sha256 when every file of a Build: page has a hash, partial otherwise. */
-function buildIdentity(page: { content: string } | null): 'sha256' | 'partial' | null {
+function buildIdentity(page: { content: string } | null): 'sha256' | 'hash' | 'partial' | null {
   if (!page) return null;
   try {
     const doc = JSON.parse(page.content) as BuildDoc;

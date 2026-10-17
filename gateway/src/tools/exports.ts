@@ -32,7 +32,40 @@ function hexNum(raw: unknown): number | null {
   return null;
 }
 
-const C_TYPE = /^(?:const\s+)?(?:unsigned\s+|signed\s+)?[A-Za-z_][\w]*(?:\s*\*+)?$/;
+const C_TYPE = /^(?:const\s+)?(?:(?:struct|enum|union)\s+)?(?:unsigned\s+|signed\s+)?[A-Za-z_][\w]*(?:\s*\*+)?$/;
+/** "void (*)(void)", "int (*)(Entity *, int)": a function pointer type. */
+const FN_POINTER = /^[A-Za-z_][\w\s*]*\(\s*\*\s*\)\s*\([\w\s*,.]*\)$/;
+
+/** The type name a field uses by value or through a pointer ("struct Entity *" → Entity). */
+function baseType(type: string): string {
+  return type.replace(/^const\s+/, '').replace(/^(?:struct|enum|union)\s+/, '').replace(/\s*\*+$/, '').trim();
+}
+
+/**
+ * Structs in an order C accepts: one used by value comes before the struct that contains it.
+ * (Pointers are fine in any order: every struct also gets a forward declaration.)
+ */
+function dependencyOrder<T extends { kind: string; data: string }>(facts: T[], name: (f: T) => string): T[] {
+  const structs = facts.filter((f) => f.kind === 'struct');
+  const byName = new Map(structs.map((f) => [name(f), f]));
+  const out: T[] = [];
+  const state = new Map<string, 'visiting' | 'done'>();
+  const visit = (f: T) => {
+    const n = name(f);
+    if (state.get(n)) return;
+    state.set(n, 'visiting');
+    for (const field of JSON.parse(f.data).fields ?? []) {
+      const t = String(field?.type ?? '');
+      if (t.includes('*')) continue;
+      const dep = byName.get(baseType(t.replace(/\[.*$/, '')));
+      if (dep && state.get(name(dep)) !== 'visiting') visit(dep);
+    }
+    state.set(n, 'done');
+    out.push(f);
+  };
+  for (const f of structs) visit(f);
+  return [...facts.filter((f) => f.kind === 'enum'), ...out, ...facts.filter((f) => f.kind !== 'enum' && f.kind !== 'struct')];
+}
 const BUILTIN = /^(?:const\s+)?(?:unsigned\s+|signed\s+)?(?:u?int(?:8|16|32|64)_t|u?intptr_t|size_t|char|short|int|long|long long|float|double|void|bool|_Bool|wchar_t|BYTE|WORD|DWORD|QWORD|BOOL)\b/;
 
 /** A field name that is a description ("type (0 = saved game)"): a short identifier, the rest as a comment. */
@@ -90,9 +123,20 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
     ` * Generated: ${new Date().toISOString()} */`, '#pragma once', '#include <stdint.h>', ''];
   const skipped: string[] = [];
   // Types defined in this header; others come from other pages and must still compile here.
-  const defined = new Set(facts.map((f) => { try { const d = JSON.parse(f.data); return ident(f.kind === 'vtable' ? `${d.class}_vtbl` : d.name, ''); } catch { return ''; } }));
+  const typeName = (f: { kind: string; data: string }) => {
+    try {
+      const d = JSON.parse(f.data);
+      return f.kind === 'vtable' ? ident(`${d.class}_vtbl`, '') : ident(fieldName(d.name).name, '');
+    } catch {
+      return '';
+    }
+  };
+  const defined = new Set(facts.map(typeName));
   const forward = new Set<string>();
-  for (const f of facts) {
+  // Every struct is declared first, so pointers between them work in any order.
+  const declared = facts.filter((f) => f.kind !== 'enum').map(typeName).filter(Boolean);
+  if (declared.length) lines.push(...declared.map((t) => `typedef struct ${t} ${t};`), '');
+  for (const f of dependencyOrder(facts, typeName)) {
     const data = JSON.parse(f.data);
     lines.push(`/* [${f.status}] ${comment(f.title)} */`);
     if (f.kind === 'struct') {
@@ -105,7 +149,7 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
         })
         .filter((x: any) => x.offset !== null)
         .sort((a: any, b: any) => a.offset - b.offset);
-      lines.push(`typedef struct ${name} {`);
+      lines.push(`struct ${name} {`);
       let cursor = 0;
       for (const field of fields) {
         if (field.offset > cursor) {
@@ -115,6 +159,12 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
           continue;
         }
         const fieldId = field.name || `field_${field.offset.toString(16).toUpperCase()}`;
+        if (FN_POINTER.test(field.rawType.trim())) {
+          // A function pointer: the name goes inside "(*)".
+          lines.push(`    /* 0x${field.offset.toString(16).toUpperCase().padStart(2, '0')} */ ${field.rawType.trim().replace(/\(\s*\*\s*\)/, `(*${fieldId})`)};${field.notes ? ` /* ${comment(field.notes)} */` : ''}`);
+          cursor = field.offset + (field.size ?? 4);
+          continue;
+        }
         // "int16_t[2][4]", "char[8]": typed arrays; a symbolic length ("[width]") stays bytes with a note.
         const array = /^(.*?)\s*((?:\[[^\]]*\])+)$/.exec(field.rawType.trim());
         const dims = array ? [...array[2].matchAll(/\[\s*([^\]]*?)\s*\]/g)].map((d) => d[1]) : [];
@@ -122,7 +172,7 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
         let type = array ? cType(array[1]) : field.type;
         let note = field.notes;
         if (array && !numericDims) { note = [`${field.rawType}`, note].filter(Boolean).join('; '); type = null; }
-        const base = type?.replace(/^const\s+/, '').replace(/\s*\*+$/, '');
+        const base = type ? baseType(type) : undefined;
         if (type && base && !BUILTIN.test(type) && !defined.has(base)) {
           if (type.includes('*')) forward.add(base);
           else {
@@ -139,7 +189,7 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
         cursor = field.offset + (field.size ?? (field.type ? 0 : 1));
       }
       if (size !== null && size > cursor) lines.push(`    uint8_t _pad_${cursor.toString(16).toUpperCase()}[0x${(size - cursor).toString(16).toUpperCase()}];`);
-      lines.push(`} ${name};${size !== null ? ` /* size 0x${size.toString(16).toUpperCase()} */` : ''}`, '');
+      lines.push(`};${size !== null ? ` /* size 0x${size.toString(16).toUpperCase()} */` : data.size === 'variable' ? ' /* variable size */' : ''}`, '');
     } else if (f.kind === 'enum') {
       const name = ident(fieldName(data.name).name, 'UnnamedEnum');
       lines.push(`typedef enum ${name} {`);
@@ -151,11 +201,11 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
       lines.push(`} ${name};`, '');
     } else if (f.kind === 'vtable') {
       const name = ident(`${data.class}_vtbl`, 'Unnamed_vtbl');
-      lines.push(`typedef struct ${name} {`);
+      lines.push(`struct ${name} {`);
       (Array.isArray(data.slots) ? data.slots : []).forEach((slot: any, i: number) => {
         lines.push(`    void *${ident(slot.name ?? slot, `slot_${i}`)}; /* slot ${i} */`);
       });
-      lines.push(`} ${name};`, '');
+      lines.push(`};`, '');
     } else {
       skipped.push(f.title);
     }
@@ -173,7 +223,8 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
   }
   if (!facts.length && !hardware.length) lines.push('/* No struct, enum or vtable facts for this subject yet. Add them with add_fact. */');
   // Pointers to types from other pages: forward declarations right after the includes.
-  if (forward.size) lines.splice(6, 0, ...[...forward].map((t) => `typedef struct ${t} ${t}; /* defined on another page */`), '');
+  const elsewhere = [...forward].filter((t) => !defined.has(t));
+  if (elsewhere.length) lines.splice(6, 0, ...elsewhere.map((t) => `typedef struct ${t} ${t}; /* defined on another page */`), '');
   return { subject, build, facts: facts.length, header: lines.join('\n') };
 }
 
@@ -329,14 +380,17 @@ export function exportSymbols(s: Services, args: { build?: string; platform?: st
   const build = s.index.resolveRedirect(cleanTitle(args.build!, ['build']));
   if (!s.index.page(build)) throw new ToolError('NOT_FOUND', `"${build}" is not a known build. Use lookup_binary or register_build.`);
   const rows = s.index.factsForBuild(build).filter((f) => ['function', 'global', 'vtable'].includes(f.kind) && f.status !== 'rejected');
-  const symbols: Array<{ rva: number; name: string; kind: string; status: string; fact: string }> = [];
+  // rva: relative to the image base (PE); absolute: a fixed address (PlayStation, consoles, va facts).
+  const symbols: Array<{ rva: number; name: string; kind: string; status: string; fact: string; absolute?: boolean }> = [];
   const signatureOnly: Array<{ name: string; pattern: string; fact: string }> = [];
   const otherAddresses: Array<{ name: string; kind: string; value: string; fact: string }> = [];
   for (const f of rows) {
     const data = JSON.parse(f.data);
     const rva = hexNum(data.rva);
     const name = qualifiedName(data.name ?? data.class, `rewiki_${f.kind}`);
+    const va = data.address?.kind === 'va' ? hexNum(data.address.value) : null;
     if (rva !== null) symbols.push({ rva, name, kind: f.kind, status: f.status, fact: f.title });
+    else if (va !== null) symbols.push({ rva: va, name, kind: f.kind, status: f.status, fact: f.title, absolute: true });
     else if (data.address && typeof data.address.value === 'string') otherAddresses.push({ name, kind: String(data.address.kind), value: data.address.value, fact: f.title });
     else if (typeof data.signature === 'string') signatureOnly.push({ name, pattern: data.signature, fact: f.title });
   }
@@ -345,12 +399,12 @@ export function exportSymbols(s: Services, args: { build?: string; platform?: st
   let fromMap = 0;
   for (const m of s.index.symbolsForBuild(build)) {
     if (byFact.has(m.rva) || (m.kind !== 'function' && m.kind !== 'global' && m.kind !== 'vtable' && m.kind !== 'label')) continue;
-    symbols.push({ rva: m.rva, name: qualifiedName(m.name, `rewiki_${m.kind}`), kind: m.kind === 'label' ? 'global' : m.kind, status: `map:${m.confidence}`, fact: m.title });
+    symbols.push({ rva: m.rva, name: qualifiedName(m.name, `rewiki_${m.kind}`), kind: m.kind === 'label' ? 'global' : m.kind, status: `map:${m.confidence}`, fact: m.title, absolute: !!m.absolute });
     fromMap++;
   }
   symbols.sort((a, b) => a.rva - b.rva);
   const ascii = (x: string) => JSON.stringify(x.replace(/[^\x20-\x7e]/g, '?'));
-  const pyList = symbols.map((x) => `    (0x${x.rva.toString(16)}, ${ascii(x.name)}, ${ascii(x.kind)}, ${ascii(x.status)}, ${ascii(x.fact)}),`).join('\n');
+  const pyList = symbols.map((x) => `    (0x${x.rva.toString(16)}, ${ascii(x.name)}, ${ascii(x.kind)}, ${ascii(x.status)}, ${ascii(x.fact)}, ${x.absolute ? 'True' : 'False'}),`).join('\n');
   const pySigs = [
     ...signatureOnly.map((x) => `#   ${comment(x.name)}: pattern ${comment(x.pattern)}  (${comment(x.fact)})`),
     ...otherAddresses.map((x) => `#   ${comment(x.name)}: ${comment(x.kind)} address ${comment(x.value)}  (${comment(x.fact)})`),
@@ -366,7 +420,8 @@ export function exportSymbols(s: Services, args: { build?: string; platform?: st
     });
     script = `; ${HEADER_NOTE}\n; Build: ${comment(build)}\n${banked.sort().join('\n')}\n`;
   } else if (args.tool === 'json') {
-    script = JSON.stringify({ build, symbols, signature_only: signatureOnly, other_addresses: otherAddresses }, null, 2);
+    const hex = (n: number) => `0x${n.toString(16).toUpperCase()}`;
+    script = JSON.stringify({ build, symbols: symbols.map((x) => ({ ...x, rva: x.absolute ? undefined : hex(x.rva), va: x.absolute ? hex(x.rva) : undefined })), signature_only: signatureOnly, other_addresses: otherAddresses }, null, 2);
   } else if (args.tool === 'ghidra') {
     script = `${head}# Run in Ghidra's Script Manager (Jython or PyGhidra) with the program open.
 from ghidra.program.model.symbol import SourceType
@@ -376,14 +431,14 @@ ${pyList}
 ]
 
 base = currentProgram.getImageBase()
-for rva, name, kind, status, fact in SYMBOLS:
-    addr = base.add(rva)
+for rva, name, kind, status, fact, absolute in SYMBOLS:
+    addr = toAddr(rva) if absolute else base.add(rva)
     if kind == "function" and getFunctionAt(addr) is None:
         createFunction(addr, name)
     createLabel(addr, name, True, SourceType.USER_DEFINED)
     setPlateComment(addr, "ReverseEngineering.wiki [%s] %s" % (status, fact))
 print("ReverseEngineering.wiki: applied %d symbols" % len(SYMBOLS))
-${pySigs ? `\n# Not applied automatically (signature only, or a non-RVA address: segmented, banked, va, file offset):\n${pySigs}\n` : ''}`;
+${pySigs ? `\n# Not applied automatically (signature only, or a segmented, banked or file-offset address):\n${pySigs}\n` : ''}`;
   } else {
     script = `${head}# Run in IDA via File > Script file (IDAPython).
 import idaapi, idc, ida_funcs, ida_name
@@ -393,14 +448,14 @@ ${pyList}
 ]
 
 base = idaapi.get_imagebase()
-for rva, name, kind, status, fact in SYMBOLS:
-    ea = base + rva
+for rva, name, kind, status, fact, absolute in SYMBOLS:
+    ea = rva if absolute else base + rva
     if kind == "function":
         ida_funcs.add_func(ea)
     ida_name.set_name(ea, name, ida_name.SN_NOWARN | ida_name.SN_NOCHECK | ida_name.SN_FORCE)
     idc.set_cmt(ea, "ReverseEngineering.wiki [%s] %s" % (status, fact), 1)
 print("ReverseEngineering.wiki: applied %d symbols" % len(SYMBOLS))
-${pySigs ? `\n# Not applied automatically (signature only, or a non-RVA address: segmented, banked, va, file offset):\n${pySigs}\n` : ''}`;
+${pySigs ? `\n# Not applied automatically (signature only, or a segmented, banked or file-offset address):\n${pySigs}\n` : ''}`;
   }
   return {
     build, tool: args.tool, symbols: symbols.length, from_facts: symbols.length - fromMap, from_symbol_map: fromMap, signature_only: signatureOnly.length, other_addresses: otherAddresses.length, script,

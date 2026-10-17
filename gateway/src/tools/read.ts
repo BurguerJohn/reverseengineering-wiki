@@ -99,9 +99,10 @@ export function identify(s: Services, evidence: Evidence & { limit?: number }) {
   };
 }
 
-export function lookupBinary(s: Services, args: { sha256?: string; name?: string; size?: number; pe_timestamp?: string }) {
+export function lookupBinary(s: Services, args: { sha256?: string; sha1?: string; md5?: string; crc32?: string; name?: string; size?: number; pe_timestamp?: string }) {
   let build: string | null = null;
   if (args.sha256) build = s.index.buildBySha(args.sha256);
+  for (const kind of ['sha1', 'md5', 'crc32'] as const) if (!build && args[kind]) build = s.index.buildByHash(kind, args[kind]!);
   if (!build && args.name) build = s.index.buildByFile(args.name, args.size, args.pe_timestamp);
   if (!build) {
     return {

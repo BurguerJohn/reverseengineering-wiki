@@ -83,7 +83,9 @@ create table if not exists symbols (
   type text,
   signature text,
   size integer,
-  seen integer not null default 1
+  seen integer not null default 1,
+  absolute integer not null default 0,
+  overlay text
 );
 create index if not exists symbols_build_rva on symbols(build, rva);
 create index if not exists symbols_name on symbols(name);
@@ -118,6 +120,9 @@ export interface SymbolRow {
   signature: string | null;
   size: number | null;
   seen: number;
+  /** 1: rva holds an absolute address (va entries on builds without an image base). */
+  absolute: number;
+  overlay: string | null;
 }
 
 export interface SearchHit {
@@ -156,12 +161,19 @@ export class SearchIndex {
   constructor(path: string) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
-    this.db.exec('pragma journal_mode = wal;');
+    // Wait for another process's write (the CLI next to the running gateway) instead of failing at once.
+    this.db.exec('pragma journal_mode = wal; pragma busy_timeout = 10000;');
     // An index from before stemming: drop its text table and the poll cursor, so the
     // indexer rebuilds everything on its next pass.
     const docs = this.db.prepare("select sql from sqlite_master where name = 'docs'").get() as { sql: string } | undefined;
     if (docs && !docs.sql.includes('porter')) {
       this.db.exec('drop table docs');
+      this.db.exec("create table if not exists state (key text primary key, value text not null); delete from state where key = 'rc_cursor';");
+    }
+    // Symbols without the absolute/overlay columns: same, rebuilt on the next pass.
+    const symbolCols = (this.db.prepare('pragma table_info(symbols)').all() as Array<{ name: string }>).map((c) => c.name);
+    if (symbolCols.length && !symbolCols.includes('absolute')) {
+      this.db.exec('drop table symbols');
       this.db.exec("create table if not exists state (key text primary key, value text not null); delete from state where key = 'rc_cursor';");
     }
     this.db.exec(SCHEMA);
@@ -358,7 +370,14 @@ export class SearchIndex {
       const sha = f.sha256?.toLowerCase() ?? '';
       this.db.prepare('insert into build_files (sha256, title, name, size, pe_timestamp) values (?, ?, ?, ?, ?)')
         .run(sha, p.title, f.name, f.size ?? 0, f.pe_timestamp ?? null);
-      this.ids(p.title, '', [...(sha ? [{ kind: 'sha256' as const, token: sha }] : []), { kind: 'file' as const, token: f.name.toLowerCase() }]);
+      const other = (f as { sha1?: string; md5?: string; crc32?: string });
+      this.ids(p.title, '', [
+        ...(sha ? [{ kind: 'sha256' as const, token: sha }] : []),
+        ...(other.sha1 ? [{ kind: 'sha1' as const, token: other.sha1.toLowerCase() }] : []),
+        ...(other.md5 ? [{ kind: 'md5' as const, token: other.md5.toLowerCase() }] : []),
+        ...(other.crc32 ? [{ kind: 'crc32' as const, token: other.crc32.toLowerCase().replace(/^0x/, '') }] : []),
+        { kind: 'file' as const, token: f.name.toLowerCase() },
+      ]);
     }
     this.doc(p.title, '', `${summary}\n${(doc.files ?? []).map((f) => f.name).join(' ')}\n${doc.notes ?? ''}`, 'build');
     this.edge(p.title, 'build_of', doc.software);
@@ -373,13 +392,13 @@ export class SearchIndex {
     }
     const symbols = Array.isArray(doc.symbols) ? doc.symbols : [];
     this.insertPage(p, 'symbols', `${symbols.length} symbols, ${doc.range?.start}–${doc.range?.end}`, null, doc.build, null, null);
-    const stmt = this.db.prepare(`insert into symbols (title, build, rva, name, kind, confidence, source, type, signature, size, seen)
-      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = this.db.prepare(`insert into symbols (title, build, rva, name, kind, confidence, source, type, signature, size, seen, absolute, overlay)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     for (const x of symbols) {
       const rva = parseInt(String(x.rva), 16);
       if (!Number.isFinite(rva) || typeof x.name !== 'string') continue;
       stmt.run(p.title, doc.build, rva, x.name, x.kind ?? 'function', x.confidence ?? 'low', x.source ?? 'other',
-        x.type ?? null, x.signature ?? null, x.size ?? null, 1 + (x.seen_by?.length ?? 0));
+        x.type ?? null, x.signature ?? null, x.size ?? null, 1 + (x.seen_by?.length ?? 0), x.absolute ? 1 : 0, x.overlay ?? null);
     }
     this.edge(p.title, 'symbols_of', doc.build);
   }
@@ -602,6 +621,13 @@ export class SearchIndex {
     }
     const rank = (t: string) => (order.includes(t) ? order.indexOf(t) : order.length);
     return out.sort((a, b) => rank(a.type) - rank(b.type) || a.title.length - b.title.length).slice(0, limit);
+  }
+
+  /** A build by any of its files' SHA-1, MD5 or CRC32. */
+  buildByHash(kind: 'sha1' | 'md5' | 'crc32', value: string): string | null {
+    const row = this.db.prepare(`select i.title from identifiers i join pages p on p.title = i.title where i.kind = ? and i.token = ? and p.type = 'build' limit 1`)
+      .get(kind, value.toLowerCase().replace(/^0x/, '')) as { title: string } | undefined;
+    return row?.title ?? null;
   }
 
   buildBySha(sha256: string): string | null {

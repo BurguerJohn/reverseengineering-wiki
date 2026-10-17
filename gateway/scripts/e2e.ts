@@ -409,7 +409,7 @@ ok('search (text + exact hex), identify → library, lookup_binary, related(used
 const ghidra = await call(anon, 'export_symbols', { build: build.title, tool: 'ghidra' });
 assert.match(ghidra.script, /\(0x1a2b30, "WeaponTable_Parse", "function", "verified"/);
 const header = await call(anon, 'export_header', { subject: lib });
-assert.match(header.header, new RegExp(`typedef struct E2ePlayer_${run} \\{`));
+assert.match(header.header, new RegExp(`typedef struct E2ePlayer_${run} E2ePlayer_${run};[\\s\\S]*\\nstruct E2ePlayer_${run} \\{`));
 assert.match(header.header, /uint8_t _pad_C\[0x4\];/);
 ok('export_symbols (Ghidra) and export_header (C, with padding)');
 
@@ -886,10 +886,49 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
     data: { name: 'TrackNode (variable length)', size: 'variable', fields: [{ offset: '0x0', size: 8, type: 'char[8]', name: 'name' }, { offset: '0x8', size: 16, type: 'int16_t[2][4]', name: 'bbox' }, { offset: '0x18', size: 4, type: 'int32_t[count]', name: 'children' }] },
     evidence: [{ type: 'documentation', detail: 'fictional test data' }], confidence: 'low' });
   const typed = (await call(anon, 'export_header', { subject: `Format:E2E Track ${run}` })).header;
-  assert.match(typed, /typedef struct TrackNode \{/);
+  assert.match(typed, /\nstruct TrackNode \{/);
   assert.match(typed, /char name\[8\];/);
   assert.match(typed, /int16_t bbox\[2\]\[4\];/);
   assert.match(typed, /uint8_t children\[0x4\]; \/\* int32_t\[count\]/);
+
+  // PlayStation-style builds: SHA-1 identity, absolute addresses (va), scripts that place them right.
+  const sha1 = createHash('sha1').update(`psx-${run}`).digest('hex');
+  const psx = await call(a, 'register_build', { software: cave, version: 'US', platform: 'playstation', distribution: 'cd', release_date: '1997-10',
+    files: [{ name: `SLUS_${run}.EXE`, sha1, version_string: 'US release' }] });
+  assert.equal(psx.identity, 'hash', JSON.stringify(psx));
+  assert.equal((await call(anon, 'lookup_binary', { sha1 })).build, psx.title);
+  const absSyms = await call(a, 'add_symbols', { build: psx.title, symbols: [{ va: '0x80010DF4', name: 'g_Status', kind: 'global', confidence: 'medium', source: 'other' }] });
+  assert.equal(absSyms.added, 1, JSON.stringify(absSyms).slice(0, 300));
+  const relWarn = await call(a, 'add_symbols', { build: psx.title, symbols: [{ rva: '0x80020000', name: 'g_Other', kind: 'global', confidence: 'low', source: 'other' }] });
+  assert.match(relWarn.warning ?? '', /look like absolute addresses/);
+  const psxScript = await call(anon, 'export_symbols', { build: psx.title, tool: 'ghidra' });
+  assert.match(psxScript.script, /\(0x80010df4, "g_Status", "global", "map:medium", "[^"]+", True\)/, psxScript.script.slice(0, 900));
+  assert.match(psxScript.script, /addr = toAddr\(rva\) if absolute else base\.add\(rva\)/);
+  writeFileSync(join(tmpdir(), `rewiki-build-${run}.py`), psxScript.script);
+  assert.match((await call(anon, 'export_symbols', { build: psx.title, tool: 'json' })).script, /"va": "0x80010DF4"/);
+  const based = await call(a, 'register_build', { software: cave, version: 'EU', platform: 'playstation', distribution: 'cd',
+    files: [{ name: `SLES_${run}.EXE`, sha1: createHash('sha1').update(`psx-eu-${run}`).digest('hex'), image_base: '0x80010000' }] });
+  await call(a, 'add_symbols', { build: based.title, symbols: [{ va: '0x80010DF4', name: 'g_StatusEU', kind: 'global', confidence: 'medium', source: 'other' }] });
+  assert.equal((await call(anon, 'symbols', { build: based.title, rva: '0xDF4' })).symbol?.name ?? JSON.stringify(await call(anon, 'symbols', { build: based.title, rva: '0xDF4' })).slice(0, 200), 'g_StatusEU');
+  // Headers: structs in dependency order with forward declarations, function pointers, struct pointers.
+  await call(a, 'batch', { operations: [
+    { tool: 'add_fact', arguments: { kind: 'struct', subject: `Format:E2E Track ${run}`, claim: 'The fictional overlay header holds a room header by value and callbacks.', scope: { level: 'format', applies_to: 'all versions' },
+      data: { name: 'OverlayHdr', size: '0x10', fields: [{ offset: '0x0', size: 4, type: 'void (*)(void)', name: 'Update' }, { offset: '0x4', size: 4, type: 'struct Entity*', name: 'owner' }, { offset: '0x8', size: 8, type: 'RoomHdr', name: 'room' }] },
+      evidence: [{ type: 'documentation', detail: 'fictional test data' }], confidence: 'low' } },
+    { tool: 'add_fact', arguments: { kind: 'struct', subject: `Format:E2E Track ${run}`, claim: 'The fictional room header holds two edge coordinates.', scope: { level: 'format', applies_to: 'all versions' },
+      data: { name: 'RoomHdr', size: '0x8', fields: [{ offset: '0x0', size: 4, type: 'int32_t', name: 'left' }, { offset: '0x4', size: 4, type: 'int32_t', name: 'top' }] },
+      evidence: [{ type: 'documentation', detail: 'fictional test data' }], confidence: 'low' } },
+  ] });
+  const ordered = (await call(anon, 'export_header', { subject: `Format:E2E Track ${run}` })).header;
+  assert.match(ordered, /typedef struct OverlayHdr OverlayHdr;/);
+  assert.ok(ordered.indexOf('struct RoomHdr {') < ordered.indexOf('struct OverlayHdr {'), ordered);
+  assert.match(ordered, /void \(\*Update\)\(void\);/);
+  assert.match(ordered, /struct Entity\* owner;/);
+  assert.match(ordered, /RoomHdr room;/);
+  writeFileSync(join(tmpdir(), `rewiki-header-${run}.h`), ordered);
+  const oddEnum = await call(a, 'add_fact', { kind: 'enum', subject: `Format:E2E Track ${run}`, claim: 'The fictional stage ids include a hidden stage.', scope: { level: 'format', applies_to: 'all versions' },
+    data: { name: 'StageId', values: { 0: 'STAGE_NO0', 1: 'hidden stage (beta only)' } }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low', dry_run: true });
+  assert.match(oddEnum.warnings?.[0] ?? '', /not C identifiers/);
 
   // A wrong build title: "did you mean" the real one.
   const typo = await expectError(a, 'add_fact', { ...fn('Cave::Draw', '0x2000', `Build:${cave}/1.0 (Win64, Steam)`), dry_run: true }, 'SCHEMA_INVALID');

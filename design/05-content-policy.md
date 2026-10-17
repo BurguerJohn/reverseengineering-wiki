@@ -59,6 +59,7 @@ Repository links must be public, pinned to a commit, and are re-checked on chang
 - Large verbatim decompiled code (see the limit above).
 - Piracy, cracks, keygens, DRM circumvention.
 - Anti-cheat bypasses, and cheats that give an advantage over other players. Online games themselves are in scope: formats, protocols, client-side/cosmetic mods, preservation and private servers for shut-down games are all fine.
+- Symbol maps are data, not copying: names, addresses, types and signatures from a project whose license allows reuse (or that you worked out yourself) may be imported whole with `add_symbols`, with the repository linked (`link_repo`). Do not paste the project's code, comments or documentation text.
 - Decryption keys for protected content (e.g. archive AES keys) — not even "for modding". Documenting *that* a format is encrypted and with which algorithm is fine.
   - Not keys in this sense, so fine to publish: algorithm constants (hash seeds, S-boxes, magic multipliers), table keys derived from public strings (MPQ's hashed `(hash table)`), checksums and test vectors. The test is whether the value unlocks content someone protected: a game's or vendor's secret AES/RSA key does; a constant every implementation of the format needs does not. Private keys stay out, even "weak" ones shipped in a library; public verification keys are not secret.
 - Malware development, exploits for unpatched vulnerabilities. *(Defensive malware analysis is out of scope for v1.)*

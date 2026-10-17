@@ -4,7 +4,7 @@
  * bytes, symbols, RTTI names, hashes. Those are indexed as normalized tokens.
  */
 
-export type IdKind = 'hex' | 'bytes' | 'sha256' | 'symbol' | 'string' | 'rtti' | 'file';
+export type IdKind = 'hex' | 'bytes' | 'sha256' | 'sha1' | 'md5' | 'crc32' | 'symbol' | 'string' | 'rtti' | 'file';
 
 /** File names worth matching exactly: executables, libraries, archives, ROMs, data files. */
 const FILE_EXT = 'exe|dll|sys|com|drv|ocx|cpl|scr|efi|so|dylib|elf|bin|dat|pak|pck|cpk|awb|acb|arc|bnk|wem|big|wad|iso|cso|xex|xbe|nro|nso|nsp|xci|rom|nes|sfc|smc|z64|n64|v64|gb|gbc|gba|nds|3ds|cia|psarc|sgo|rmpa|mdb|cas|ini|cfg|sav|ttf';
