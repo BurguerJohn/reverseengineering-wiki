@@ -831,6 +831,34 @@ export class SearchIndex {
   }
 
   /** Exact name, or a prefix when the name ends with "*"; optionally across all builds. */
+  /**
+   * Where a name is in every build: symbol maps and build-level facts (rva, or a va address), with
+   * the software of each build, to carry an address from one version or region to another.
+   */
+  addressesOf(name: string, limit = 50): Array<{ build: string; rva: number; absolute: boolean; source: string; software: string | null }> {
+    const out: Array<{ build: string; rva: number; absolute: boolean; source: string; software: string | null }> = [];
+    const softwareOf = (b: string) => (this.db.prepare('select software from builds where title = ?').get(this.resolveRedirect(b)) as { software: string } | undefined)?.software ?? null;
+    for (const r of this.db.prepare('select build, rva, absolute, title from symbols where name = ? limit ?').all(name, limit) as any[]) {
+      out.push({ build: this.resolveRedirect(r.build), rva: r.rva, absolute: !!r.absolute, source: r.title, software: softwareOf(r.build) });
+    }
+    const facts = this.db.prepare(`select title, applies_to, data from facts where level = 'build' and kind in ('function', 'global', 'vtable')
+      and (json_extract(data, '$.name') = ? or json_extract(data, '$.class') = ?) limit ?`).all(name, name, limit) as Array<{ title: string; applies_to: string; data: string }>;
+    for (const f of facts) {
+      let d: any = {};
+      try { d = JSON.parse(f.data); } catch { /* skip */ }
+      const rva = typeof d.rva === 'string' ? parseInt(d.rva, 16) : NaN;
+      const va = d.address?.kind === 'va' && typeof d.address.value === 'string' ? parseInt(d.address.value, 16) : NaN;
+      const at = Number.isFinite(rva) ? rva : va;
+      if (!Number.isFinite(at)) continue;
+      const build = this.resolveRedirect(f.applies_to);
+      // A fact and a symbol map naming the same address: the fact (it has evidence).
+      const same = out.findIndex((o) => o.build === build && o.rva === at);
+      const row = { build, rva: at, absolute: !Number.isFinite(rva), source: f.title, software: softwareOf(build) };
+      if (same >= 0) out[same] = row; else out.push(row);
+    }
+    return out;
+  }
+
   symbolsByName(name: string, build: string | null, limit: number, offset: number): SymbolRow[] {
     const prefix = name.endsWith('*');
     const value = prefix ? `${name.slice(0, -1).replace(/[!%_]/g, (c) => `!${c}`)}%` : name;

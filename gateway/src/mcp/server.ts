@@ -26,7 +26,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.17';
+export const VERSION = '0.8.18';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -359,13 +359,14 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('symbols', {
     title: 'Look up symbols',
-    description: 'The symbol map of a build (bulk function/global names): what is at an RVA (exact or the function containing it), a range of addresses, or where a name is (exact, or prefix with a trailing *; omit build to search every build). Facts with evidence are separate: see search.',
+    description: 'The symbol map of a build (bulk function/global names): what is at an RVA (exact or the function containing it, and where that name is in other builds: another version or region), a range of addresses, or where a name is (exact, or prefix with a trailing *; omit build to search every build). Facts with evidence are separate: see search.',
     inputSchema: {
       build: z.string().optional().describe('Build: page (from lookup_binary)'),
       rva: z.string().optional().describe('An address as RVA, e.g. 0x141300'),
       from: z.string().optional().describe('Range start RVA'),
       to: z.string().optional().describe('Range end RVA'),
       name: z.string().optional().describe('Exact name, or prefix ending in *'),
+      in_build: z.string().optional().describe('With build and rva: only this other build (carry an address from the US to the JP release, from 1.0 to 1.1)'),
       limit: z.number().int().min(1).max(1000).optional().describe('Default 100'),
       cursor: z.string().optional(),
     },

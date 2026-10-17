@@ -194,7 +194,7 @@ function parseRva(raw: string, field: string): number {
   return parseInt(raw.trim(), 16);
 }
 
-export function symbols(s: Services, args: { build?: string; rva?: string; name?: string; from?: string; to?: string; limit?: number; cursor?: string }) {
+export function symbols(s: Services, args: { build?: string; rva?: string; name?: string; from?: string; to?: string; limit?: number; cursor?: string; in_build?: string }) {
   const build = args.build ? s.index.resolveRedirect(cleanTitle(args.build, s)) : null;
   if (build && typeOfTitle(build) !== 'build') throw new ToolError('BAD_TITLE', `"${build}" is not a Build: page.`);
   if (build && !s.index.page(build)) throw new ToolError('NOT_FOUND', `"${build}" is not a known build. Use lookup_binary.`);
@@ -214,14 +214,30 @@ export function symbols(s: Services, args: { build?: string; rva?: string; name?
     const rva = parseRva(args.rva, 'rva');
     const hit = s.index.symbolAt(build, rva);
     const inside = hit && (hit.offset === 0 || (hit.size !== null && hit.offset < hit.size));
-    const facts = s.index.factsForBuild(build).filter((f) => {
+    const factRows = s.index.factsForBuild(build).filter((f) => {
       try { return parseInt(JSON.parse(f.data).rva, 16) === rva; } catch { return false; }
-    }).map((f) => f.title);
+    });
+    const facts = factRows.map((f) => f.title);
+    // The same name in other builds (another version or region): the address there, at the same offset inside it.
+    const factName = factRows.map((f) => { try { const d = JSON.parse(f.data); return d.name ?? d.class; } catch { return undefined; } }).find((n) => typeof n === 'string');
+    const name: string | undefined = inside ? hit!.name : factName;
+    const offset = inside ? hit!.offset : 0;
+    const target = args.in_build ? s.index.resolveRedirect(cleanTitle(args.in_build, s)) : null;
+    const software = s.index.page(build)?.subject ?? null;
+    const elsewhere = name ? s.index.addressesOf(name).filter((x) => x.build !== build && (!target || x.build === target))
+      .sort((a, b) => Number(b.software === software) - Number(a.software === software) || a.build.localeCompare(b.build))
+      .slice(0, 20).map((x) => ({
+        build: x.build, [x.absolute ? 'va' : 'rva']: hexRva(x.rva + offset), symbol: name, ...(offset ? { symbol_start: hexRva(x.rva) } : {}),
+        same_software: x.software === software || undefined, source: x.source,
+      })) : [];
     return {
       build, rva: hexRva(rva),
       symbol: inside ? { ...symbolOut(hit!), offset: hexRva(hit!.offset) } : null,
       nearest_below: hit && !inside ? { ...symbolOut(hit), offset: hexRva(hit.offset), note: 'Size unknown or address past its end: the address may or may not belong to it.' } : undefined,
       facts: facts.length ? facts : undefined,
+      in_other_builds: elsewhere.length ? elsewhere : undefined,
+      in_other_builds_note: elsewhere.length && offset ? `Addresses there are the symbol's start + ${hexRva(offset)}, which holds when the function's code is the same in both builds; check it.` : undefined,
+      in_other_builds_hint: target && !elsewhere.length ? `No symbol or fact named ${name ?? 'here'} in ${target}: try export_symbols with a subject (signature scan) on that binary.` : undefined,
       counts: s.index.symbolCount(build),
     };
   }

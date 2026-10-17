@@ -1188,6 +1188,12 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   assert.match(psxScript.script, /addr = toAddr\(rva\) if absolute else base\.add\(rva\)/);
   writeFileSync(join(tmpdir(), `rewiki-build-${run}.py`), psxScript.script);
   assert.match((await call(anon, 'export_symbols', { build: psx.title, tool: 'json' })).script, /"va": "0x80010DF4"/);
+  // An address carried to another release: the same name there.
+  const jp = await call(a, 'register_build', { software: cave, version: 'JP', platform: 'playstation', distribution: 'cd',
+    files: [{ name: `SLPS_${run}.EXE`, sha1: createHash('sha1').update(`psx-jp-${run}`).digest('hex') }] });
+  await call(a, 'add_symbols', { build: jp.title, symbols: [{ va: '0x80011200', name: 'g_Status', kind: 'global', confidence: 'medium', source: 'other' }] });
+  const carried = await call(anon, 'symbols', { build: psx.title, rva: '0x80010DF4', in_build: jp.title });
+  assert.ok(carried.in_other_builds?.length === 1 && carried.in_other_builds[0].va === '0x80011200' && carried.in_other_builds[0].same_software, JSON.stringify(carried).slice(0, 600));
   const based = await call(a, 'register_build', { software: cave, version: 'EU', platform: 'playstation', distribution: 'cd',
     files: [{ name: `SLES_${run}.EXE`, sha1: createHash('sha1').update(`psx-eu-${run}`).digest('hex'), image_base: '0x80010000' }] });
   await call(a, 'add_symbols', { build: based.title, symbols: [{ va: '0x80010DF4', name: 'g_StatusEU', kind: 'global', confidence: 'medium', source: 'other' }] });
