@@ -555,6 +555,34 @@ print("ReverseEngineering.wiki: named %d of %d signatures" % (named, len(SIGNATU
   };
 }
 
+const CALLING_CONVENTION = /^(?:__cdecl|__stdcall|__fastcall|__thiscall|__vectorcall|__usercall|__userpurge|__pascal|__clrcall|cdecl|stdcall|fastcall|thiscall)$/;
+const TYPE_WORD = /^(?:void|char|short|int|long|float|double|signed|unsigned|const|volatile|struct|union|enum|bool|_Bool|BOOL|DWORD|WORD|BYTE|HRESULT|size_t|u?int\d+_t)$/;
+
+/**
+ * A prototype as a declaration that names the function, for Ghidra's C parser and IDA's SetType:
+ * "void __fastcall(Player*, float)" for Player::TakeDamage → "void __fastcall Player__TakeDamage(Player*, float)".
+ * Null when it does not look like a prototype.
+ */
+export function functionDecl(name: string, prototype: string): string | null {
+  const m = /^([^()]*?)\s*\((.*)\)\s*;?\s*$/s.exec(prototype.trim());
+  if (!m || !m[1].trim()) return null;
+  const cname = ident(name.replace(/::/g, '__'), 'func');
+  const words = m[1].trim().split(/\s+/);
+  const last = words[words.length - 1].replace(/^\*+/, '');
+  // "int main" names it already; "void __fastcall" or "Player *" does not.
+  const head = words.length > 1 && /^[A-Za-z_]\w*$/.test(last) && !CALLING_CONVENTION.test(last) && !TYPE_WORD.test(last)
+    ? `${m[1].trim().slice(0, m[1].trim().length - last.length)}${cname}`
+    : `${m[1].trim()} ${cname}`;
+  return `${head}(${m[2].trim()})`;
+}
+
+/** A data type as IDA declares it: "char[16]" for g_name → "char g_name[16]". */
+function dataDecl(name: string, type: string): string {
+  const cname = ident(name.replace(/::/g, '__'), 'data');
+  const array = /^(.*?)\s*((?:\[[^\]]*\])+)$/.exec(type.trim());
+  return array ? `${array[1]} ${cname}${array[2]}` : `${type.trim()} ${cname}`;
+}
+
 export function exportSymbols(s: Services, args: { build?: string; platform?: string; subject?: string; also?: string[]; tool: SymbolTool }) {
   if (!args.build && !args.platform && !args.subject) throw new ToolError('BAD_REQUEST', 'Give build (an exact binary), platform (its fixed hardware addresses) or subject (a script that finds its signatures in your binary).');
   if (args.subject && !args.build) return exportSignatureScan(s, { subject: args.subject, tool: args.tool, also: args.also });
@@ -563,7 +591,17 @@ export function exportSymbols(s: Services, args: { build?: string; platform?: st
   if (!s.index.page(build)) throw new ToolError('NOT_FOUND', `"${build}" is not a known build. Use lookup_binary or register_build.`);
   const rows = s.index.factsForBuild(build).filter((f) => ['function', 'global', 'vtable'].includes(f.kind) && f.status !== 'rejected');
   // rva: relative to the image base (PE); absolute: a fixed address (PlayStation, consoles, va facts).
-  const symbols: Array<{ rva: number; name: string; kind: string; status: string; fact: string; absolute?: boolean }> = [];
+  // type: the prototype (functions, as a declaration) or data type (globals); size: bytes of a global.
+  const symbols: Array<{ rva: number; name: string; kind: string; status: string; fact: string; absolute?: boolean; type?: string; decl?: string; size?: number }> = [];
+  const typing = (name: string, kind: string, type: unknown, size: unknown) => {
+    const t = typeof type === 'string' && type.trim() ? type.trim().slice(0, 300) : undefined;
+    const n = typeof size === 'number' && size > 0 ? size : hexNum(size) ?? undefined;
+    if (kind === 'function') {
+      const decl = t ? functionDecl(name, t) : null;
+      return decl ? { type: decl, decl } : {};
+    }
+    return { ...(t && cType(t.replace(/\s*(?:\[[^\]]*\])+$/, '')) ? { type: t, decl: dataDecl(name, t) } : {}), ...(n ? { size: n } : {}) };
+  };
   const signatureOnly: Array<{ name: string; pattern: string; fact: string }> = [];
   const otherAddresses: Array<{ name: string; kind: string; value: string; fact: string }> = [];
   for (const f of rows) {
@@ -571,8 +609,9 @@ export function exportSymbols(s: Services, args: { build?: string; platform?: st
     const rva = hexNum(data.rva);
     const name = qualifiedName(data.name ?? data.class, `rewiki_${f.kind}`);
     const va = data.address?.kind === 'va' ? hexNum(data.address.value) : null;
-    if (rva !== null) symbols.push({ rva, name, kind: f.kind, status: f.status, fact: f.title });
-    else if (va !== null) symbols.push({ rva: va, name, kind: f.kind, status: f.status, fact: f.title, absolute: true });
+    const typed = typing(name, f.kind, f.kind === 'function' ? data.prototype : data.type, f.kind === 'global' ? data.size : undefined);
+    if (rva !== null) symbols.push({ rva, name, kind: f.kind, status: f.status, fact: f.title, ...typed });
+    else if (va !== null) symbols.push({ rva: va, name, kind: f.kind, status: f.status, fact: f.title, absolute: true, ...typed });
     else if (data.address && typeof data.address.value === 'string') otherAddresses.push({ name, kind: String(data.address.kind), value: data.address.value, fact: f.title });
     else if (typeof data.signature === 'string') signatureOnly.push({ name, pattern: data.signature, fact: f.title });
   }
@@ -581,12 +620,15 @@ export function exportSymbols(s: Services, args: { build?: string; platform?: st
   let fromMap = 0;
   for (const m of s.index.symbolsForBuild(build)) {
     if (byFact.has(m.rva) || (m.kind !== 'function' && m.kind !== 'global' && m.kind !== 'vtable' && m.kind !== 'label')) continue;
-    symbols.push({ rva: m.rva, name: qualifiedName(m.name, `rewiki_${m.kind}`), kind: m.kind === 'label' ? 'global' : m.kind, status: `map:${m.confidence}`, fact: m.title, absolute: !!m.absolute });
+    const kind = m.kind === 'label' ? 'global' : m.kind;
+    const name = qualifiedName(m.name, `rewiki_${m.kind}`);
+    symbols.push({ rva: m.rva, name, kind, status: `map:${m.confidence}`, fact: m.title, absolute: !!m.absolute, ...(m.kind === 'label' ? {} : typing(name, kind, m.type, kind === 'global' ? m.size : undefined)) });
     fromMap++;
   }
   symbols.sort((a, b) => a.rva - b.rva);
   const ascii = (x: string) => JSON.stringify(x.replace(/[^\x20-\x7e]/g, '?'));
-  const pyList = symbols.map((x) => `    (0x${x.rva.toString(16)}, ${ascii(x.name)}, ${ascii(x.kind)}, ${ascii(x.status)}, ${ascii(x.fact)}, ${x.absolute ? 'True' : 'False'}),`).join('\n');
+  const pyList = symbols.map((x) => `    (0x${x.rva.toString(16)}, ${ascii(x.name)}, ${ascii(x.kind)}, ${ascii(x.status)}, ${ascii(x.fact)}, ${x.absolute ? 'True' : 'False'}, ${x.type ? ascii(x.type) : 'None'}, ${x.decl ? ascii(x.decl) : 'None'}, ${x.size ?? 'None'}),`).join('\n');
+  const typedCount = symbols.filter((x) => x.type || x.size).length;
   const pySigs = [
     ...signatureOnly.map((x) => `#   ${comment(x.name)}: pattern ${comment(x.pattern)}  (${comment(x.fact)})`),
     ...otherAddresses.map((x) => `#   ${comment(x.name)}: ${comment(x.kind)} address ${comment(x.value)}  (${comment(x.fact)})`),
@@ -606,41 +648,97 @@ export function exportSymbols(s: Services, args: { build?: string; platform?: st
     script = JSON.stringify({ build, symbols: symbols.map((x) => ({ ...x, rva: x.absolute ? undefined : hex(x.rva), va: x.absolute ? hex(x.rva) : undefined })), signature_only: signatureOnly, other_addresses: otherAddresses }, null, 2);
   } else if (args.tool === 'ghidra') {
     script = `${head}# Run in Ghidra's Script Manager (Jython or PyGhidra) with the program open.
+# APPLY_TYPES also applies the prototypes and data types published with the names (import the subject's
+# export_header header first: File > Parse C Source, so its structs exist); what does not parse is listed.
 from ghidra.program.model.symbol import SourceType
+from ghidra.program.model.data import ArrayDataType, ByteDataType
+
+APPLY_TYPES = True
 
 SYMBOLS = [
 ${pyList}
 ]
 
+def apply_type(addr, name, kind, ctype, size):
+    if kind == "function":
+        from ghidra.app.util.cparser.C import CParserUtils
+        from ghidra.app.cmd.function import ApplyFunctionSignatureCmd
+        sig = CParserUtils.parseSignature(state.getTool(), currentProgram, ctype)
+        if sig is None or not ApplyFunctionSignatureCmd(addr, sig, SourceType.USER_DEFINED).applyTo(currentProgram, monitor):
+            return False
+        func = getFunctionAt(addr)
+        if func is not None:
+            func.setName(name, SourceType.USER_DEFINED)
+        return True
+    if ctype:
+        from ghidra.util.data import DataTypeParser
+        dtm = currentProgram.getDataTypeManager()
+        dt = DataTypeParser(dtm, dtm, None, DataTypeParser.AllowedDataTypes.ALL).parse(ctype)
+    else:
+        dt = ArrayDataType(ByteDataType.dataType, size, 1)
+    clearListing(addr, addr.add(max(dt.getLength(), 1) - 1))
+    createData(addr, dt)
+    return True
+
 base = currentProgram.getImageBase()
-for rva, name, kind, status, fact, absolute in SYMBOLS:
+typed, untyped = 0, []
+for rva, name, kind, status, fact, absolute, ctype, decl, size in SYMBOLS:
     addr = toAddr(rva) if absolute else base.add(rva)
     if kind == "function" and getFunctionAt(addr) is None:
         createFunction(addr, name)
     createLabel(addr, name, True, SourceType.USER_DEFINED)
     setPlateComment(addr, "ReverseEngineering.wiki [%s] %s" % (status, fact))
-print("ReverseEngineering.wiki: applied %d symbols" % len(SYMBOLS))
+    if APPLY_TYPES and (ctype or (size and kind != "function")):
+        try:
+            ok = apply_type(addr, name, kind, ctype, size)
+        except Exception:
+            ok = False
+        if ok:
+            typed += 1
+        else:
+            untyped.append("%s: %s" % (name, ctype or size))
+print("ReverseEngineering.wiki: applied %d symbols, %d with their type" % (len(SYMBOLS), typed))
+if untyped:
+    print("Types not applied (import the header first, or set them by hand): " + "; ".join(untyped[:50]))
 ${pySigs ? `\n# Not applied automatically (signature only, or a segmented, banked or file-offset address):\n${pySigs}\n` : ''}`;
   } else {
     script = `${head}# Run in IDA via File > Script file (IDAPython).
-import idaapi, idc, ida_funcs, ida_name
+# APPLY_TYPES also applies the prototypes and data types published with the names (load the subject's
+# export_header header first: File > Load file > Parse C header file, so its structs exist); what does not parse is listed.
+import idaapi, idc, ida_funcs, ida_name, ida_bytes
+
+APPLY_TYPES = True
 
 SYMBOLS = [
 ${pyList}
 ]
 
 base = idaapi.get_imagebase()
-for rva, name, kind, status, fact, absolute in SYMBOLS:
+typed, untyped = 0, []
+for rva, name, kind, status, fact, absolute, ctype, decl, size in SYMBOLS:
     ea = rva if absolute else base + rva
     if kind == "function":
         ida_funcs.add_func(ea)
     ida_name.set_name(ea, name, ida_name.SN_NOWARN | ida_name.SN_NOCHECK | ida_name.SN_FORCE)
     idc.set_cmt(ea, "ReverseEngineering.wiki [%s] %s" % (status, fact), 1)
-print("ReverseEngineering.wiki: applied %d symbols" % len(SYMBOLS))
+    if APPLY_TYPES and (decl or (size and kind != "function")):
+        if decl:
+            ok = idc.SetType(ea, decl + ";")
+        else:
+            ida_bytes.del_items(ea, 0, size)
+            ok = idc.create_byte(ea) and idc.make_array(ea, size)
+        if ok:
+            typed += 1
+        else:
+            untyped.append("%s: %s" % (name, decl or size))
+print("ReverseEngineering.wiki: applied %d symbols, %d with their type" % (len(SYMBOLS), typed))
+if untyped:
+    print("Types not applied (load the header first, or set them by hand): " + "; ".join(untyped[:50]))
 ${pySigs ? `\n# Not applied automatically (signature only, or a segmented, banked or file-offset address):\n${pySigs}\n` : ''}`;
   }
   return {
-    build, tool: args.tool, symbols: symbols.length, from_facts: symbols.length - fromMap, from_symbol_map: fromMap, signature_only: signatureOnly.length, other_addresses: otherAddresses.length, script,
+    build, tool: args.tool, symbols: symbols.length, typed: typedCount, from_facts: symbols.length - fromMap, from_symbol_map: fromMap, signature_only: signatureOnly.length, other_addresses: otherAddresses.length, script,
+    types_hint: typedCount ? `${typedCount} symbols carry a prototype or data type. Import the header (export_header with the build's software or library) first, so the types they name exist.` : undefined,
     warning: 'Review generated scripts before running. Names come from community facts (status claimed/verified) and the symbol map (status map:<confidence>).',
   };
 }

@@ -1184,7 +1184,7 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const relWarn = await call(a, 'add_symbols', { build: psx.title, symbols: [{ rva: '0x80020000', name: 'g_Other', kind: 'global', confidence: 'low', source: 'other' }] });
   assert.match(relWarn.warning ?? '', /look like absolute addresses/);
   const psxScript = await call(anon, 'export_symbols', { build: psx.title, tool: 'ghidra' });
-  assert.match(psxScript.script, /\(0x80010df4, "g_Status", "global", "map:medium", "[^"]+", True\)/, psxScript.script.slice(0, 900));
+  assert.match(psxScript.script, /\(0x80010df4, "g_Status", "global", "map:medium", "[^"]+", True, None, None, None\)/, psxScript.script.slice(0, 900));
   assert.match(psxScript.script, /addr = toAddr\(rva\) if absolute else base\.add\(rva\)/);
   writeFileSync(join(tmpdir(), `rewiki-build-${run}.py`), psxScript.script);
   assert.match((await call(anon, 'export_symbols', { build: psx.title, tool: 'json' })).script, /"va": "0x80010DF4"/);
