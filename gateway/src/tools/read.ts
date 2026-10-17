@@ -1,4 +1,5 @@
 /** Read tools (design/04-mcp-server.md#read). Public: no account needed. */
+import { createHash } from 'node:crypto';
 import { createTwoFilesPatch } from 'diff';
 import type { Services } from './context.ts';
 import type { Operator } from '../db/accounts.ts';
@@ -315,7 +316,7 @@ export async function read(s: Services, args: { title: string; section?: string;
       // max_tokens holds for code too: files past the budget are cut, with a note.
       let budget = maxTokens * 4;
       let cut = false;
-      const files = code.files.map((f) => {
+      const files = code.files.map((f) => ({ ...f, sha256: createHash('sha256').update(f.content).digest('hex') })).map((f) => {
         if (f.content.length <= budget) { budget -= f.content.length; return f; }
         cut = true;
         const kept = f.content.slice(0, Math.max(0, budget));

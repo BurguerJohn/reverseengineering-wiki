@@ -42,6 +42,13 @@ test('code rules', () => {
   assert.ok(!rules(`Here:\n\n\`\`\`c\n${shortSnippet}\n\`\`\``, 'article').includes('decompiled-snippet-too-long'));
   const ownCode = 'import struct\n\ndef parse(data):\n    magic, count = struct.unpack_from("<4sI", data, 0)\n    return magic, count\n';
   assert.deepEqual(rules(ownCode, 'code'), []);
+  // A textbook SipHash names its state v0..v3: not decompiler output; Hex-Rays output (sub_, a1, v3) is.
+  const sipRound = 'def sipround(v0, v1, v2, v3):\n    v0 = (v0 + v1) & M\n    v1 = rotl(v1, 13) ^ v0\n    v2 = (v2 + v3) & M\n    v3 = rotl(v3, 16) ^ v2\n    return v0, v1, v2, v3\n';
+  assert.deepEqual(rules(sipRound.repeat(4), 'code'), []);
+  const hexRays = Array.from({ length: 20 }, (_, i) => `  v${i + 3} = sub_1400${i}A2B0(a1, a2);`).join('\n');
+  const flagged = scanText(hexRays, 'code', 'x.c').find((f) => f.rule === 'decompiler-output');
+  assert.ok(flagged);
+  assert.match(flagged.label, /sub_… ×20/);
 });
 
 test('usernames', () => {

@@ -112,10 +112,16 @@ export function scanText(text: string, context: ScanContext, fileName?: string):
   if (context === 'code') {
     const lines = text.split('\n');
     const markers = countMarkers(text);
-    if (markers >= 10 && markers / Math.max(lines.length, 1) > MARKERS.code_page_marker_ratio) {
+    const found = text.match(markerRegex()) ?? [];
+    // v0..v3 and a1 alone are ordinary names (SipHash state, arguments): it takes a decompiler-only token too.
+    const strong = found.filter((m) => !/^[va]\d{1,3}$/.test(m));
+    if (markers >= 10 && strong.length > 0 && markers / Math.max(lines.length, 1) > MARKERS.code_page_marker_ratio) {
+      const counts = [...found.reduce((m, t) => m.set(t.replace(/[0-9a-fA-F]{5,}$|\d+$/, '…'), (m.get(t.replace(/[0-9a-fA-F]{5,}$|\d+$/, '…')) ?? 0) + 1), new Map<string, number>())]
+        .sort((a, b) => b[1] - a[1]).slice(0, 4).map(([t, n]) => `${t} ×${n}`).join(', ');
+      const first = text.search(markerRegex());
       findings.push({
-        rule: 'decompiler-output', category: 'code', file: fileName, line: 1,
-        label: 'looks like decompiler output; publish your own implementation, quote target code only in short snippets',
+        rule: 'decompiler-output', category: 'code', file: fileName, line: lineOf(text, first),
+        label: `looks like decompiler output (${counts}); publish your own implementation with your own names, quote target code only in short snippets`,
       });
     }
     const longest = lines.reduce((max, l) => Math.max(max, l.length), 0);

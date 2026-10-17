@@ -393,7 +393,9 @@ export async function editSection(s: Services, caller: Caller, args: {
   }
   if (!target && args.create_if_missing === false) throw new ToolError('NOT_FOUND', `No section "${args.section}".`);
 
-  const newBody = markdownToWikitext(body, { topLevel: target && target.level > 0 ? Math.min(target.level + 1, 6) : 3 });
+  // replace edits only what it names: the blank lines after the heading stay as they were.
+  const keepLead = args.replace && target && target.level > 0 ? (/^\n*/.exec(target.body)?.[0] ?? '') : '';
+  const newBody = keepLead + markdownToWikitext(body, { topLevel: target && target.level > 0 ? Math.min(target.level + 1, 6) : 3 });
   const oldBody = target ? (target.level === 0 ? target.text : target.body) : '';
   if (target && oldBody.trim().length > 200 && newBody.length < oldBody.trim().length * 0.7 && !args.reason) {
     throw new ToolError('REASON_REQUIRED', 'This removes more than 30% of the section. Resend with a reason (and evidence if you are correcting information).');

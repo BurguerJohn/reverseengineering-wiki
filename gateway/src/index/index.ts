@@ -152,6 +152,20 @@ function bytesContain(outer: string, inner: string): boolean {
   return false;
 }
 
+/** One byte string starts the other; ".." matches any byte. Both need 2+ fixed bytes in common. */
+function bytesPrefix(a: string, b: string): boolean {
+  const x = a.match(/../g) ?? [];
+  const y = b.match(/../g) ?? [];
+  const n = Math.min(x.length, y.length);
+  let fixed = 0;
+  for (let i = 0; i < n; i++) {
+    if (x[i] === '..' || y[i] === '..') continue;
+    if (x[i] !== y[i]) return false;
+    fixed++;
+  }
+  return fixed >= 2;
+}
+
 /** Words too common to search on their own (match="any"). */
 const STOP_WORDS = new Set(['a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'how', 'in', 'into', 'is', 'it', 'of', 'on', 'or', 'the', 'to', 'what', 'when', 'where', 'with']);
 
@@ -545,6 +559,10 @@ export class SearchIndex {
       if (t.kind === 'bytes' && t.prefix) {
         rows = this.db.prepare(`select i.title, p.subject from identifiers i join pages p on p.title = i.title
           where i.kind = 'bytes' and (i.token like ? or ? like i.token || '%') limit 100`).all(`${t.token}%`, t.token) as any[];
+        // Magics with wildcard bytes (a mask, or ?? in the fact): compared byte by byte.
+        const wild = this.db.prepare(`select i.title, i.token, p.subject from identifiers i join pages p on p.title = i.title
+          where i.kind = 'bytes' and instr(i.token, '..') > 0 limit 20000`).all() as Array<{ title: string; token: string; subject: string | null }>;
+        rows = [...rows, ...wild.filter((r) => bytesPrefix(r.token, t.token))];
       } else if (t.kind === 'bytes' && t.token.length >= 8) {
         // A pattern of 4+ bytes found inside a published signature, or containing one; ?? matches any byte.
         const all = this.db.prepare(`select i.title, i.token, p.subject from identifiers i join pages p on p.title = i.title

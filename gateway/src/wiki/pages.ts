@@ -455,7 +455,7 @@ export function renderCodePage(doc: CodeDoc): string {
   ];
   for (const file of doc.files) {
     parts.push(`== File: ${file.name} ==`);
-    parts.push(codeBlock(file.lang, file.content));
+    parts.push(codeBlock(file.lang, file.content, true));
   }
   return `${parts.join('\n\n')}\n`;
 }

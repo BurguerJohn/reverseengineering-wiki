@@ -159,6 +159,13 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
         })
         .filter((x: any) => x.offset !== null)
         .sort((a: any, b: any) => a.offset - b.offset);
+      const NATURAL: Record<string, number> = { int16_t: 2, uint16_t: 2, int32_t: 4, uint32_t: 4, float: 4, int64_t: 8, uint64_t: 8, double: 8 };
+      const misaligned = fields.some((x: any) => {
+        const n = x.type ? NATURAL[x.type.replace(/^const\s+/, '')] : undefined;
+        return n !== undefined && x.offset % n !== 0;
+      });
+      const packed = hexNum(data.alignment) === 1 || data.packed === true || misaligned;
+      if (packed) lines.push(`#pragma pack(push, 1) /* ${misaligned ? 'fields off their natural alignment' : 'packed'}: offsets as documented */`);
       lines.push(`struct ${name} {`);
       let cursor = 0;
       for (const field of fields) {
@@ -199,7 +206,9 @@ export function exportHeader(s: Services, args: { subject: string; build?: strin
         cursor = field.offset + (field.size ?? (field.type ? 0 : 1));
       }
       if (size !== null && size > cursor) lines.push(`    uint8_t _pad_${cursor.toString(16).toUpperCase()}[0x${(size - cursor).toString(16).toUpperCase()}];`);
-      lines.push(`};${size !== null ? ` /* size 0x${size.toString(16).toUpperCase()} */` : data.size === 'variable' ? ' /* variable size */' : ''}`, '');
+      lines.push(`};${size !== null ? ` /* size 0x${size.toString(16).toUpperCase()} */` : data.size === 'variable' ? ' /* variable size */' : ''}`);
+      if (packed) lines.push('#pragma pack(pop)');
+      lines.push('');
     } else if (f.kind === 'enum') {
       const name = ident(fieldName(data.name).name.replace(/_+$/, ''), 'UnnamedEnum');
       lines.push(`typedef enum ${name} {`);

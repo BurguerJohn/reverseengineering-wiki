@@ -50,8 +50,9 @@ function sanitizeLang(info: string): string {
   return /^[a-z0-9+#._-]{1,30}$/.test(lang) ? lang : 'text';
 }
 
-export function codeBlock(lang: string, content: string): string {
-  const body = content.replace(/\n$/, '').replace(/<\/syntaxhighlight/gi, '&lt;/syntaxhighlight');
+/** exact: keep a trailing newline (code files, whose checksums must match the tested file). */
+export function codeBlock(lang: string, content: string, exact = false): string {
+  const body = (exact ? content : content.replace(/\n$/, '')).replace(/<\/syntaxhighlight/gi, '&lt;/syntaxhighlight');
   return `<syntaxhighlight lang="${sanitizeLang(lang)}">\n${body}\n</syntaxhighlight>`;
 }
 

@@ -93,7 +93,13 @@ export function extractFromFactData(data: Record<string, unknown>): Identifier[]
   }
   for (const key of ['signature', 'pattern', 'bytes']) {
     const v = str(data[key]);
-    if (v) add(out, 'bytes', normalizeBytes(v));
+    if (!v) continue;
+    const bytes = normalizeBytes(v);
+    const mask = key === 'bytes' ? normalizeBytes(str(data.mask) ?? '') : null;
+    // "00 00 0D 0A" with mask "00 00 FF FF": only the bytes under FF are fixed (versioned magics).
+    if (bytes && mask && mask.length === bytes.length) {
+      add(out, 'bytes', (bytes.match(/../g) ?? []).map((b, i) => (mask.slice(i * 2, i * 2 + 2) === 'ff' ? b : '..')).join(''));
+    } else add(out, 'bytes', bytes);
   }
   for (const key of ['value', 'indicator', 'string']) {
     const v = str(data[key]);

@@ -26,7 +26,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.3';
+export const VERSION = '0.8.4';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -549,12 +549,12 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       name: z.string().optional().describe('For new pages: what it does, e.g. "SGO parser"'),
       title: z.string().optional().describe('Existing Code: page to update'),
       base_revision: z.number().int().optional(),
-      summary: z.string(),
+      summary: z.string().min(10).max(500).describe('What it does, 10-500 characters'),
       language: z.string(),
       kind: z.enum(CODE_KINDS),
       subjects: z.array(z.string()).min(1),
-      tested_on: z.string().describe('Builds/samples and tool versions it was run against'),
-      usage: z.string(),
+      tested_on: z.string().min(3).max(1000).describe('Builds/samples and tool versions it was run against'),
+      usage: z.string().min(10).max(4000).describe('How to run it'),
       dependencies: z.string().optional(),
       files: z.array(z.object({ name: z.string(), lang: z.string().optional(), content: z.string() })).min(1),
     },

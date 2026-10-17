@@ -864,6 +864,13 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const sub = await call(anon, 'identify', { patterns: ['E0 46 3E 28 3D 20 FD C9'] });
   assert.equal(sub.candidates[0]?.subject, `Platform:${consoleName}`, JSON.stringify(sub.candidates));
 
+  // From here on account a writes a lot: "established" (200 writes an hour), as an account with this history would be.
+  {
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(new URL('../data-test/gateway.sqlite', import.meta.url));
+    db.prepare("update operators set trust = 'established' where username = ? and trust = 'new'").run(nameA);
+    db.close();
+  }
   // Typed hardware blocks, enum constants that collide, a leading-digit name, "_start" keys, lower bounds, line lists, the infobox.
   await call(a, 'batch', { operations: [
     { tool: 'add_fact', arguments: { kind: 'struct', subject: `Platform:${consoleName}`, claim: 'The fictional video unit has two registers.', scope: { level: 'platform', applies_to: 'all models' },
@@ -893,6 +900,29 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const ib = await call(a, 'edit_section', { title: `Platform:${consoleName}`, section: 'Infobox', infobox: { vendor: 'Fictional Corp', release: '1996' }, base_revision: consoleRead.revision, summary: 'Set vendor and release' });
   assert.equal(ib.infobox?.vendor, 'Fictional Corp', JSON.stringify(ib).slice(0, 300));
   assert.equal((await call(anon, 'read', { title: `Platform:${consoleName}` })).infobox?.release, '1996');
+
+  // Versioned magics (a mask), packed structs, byte-exact code files, replace that keeps whitespace.
+  const versioned = await call(a, 'batch', { operations: [
+    { tool: 'add_fact', arguments: { kind: 'magic', subject: `Format:E2E Track ${run}`, claim: 'Fictional track files start with a 2-byte version and then CR LF.', scope: { level: 'format', applies_to: 'all versions' },
+      data: { offset: 0, bytes: '00 00 0D 0A', mask: '00 00 FF FF', meaning: 'fictional track file, any version' }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' } },
+    { tool: 'add_fact', arguments: { kind: 'struct', subject: `Format:E2E Track ${run}`, claim: 'The fictional packed prefix has a byte then 32-bit counts.', scope: { level: 'format', applies_to: 'all versions' },
+      data: { name: 'PackedPrefix', size: 9, fields: [{ offset: 0, size: 1, type: 'uint8_t', name: 'tag' }, { offset: 1, size: 4, type: 'uint32_t', name: 'argcount' }, { offset: 5, size: 4, type: 'uint32_t', name: 'flags' }] },
+      evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' } },
+  ] });
+  assert.equal(versioned.results?.length ?? versioned.completed, 2, JSON.stringify(versioned).slice(0, 500));
+  const masked = await call(anon, 'identify', { magic: ['17 0D 0D 0A E3 00'] });
+  assert.equal(masked.candidates[0]?.subject, `Format:E2E Track ${run}`, JSON.stringify(masked).slice(0, 400));
+  const packed = (await call(anon, 'export_header', { subject: `Format:E2E Track ${run}` })).header;
+  assert.match(packed, /#pragma pack\(push, 1\)[^\n]*\nstruct PackedPrefix \{[\s\S]*?\}; \/\* size 0x9 \*\/\n#pragma pack\(pop\)/, packed);
+  const exact = await call(a, 'add_code', { name: `Exact ${run}`, summary: 'Prints the fictional track header byte by byte.', language: 'python', kind: 'parser',
+    subjects: [`Format:E2E Track ${run}`], tested_on: 'fictional samples', usage: 'python exact.py file.trk', files: [{ name: 'exact.py', content: 'print(open(__import__("sys").argv[1], "rb").read(4))\n\n' }] });
+  const exactFiles = await call(anon, 'read', { title: exact.title, format: 'files' });
+  const exactFile = exactFiles.files?.find((f: any) => f.name === 'exact.py');
+  assert.equal(exactFile?.sha256, createHash('sha256').update('print(open(__import__("sys").argv[1], "rb").read(4))\n\n').digest('hex'), JSON.stringify(exactFiles).slice(0, 400));
+  const trackPage = await call(anon, 'read', { title: `Format:E2E Track ${run}`, section: 'Container' });
+  await call(a, 'edit_section', { title: `Format:E2E Track ${run}`, section: 'Container', replace: [{ old: 'See', new: 'See also' }], base_revision: trackPage.revision, summary: 'Wording' });
+  const trackRaw = await call(anon, 'read', { title: `Format:E2E Track ${run}`, format: 'wikitext' });
+  assert.match(trackRaw.content ?? JSON.stringify(trackRaw), /== Container ==\n\nSee also \[\[/, JSON.stringify(trackRaw).slice(0, 600));
 
   // A dry run hands back a check_id: publish_checked publishes exactly that, once.
   const checkedNote = await call(a, 'add_note', { subject: cave, key: 'Checked once', body: 'Published by check_id without resending the arguments.', confidence: 'low', dry_run: true });
@@ -941,7 +971,7 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   await call(a, 'add_symbols', { build: based.title, symbols: [{ va: '0x80010DF4', name: 'g_StatusEU', kind: 'global', confidence: 'medium', source: 'other' }] });
   assert.equal((await call(anon, 'symbols', { build: based.title, rva: '0xDF4' })).symbol?.name ?? JSON.stringify(await call(anon, 'symbols', { build: based.title, rva: '0xDF4' })).slice(0, 200), 'g_StatusEU');
   // Headers: structs in dependency order with forward declarations, function pointers, struct pointers.
-  await call(a, 'batch', { operations: [
+  const headerOps = await call(a, 'batch', { operations: [
     { tool: 'add_fact', arguments: { kind: 'struct', subject: `Format:E2E Track ${run}`, claim: 'The fictional overlay header holds a room header by value and callbacks.', scope: { level: 'format', applies_to: 'all versions' },
       data: { name: 'OverlayHdr', size: '0x10', fields: [{ offset: '0x0', size: 4, type: 'void (*)(void)', name: 'Update' }, { offset: '0x4', size: 4, type: 'struct Entity*', name: 'owner' }, { offset: '0x8', size: 8, type: 'RoomHdr', name: 'room' }] },
       evidence: [{ type: 'documentation', detail: 'fictional test data' }], confidence: 'low' } },
@@ -949,6 +979,7 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
       data: { name: 'RoomHdr', size: '0x8', fields: [{ offset: '0x0', size: 4, type: 'int32_t', name: 'left' }, { offset: '0x4', size: 4, type: 'int32_t', name: 'top' }] },
       evidence: [{ type: 'documentation', detail: 'fictional test data' }], confidence: 'low' } },
   ] });
+  assert.ok(!headerOps.error, JSON.stringify(headerOps).slice(0, 600));
   const ordered = (await call(anon, 'export_header', { subject: `Format:E2E Track ${run}` })).header;
   assert.match(ordered, /typedef struct OverlayHdr OverlayHdr;/);
   assert.ok(ordered.indexOf('struct RoomHdr {') < ordered.indexOf('struct OverlayHdr {'), ordered);
