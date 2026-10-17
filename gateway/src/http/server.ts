@@ -164,6 +164,9 @@ export function createHttpServer(s: Services, auth: AuthService, mailer: Mailer)
         server.server.oninitialized = () => {
           const info = server.server.getClientVersion();
           console.log(`[${new Date().toISOString()}] MCP session: ${info?.name ?? '?'} ${info?.version ?? ''}, elicitation: ${server.server.getClientCapabilities()?.elicitation ? 'yes' : 'no'}`);
+          // Clients that reconnect after an update may keep the tool list of an older version:
+          // tell them it changed, so they fetch the current tools and schemas.
+          setTimeout(() => { try { server.sendToolListChanged(); } catch { /* client gone */ } }, 500);
         };
         transport.onclose = () => {
           if (transport.sessionId) sessions.delete(transport.sessionId);
