@@ -15,6 +15,7 @@ import { ToolError, batchContext, quotaError, requireWriter, type Caller, type P
 import { quota, remainingWrites } from '../auth/trust.ts';
 import * as read from '../tools/read.ts';
 import * as write from '../tools/write.ts';
+import { importSymbols, SYMBOL_FILE_FORMATS } from '../tools/symbolimport.ts';
 import { exportHeader, exportSymbols } from '../tools/exports.ts';
 import { FACT_KINDS, FACT_DATA, CODE_KINDS, SYMBOL_KINDS, SYMBOL_SOURCES, MAX_SYMBOLS_PER_CALL } from '../wiki/pages.ts';
 
@@ -26,7 +27,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.18';
+export const VERSION = '0.8.19';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -570,6 +571,22 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     },
     annotations: WRITE,
   }, (c, a) => write.addSymbols(s, c, a));
+
+  registerWrite('import_symbols', {
+    title: 'Import a decompilation symbol file',
+    description: `A licensed decompilation project's symbol file, read from its repository at a pinned commit and added to a build's symbol map (source "decompilation"; up to 50,000 names, ${MAX_SYMBOLS_PER_CALL} per write). Formats: linker lists and splat symbol_addrs.txt ("func_80012345 = 0x80012345; // type:func size:0x40"), nm output ("00401136 T main"), address/name pairs. Addresses are read as va (absolute; relative to the build's image_base when it declares one). The dry run reads the file and checks everything. The repository needs a license (declare it with license when GitHub missed it).`,
+    inputSchema: { dry_run: DRY_RUN,
+      build: z.string().describe('Build: page the names belong to (the exact binary the decompilation matches)'),
+      url: z.string().describe('Repository URL (github.com, gitlab.com, codeberg.org)'),
+      path: z.string().describe('The symbol file in the repository, e.g. "symbol_addrs.txt" or "config/us/symbols.txt"'),
+      commit: z.string().optional().describe('Commit to read (default: the default branch, pinned in the answer)'),
+      format: z.enum(SYMBOL_FILE_FORMATS).optional().describe('Default auto: the format that reads the most lines'),
+      confidence: z.enum(['low', 'medium', 'high']).optional().describe('Default medium (a matching decompilation is usually high)'),
+      license: z.string().optional().describe('SPDX id when GitHub did not recognize the license'),
+      force: z.boolean().optional(),
+    },
+    annotations: WRITE,
+  }, (c, a) => importSymbols(s, c, a));
 
   registerWrite('add_code', {
     title: 'Publish code',

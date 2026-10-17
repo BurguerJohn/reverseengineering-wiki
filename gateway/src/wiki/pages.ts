@@ -314,7 +314,7 @@ export function buildTitle(b: BuildInput): string {
 // explanation, evidence and verification; maps hold the long tail.
 
 export const SYMBOL_KINDS = ['function', 'global', 'vtable', 'label'] as const;
-export const SYMBOL_SOURCES = ['manual', 'rtti', 'strings', 'debug-info', 'exports', 'signature', 'decompiler', 'diffing', 'other'] as const;
+export const SYMBOL_SOURCES = ['manual', 'rtti', 'strings', 'debug-info', 'exports', 'signature', 'decompiler', 'decompilation', 'diffing', 'other'] as const;
 const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 } as const;
 export const MAX_SYMBOLS_PER_CALL = 5000;
 
