@@ -5,8 +5,8 @@ export type SubjectType = (typeof SUBJECT_TYPES)[number];
 export type PageType = SubjectType | 'build' | 'symbols' | 'fact' | 'code' | 'notes' | 'project' | 'other';
 type NamespacedType = Exclude<PageType, 'project' | 'other' | 'symbols'>;
 
-/** Symbol map pages live under their build: Build:<build>/symbols/<8 hex digits, chunk start>. */
-export const SYMBOLS_TITLE = /^Build:(.+)\/symbols\/([0-9A-F]{8})$/;
+/** Symbol map pages live under their build: Build:<build>/symbols/<8 hex digits or more (64-bit addresses), chunk start>. */
+export const SYMBOLS_TITLE = /^Build:(.+)\/symbols\/([0-9A-F]{8,16})$/;
 
 export const NAMESPACES: Record<NamespacedType, { id: number; name: string }> = {
   software: { id: 3000, name: 'Software' },
