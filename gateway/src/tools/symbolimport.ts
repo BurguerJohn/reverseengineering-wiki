@@ -46,7 +46,7 @@ const NAME = String.raw`[A-Za-z_.$?@][\w.$@?:<>~]*`;
 // CodeWarrior-mangled template names keep their commas ("vector<pair<Ui,Ui>,alloc>"): in "name = address" lines the "=" ends the name.
 const LINKER_NAME = String.raw`[A-Za-z_.$?@][\w.$@?:<>~,*&]*`;
 
-export interface ParsedSymbol { va: string; name: string; kind: 'function' | 'global' | 'label'; size?: number; type?: string }
+export interface ParsedSymbol { va: string; name: string; kind: 'function' | 'global' | 'label'; size?: number; type?: string; rom?: string; overlay?: string }
 
 // splat and decomp tools write data types as u8/s16/f32...
 const SPLAT_TYPES: Record<string, string> = {
@@ -70,7 +70,9 @@ function parseLine(line: string, format: SymbolFileFormat): ParsedSymbol | null 
     const kind = t === 'func' || t === 'function' ? 'function' : t === 'label' || t === 'jtbl' ? 'label' : t ? 'global' : /^(?:func_|fn_|sub_)/i.test(m[1]) ? 'function' : 'label';
     // decomp-toolkit writes "type:object" for data; its size is the object's.
     const size = attrs.size ? Number(attrs.size) : undefined;
-    return { va: hex(Number(m[2])), name: m[1], kind, ...(size && Number.isFinite(size) && size > 0 ? { size } : {}), ...(SPLAT_TYPES[t] ? { type: SPLAT_TYPES[t] } : {}) };
+    // splat's rom:0x... tells overlays apart that load at the same address.
+    const rom = attrs.rom && /^(?:0x)?[0-9A-Fa-f]+$/.test(attrs.rom) ? hex(parseInt(attrs.rom.replace(/^0x/i, ''), 16)) : undefined;
+    return { va: hex(Number(m[2])), name: m[1], kind, ...(size && Number.isFinite(size) && size > 0 ? { size } : {}), ...(SPLAT_TYPES[t] ? { type: SPLAT_TYPES[t] } : {}), ...(rom ? { rom } : {}) };
   }
   if (format === 'nm') {
     // "0000000000401136 T main" or, with -S, "0000000000401136 0000000000000020 T main"
@@ -106,8 +108,20 @@ export function parseSymbolFile(text: string, format: (typeof SYMBOL_FILE_FORMAT
     if (symbols.length > best.symbols.length) best = { format: f, symbols };
   }
   // One name per address (the first), as add_symbols requires.
-  const seen = new Set<string>();
-  const symbols = best.symbols.filter((x) => (seen.has(x.va) ? false : (seen.add(x.va), true)));
+  // One name per address, as add_symbols requires; names that share an address but come from different ROM offsets
+  // (N64/PS1 overlays) are kept apart, each in the overlay named by its ROM offset.
+  const atAddress = new Map<string, ParsedSymbol[]>();
+  for (const x of best.symbols) atAddress.set(x.va, [...(atAddress.get(x.va) ?? []), x]);
+  const symbols: ParsedSymbol[] = [];
+  for (const group of atAddress.values()) {
+    const roms = new Set(group.map((x) => x.rom).filter(Boolean));
+    if (group.length > 1 && roms.size > 1) {
+      const byRom = new Map<string, ParsedSymbol>();
+      for (const x of group) if (x.rom && !byRom.has(x.rom)) byRom.set(x.rom, { ...x, overlay: `rom:${x.rom}` });
+      symbols.push(...byRom.values());
+    } else symbols.push(group[0]);
+  }
+  for (const x of symbols) delete x.rom;
   const meaningful = (l: string) => l.trim() && !/^\s*(?:#|\/\/|;)/.test(l);
   const content = lines.filter(meaningful).length;
   // A few lines the format did not read, so the agent sees why (another syntax, sections, sizes only).

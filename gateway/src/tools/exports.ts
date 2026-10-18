@@ -732,6 +732,12 @@ export function exportSymbols(s: Services, args: { build?: string; platform?: st
       continue;
     }
     if (byFact.has(m.rva) || (m.kind !== 'function' && m.kind !== 'global' && m.kind !== 'vtable' && m.kind !== 'label')) continue;
+    // Overlays share addresses (N64 code overlays, the modules of a multi-file build): one label per address in a
+    // script, the first map entry; the others stay in the map and its pages.
+    if (m.overlay) {
+      if (byFact.has(m.rva)) continue;
+      byFact.add(m.rva);
+    }
     const kind = m.kind === 'label' ? 'global' : m.kind;
     const name = qualifiedName(m.name, `rewiki_${m.kind}`);
     symbols.push({ rva: m.rva, name, kind, status: `map:${m.confidence}`, fact: m.title, absolute: !!m.absolute, ...(m.kind === 'label' ? {} : typing(name, kind, m.type, kind === 'global' ? m.size : undefined)) });

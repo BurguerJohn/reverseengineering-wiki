@@ -470,17 +470,21 @@ const rvaOf = (s: { rva: string }) => parseInt(s.rva, 16);
  * is higher (or `force`), otherwise reported as a conflict.
  */
 export function mergeSymbols(doc: SymbolsDoc, incoming: SymbolInput[], op: string, at: string, force = false) {
-  const byRva = new Map(doc.symbols.map((x) => [rvaOf(x), x]));
+  // An address is one symbol per overlay (or module of a multi-file build: ISLE.EXE and LEGO1.DLL share small RVAs;
+  // N64 overlays share one RAM range): the key is the overlay plus the address.
+  const keyOf = (x: { rva: string; overlay?: string }) => `${x.overlay ?? ''}|${rvaOf(x)}`;
+  const byRva = new Map(doc.symbols.map((x) => [keyOf(x), x]));
   let added = 0;
   let updated = 0;
   let unchanged = 0;
   const conflicts: SymbolConflict[] = [];
   for (const sym of incoming) {
     const rva = rvaOf(sym);
+    const key = keyOf(sym);
     const entry: SymbolEntry = { ...sym, rva: hexRva(rva), by: op, at };
-    const old = byRva.get(rva);
+    const old = byRva.get(key);
     if (!old) {
-      byRva.set(rva, entry);
+      byRva.set(key, entry);
       added++;
       continue;
     }
@@ -497,13 +501,13 @@ export function mergeSymbols(doc: SymbolsDoc, incoming: SymbolInput[], op: strin
     }
     if (force || CONFIDENCE_RANK[sym.confidence] > CONFIDENCE_RANK[old.confidence]) {
       entry.previous = [{ name: old.name, by: old.by, confidence: old.confidence }, ...(old.previous ?? [])].slice(0, 3);
-      byRva.set(rva, entry);
+      byRva.set(key, entry);
       updated++;
     } else {
       conflicts.push({ rva: old.rva, existing: { name: old.name, confidence: old.confidence, by: old.by }, proposed: { name: sym.name, confidence: sym.confidence } });
     }
   }
-  doc.symbols = [...byRva.values()].sort((a, b) => rvaOf(a) - rvaOf(b));
+  doc.symbols = [...byRva.values()].sort((a, b) => rvaOf(a) - rvaOf(b) || String(a.overlay ?? '').localeCompare(String(b.overlay ?? '')));
   return { added, updated, unchanged, conflicts };
 }
 

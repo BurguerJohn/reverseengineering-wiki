@@ -919,11 +919,11 @@ export async function addSymbols(s: Services, caller: Caller, args: { build: str
     else if (issues.length < 20) issues.push(`symbols[${i}]: ${parsed.error.issues.map((x) => `${x.path.join('.')}: ${x.message}`).join('; ')}`);
   });
   if (issues.length) throw new ToolError('SCHEMA_INVALID', `Invalid symbols (first ${issues.length} shown).`, { problems: issues });
-  const seen = new Map<number, string>();
+  const seen = new Map<string, string>();
   for (const x of valid) {
-    const rva = parseInt(x.rva, 16);
-    if (seen.has(rva) && seen.get(rva) !== x.name) throw new ToolError('BAD_REQUEST', `RVA ${x.rva} appears twice with different names in this call.`);
-    seen.set(rva, x.name);
+    const key = `${x.overlay ?? ''}|${parseInt(x.rva, 16)}`;
+    if (seen.has(key) && seen.get(key) !== x.name) throw new ToolError('BAD_REQUEST', `RVA ${x.rva}${x.overlay ? ` in overlay ${x.overlay}` : ''} appears twice with different names in this call (give each module or overlay its own overlay value).`);
+    seen.set(key, x.name);
   }
   assertClean(scanText(valid.map((x) => `${x.name} ${x.type ?? ''}`).join('\n'), 'summary'));
 
