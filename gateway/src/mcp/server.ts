@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.45';
+export const VERSION = '0.8.46';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -573,7 +573,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       replace: z.array(z.object({ old: z.string().min(1), new: z.string() })).min(1).max(20).optional()
         .describe("Small changes instead of body: each old text must occur exactly once in the section's Markdown (as read returns it)"),
       base_revision: z.number().int().optional().describe('The revision you read (needed with body; replace may leave it out and applies to the latest revision; inside a batch it may be left out for a page an earlier operation of the batch writes)'),
-      summary: z.string().min(3),
+      summary: z.string().min(3).optional().describe('Edit summary (default: "Edit <section>")'),
       reason: z.string().optional(),
       create_if_missing: z.boolean().optional(),
     },
@@ -831,7 +831,9 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
         const swap = typeof v.tool === 'string' && v.arguments && typeof v.arguments === 'object' && Object.keys(v).length === 2;
         if (swap && !handlers.has(String(v.tool))) return fail(new ToolError('BAD_REQUEST', `replace: "${v.tool}" is not a write tool.`));
         // Same tool: the given fields replace those of the checked operation (null removes one); the rest is kept.
-        const merged = Object.fromEntries(Object.entries({ ...ops[n - 1].arguments, ...v }).filter(([, x]) => x !== null));
+        // Arguments the tool does not know are dropped here: they are why the check failed, and would fail it again.
+        const shape = (writeTools.get(ops[n - 1].tool)?.schema as z.ZodObject<any> | undefined)?.shape as Record<string, unknown> | undefined;
+        const merged = Object.fromEntries(Object.entries({ ...ops[n - 1].arguments, ...v }).filter(([k, x]) => x !== null && (!shape || k in shape)));
         ops[n - 1] = swap ? { tool: String(v.tool), arguments: v.arguments as Record<string, unknown> } : { tool: ops[n - 1].tool, arguments: merged };
       }
       args = { ...args, operations: ops.filter((_, i) => !dropped.has(i)) };

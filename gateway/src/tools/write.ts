@@ -447,11 +447,12 @@ export async function verify(s: Services, caller: Caller, args: { target: string
 // ---- articles --------------------------------------------------------------------
 
 export async function editSection(s: Services, caller: Caller, input: {
-  title: string; section: string; body?: string; replace?: Array<{ old: string; new: string }>; append?: boolean; new_heading?: string; base_revision?: number; summary: string; reason?: string; create_if_missing?: boolean;
+  title: string; section: string; body?: string; replace?: Array<{ old: string; new: string }>; append?: boolean; new_heading?: string; base_revision?: number; summary?: string; reason?: string; create_if_missing?: boolean;
   infobox?: Record<string, string>;
 }) {
   const op = requireWriter(s, caller);
   const t = title(s, input.title, [...SUBJECTS, 'notes']);
+  input = { ...input, summary: input.summary?.trim() || `Edit ${input.new_heading ? `heading of ${input.section}` : input.section}` };
   // Only a new heading: the body stays as it is (a replace without changes, which needs no base_revision).
   if (input.new_heading !== undefined && input.body === undefined && input.replace === undefined) input = { ...input, replace: [] };
   if (input.new_heading !== undefined && !/^[^\n=]{1,120}$/.test(input.new_heading.trim())) throw new ToolError('BAD_REQUEST', 'new_heading is one line of up to 120 characters, without "=".');
@@ -467,7 +468,7 @@ export async function editSection(s: Services, caller: Caller, input: {
   if (input.base_revision === undefined && fromBatch === undefined && latest === undefined) {
     throw new ToolError('BAD_REQUEST', 'base_revision is required with body: the revision you read (read gives it; inside a batch it may be left out for a page an earlier operation of the batch writes). replace = [{old, new}] needs no base_revision, nor does create_if_missing for a section that does not exist yet.');
   }
-  let args = { ...input, base_revision: input.base_revision ?? fromBatch ?? latest! };
+  let args = { ...input, summary: input.summary!, base_revision: input.base_revision ?? fromBatch ?? latest! };
   if (args.infobox || /^infobox$/i.test(args.section.trim())) return editInfobox(s, op, t, args);
   if ((args.body === undefined) === (args.replace === undefined)) {
     throw new ToolError('BAD_REQUEST', 'Give either body (the whole new section) or replace (small changes: [{old, new}]), not both.');
@@ -687,7 +688,8 @@ export async function createPage(s: Services, caller: Caller, args: {
       if (target) candidates.add(target.redirect_to ?? alias);
     }
     if (candidates.size) {
-      throw new ToolError('DUPLICATE_SUSPECTED', 'Similar pages exist. Improve one of them with edit_section, or resend with confirm_new=true and a justification.', {
+      // Named in the message too: inside a batch the details may not reach the agent.
+      throw new ToolError('DUPLICATE_SUSPECTED', `Similar pages exist: ${[...candidates].slice(0, 5).join(', ')}. Improve one of them with edit_section, or resend with confirm_new=true and a justification (why yours is a different subject).`, {
         candidates: [...candidates].map((c) => ({ title: c, url: link(s, c), summary: s.index.page(c)?.summary })),
       });
     }

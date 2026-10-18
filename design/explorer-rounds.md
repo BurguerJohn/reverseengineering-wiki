@@ -333,3 +333,10 @@ Areas: Sony PSP/PS3/Vita (11 pages: PBP, PSF, PRX, SCE SELF, PS3 PKG, Vita VPK a
 - read section "3DSX" finds "3DSX homebrew" when exactly one heading starts with it.
 - One agent cloned into the project directory after a failed cd and moved it out (tree verified clean); one used ~70 writes against a 35 budget. The prompt now gives clone commands with absolute targets and asks agents to check account_status before each batch.
 - Declined: listing link_repo entries on topic subpages (repositories belong to the subject; the subject page lists them once).
+
+### Round 7 (0.8.45 → 0.8.46)
+Areas: retro ROM/disc formats (iNES/NES 2.0, SNES, Mega Drive, Saturn and Dreamcast IP.BIN, four platforms; 18 facts, plus the PSP stub/entry tables and ~PSP header as facts); game middleware (FSB5, FMOD bank, WEM, Wwise BNK, Bink, CRI UTF/CPK/AFS2/ADX/HCA/USM, Technique:Game audio and video middleware; 14 facts; Electron ASAR integrity and version answered from source); ELF topic subpages (symbol versioning, relocations and PLT, TLS, init arrays and IFUNC, APS2/RELR; 10 facts) and the Rust leads (v0 mangling default since rustc 1.97.0, trait vtable layout). Reports 20-22, all 4/5.
+- publish_checked replace merged the unknown argument that made the check fail back into the fix: merging now drops arguments the tool does not know.
+- DUPLICATE_SUSPECTED names the similar pages in its message (inside a batch the details did not reach the agent).
+- edit_section summary is optional (default "Edit <section>"), forgotten twice.
+- Checked and declined: "search misses Sega/LoROM" (the pages did not exist yet when searched; both find them now); "no Topics list on the ELF page" (it has one, written by the batch); per-agent quota (one account; the shared count is shown).
