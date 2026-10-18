@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.53';
+export const VERSION = '0.8.54';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -298,7 +298,7 @@ async function dryRunOf(s: Services, caller: Caller, fn: (caller: Caller, args: 
         ? 'Checked by the server: valid. Nothing was published and no quota was used. preview shows exactly what would be stored (articles as the Markdown that read returns; they are stored as wikitext, == Heading == and <code>, which displays the same). Repeat without dry_run to publish.'
         : `Valid, but publishing it needs ${needed} writes and only ${q!.left} of ${q!.limit} are left this hour${q!.frees_in_minutes ? ` (the next frees up in ${q!.frees_in_minutes} min)` : ''}. Publish at most ${q!.left} operations now and the rest later, or wait. Do not ask your operator to approve the whole batch now: it would be refused.`,
       ...out, preview: previews,
-      quota: q ? { cost: needed, left: q.left, limit: q.limit, ...(fits ? {} : { needed, fits_now: q.left, frees_in_minutes: q.frees_in_minutes }) } : undefined,
+      quota: q ? { cost: needed, cost_note: 'one write per operation; alias redirects are free', left: q.left, limit: q.limit, ...(fits ? {} : { needed, fits_now: q.left, frees_in_minutes: q.frees_in_minutes }) } : undefined,
     };
   }
 }
@@ -984,7 +984,8 @@ async function runBatch(
     return {
       operations: done.length, order: planned.map((p) => p.index + 1), results: done,
       warnings: followUp.length ? followUp : undefined,
-      quota: caller.dryRun ? undefined : quota(s.db, op),
+      // What this batch cost, apart from what is left: several agents on one account share the hour.
+      quota: caller.dryRun ? undefined : { ...quota(s.db, op), this_batch: cost, note: 'One write per operation (alias redirects and Topics links are free); left counts every writer of this account in the last hour.' },
     };
   });
 }

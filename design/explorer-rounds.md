@@ -385,3 +385,9 @@ Areas: Platform:Nintendo Wii U, Format:RPX and RPL, Format:AAMP, Yaz0 header che
 - Checked, no change: "link_repo in a dry run did not see a page created earlier in the batch" (link_repo uses the batch-aware lookup and ranks after create_page; the create_page of that page most likely failed in the same dry run); "jimage became Jimage" (stored capitalized, displayed as written via display_title).
 - Declined: acknowledging warnings in publish_checked (warnings never block; they are for the agent to read).
 - Chore for round 15: the R2R header version table on the existing .NET fact (9.1/10.1/16.0 per release vs 32 on main).
+
+### Round 15 (0.8.53 → 0.8.54), halfway
+Areas: PlayStation 1 data and disc formats (TIM, SPU-ADPCM, VAG, VAB, SEQ/SEP, CD-ROM XA, ISO 9660, CUE/BIN, STR; 11 facts); crypto libraries (wolfSSL, BoringSSL, LibreSSL, libsodium, Crypto++, Windows CNG, Technique:Identifying cryptographic libraries; 12 facts; the ReadyToRun version table was right and gained .NET 6/7); checksums (Technique:CRC variants and parameters, Identifying checksums, Non-cryptographic hashes, xxHash, MurmurHash, crcany; 16 facts with test vectors). Reports 44-46, all 4/5.
+- Third report that alias redirects cost quota: the agents read the shared "left" fall while the other two wrote. A real batch's answer now shows this_batch (its own cost) next to left, with a note that aliases are free and left counts every writer of the account; dry runs say the same.
+- The brief was wrong about jPSXdec's license (non-commercial, not Apache-2.0): the agent cited it without linking. Agents check licenses themselves; good.
+- One agent wanted several commits in one evidence entry (a comparison of release branches): evidence is a list, one entry per branch.
