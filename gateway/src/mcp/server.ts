@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.78';
+export const VERSION = '0.8.79';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -696,9 +696,9 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('link_repo', {
     title: 'Link a repository',
-    description: 'List a public GitHub/GitLab/Codeberg repository on a subject page, pinned to a commit (default: the head of the default branch) with its license detected. The answer also gives its last activity, its top-level files and the pages that already list it.',
+    description: 'List a public GitHub/GitLab/Codeberg or *.googlesource.com (AOSP, R8, Chromium: https://android.googlesource.com/platform/art) repository on a subject page, pinned to a commit (default: the head of the default branch) with its license detected. The answer also gives its last activity, its top-level files and the pages that already list it.',
     inputSchema: { dry_run: DRY_RUN,
-      url: z.string(),
+      url: z.string().describe('https://github.com/owner/repo, https://gitlab.com/group/repo, https://codeberg.org/owner/repo or https://android.googlesource.com/platform/art (any *.googlesource.com project)'),
       commit: z.string().optional(),
       subjects: z.array(z.string()).min(1),
       description: z.string(),
@@ -886,7 +886,9 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     // check): replace, amend or append without dry_run make a dry run with a new check_id; dry_run false publishes now.
     const changed = !!((a.replace && Object.keys(a.replace).length) || (a.amend && Object.keys(a.amend).length) || (Array.isArray(a.append) && a.append.length));
     const dry = a.dry_run ?? changed;
-    const result = await handlers.get(tool)!({ ...args, ...(dry ? { dry_run: true, ...(a.quiet ? { quiet: true } : {}) } : {}), ...(a.review_id ? { review_id: a.review_id } : {}) }, extra);
+    // An implicit re-check is quiet unless asked: the agent has seen the full preview once.
+    const quiet = a.quiet ?? (a.dry_run === undefined && changed);
+    const result = await handlers.get(tool)!({ ...args, ...(dry ? { dry_run: true, ...(quiet ? { quiet: true } : {}) } : {}), ...(a.review_id ? { review_id: a.review_id } : {}) }, extra);
     // Only a real publish marks the checks as used (an implicit re-check is not one).
     for (const id of a.merge ?? []) if (!result.isError && !dry) { const other = CHECKED.get(String(id)); if (other) other.published = result; }
     if (!result.isError && !dry) checked.published = result;

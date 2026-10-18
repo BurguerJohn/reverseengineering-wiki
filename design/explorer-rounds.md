@@ -518,3 +518,10 @@ Areas: Unreal containers (pak version enum, footer sizes per version, v10 index 
 - publish_checked with replace and no dry_run made a dry run (since 0.8.75) but marked the original check as published with that dry answer, so a retry of it returned the dry run: only a real publish marks a check now, and the re-check says not_published.
 - The batch description lists its run order (edit_fact runs before verify whatever the order given).
 - The "no offset" warning and the fact reference point to condition ("version >= 7") and to a second struct fact for fields after a variable-length one; the fields-must-be-an-array error shows an example.
+
+### Round 36 (0.8.78 → 0.8.79)
+Areas: disk and tape images finished (Technique:Identifying disk and tape images with magic and size tables; D64 BAM and directory entries, D71 second BAM, ADF bootblock and root block, SNA, TAP framing, CPC Track-Info, MSX CAS header settled from VICE, ADFlib, libspectrum and MAME; ATR header corrected: write-protect at 0x0F, high paragraphs at 6; 12 facts); fact sweep from "Fact:Libjpeg" (28 checked: 18 raised to high, 4 partial, 3 corrected: TS MIX hash padding, Pokémon Gen 2 Korean checksum, libdeflate length tables of 29 entries); JVM and Android bytecode (DEX 035-041 by release, DEX 041 header, cdex, hidden-API flags, VDEX 027, OAT 259, the R8 marker, class file versions 62-72; Tool:R8; 11 facts). Reports 107-109.
+- link_repo said github/gitlab/codeberg only, so the agent never tried googlesource (which works since round 20): its description and url field name *.googlesource.com.
+- The implicit re-check of publish_checked repeated the whole preview: it is quiet unless asked.
+- Fact listings show confidence, verifications and last_verified, so a sweep skips checked facts without reading each.
+- edit_section with a whole body reports removed_paragraphs: paragraphs of the old text the new body leaves out (an agent dropped one by accident).

@@ -579,10 +579,15 @@ export async function editSection(s: Services, caller: Caller, input: {
   const words = edited ? blockWords(sections, edited.index) : 0;
   const splittable = edited && edited.level > 0 && !STANDARD_SECTIONS.has(headingKey(edited.heading));
   // What changed in the section, in the Markdown agents read and write.
+  // A whole-body replacement that leaves out a paragraph of the old text (agents forgot one and restored it later).
+  const paragraphs = (x: string) => wikitextToMarkdown(x).split(/\n\s*\n/).map((p) => p.trim()).filter((p) => p.length >= 40);
+  const kept = wikitextToMarkdown(newBody).replace(/\s+/g, ' ');
+  const removed = args.body !== undefined && !args.append ? paragraphs(oldBody).filter((p) => !kept.includes(p.replace(/\s+/g, ' ').slice(0, 60))).map((p) => `${p.replace(/\s+/g, ' ').slice(0, 100)}…`).slice(0, 5) : [];
   const changes = createTwoFilesPatch('before', 'after', `${wikitextToMarkdown(oldBody).trimEnd()}\n`, `${wikitextToMarkdown(newBody).trimEnd()}\n`, '', '', { context: 1 })
     .split('\n').slice(2).join('\n');
   return result(s, t, r.newrevid, {
     section: heading, words, nochange: r.nochange || undefined, ...missingGeneralPages(s, newBody),
+    removed_paragraphs: removed.length ? removed : undefined,
     warnings: renderWarnings(body).length ? renderWarnings(body) : undefined,
     diff: op.dryRun ? undefined : changes,
     merged: page.revid !== args.base_revision
