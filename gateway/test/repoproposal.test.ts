@@ -50,3 +50,11 @@ test('struct layout problems: overlaps and fields past the size, unions left alo
   ] }), ['a (0x0, 8 bytes) overlaps b at 0x4', 'c ends past the struct size 0x10']);
   assert.deepEqual(structLayoutProblems({ size: 8, fields: [{ offset: 0, size: 4, name: 'x' }, { offset: 4, size: 4, name: 'y' }] }), []);
 });
+
+test('Gitiles repositories: the path before "/+/" is the repository', async () => {
+  const { parseRepoUrl } = await import('../src/tools/repos.ts');
+  assert.deepEqual(parseRepoUrl('https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/main/bootimg.py'), {
+    host: 'gitiles', owner: 'platform/system/tools', repo: 'mkbootimg', url: 'https://android.googlesource.com/platform/system/tools/mkbootimg',
+  });
+  assert.throws(() => parseRepoUrl('https://example.com/a/b'), /Supported hosts/);
+});

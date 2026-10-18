@@ -669,8 +669,10 @@ export async function createPage(s: Services, caller: Caller, args: {
   if (args.summary.trim().length < 20) throw new ToolError('BAD_REQUEST', 'summary must be 1–3 sentences (at least 20 characters).');
   if (await currentPage(s, t)) throw new ToolError('DUPLICATE_SUSPECTED', `"${t}" already exists. Use edit_section to improve it.`, { existing: t, url: link(s, t) });
 
-  const aliasTitles = (args.aliases ?? []).map((a) => {
-    if (a.includes('/')) throw new ToolError('BAD_TITLE', `Alias "${a}": "/" makes a subpage title; write it with a space or "-" ("${a.replace(/\//g, '-')}").`);
+  // "LE/LX" as an alias would be a subpage: it is created as "LE-LX", and the answer says so.
+  const slashed = (args.aliases ?? []).filter((a) => a.includes('/'));
+  const aliasTitles = (args.aliases ?? []).map((raw) => {
+    const a = raw.replace(/\s*\/\s*/g, '-');
     try { return makeTitle(args.type, nameOf(a)); } catch (e) { throw e instanceof ToolError ? e : new ToolError('BAD_TITLE', `Alias "${a}": ${(e as Error).message}`); }
   }).filter((a, i, all) => a !== t && all.indexOf(a) === i);
 
@@ -721,7 +723,7 @@ export async function createPage(s: Services, caller: Caller, args: {
   const underscored = (args.aliases ?? []).some((a) => a.includes('_')) || args.title.includes('_')
     ? 'MediaWiki shows "_" in titles as a space ("IMAGE_DOS_HEADER" is "IMAGE DOS HEADER"); links and searches with either work.' : undefined;
   const pageWarnings = renderWarnings(args.body);
-  return result(s, t, r.newrevid, { aliases: created.slice(1), aliases_skipped: skipped.length ? skipped : undefined, ...missingGeneralPages(s, text), note: [capitalized, underscored].filter(Boolean).join(' ') || undefined, warnings: pageWarnings.length ? pageWarnings : undefined });
+  return result(s, t, r.newrevid, { aliases: created.slice(1), aliases_skipped: skipped.length ? skipped : undefined, aliases_renamed: slashed.length ? `"/" would make a subpage, so these were created with "-": ${slashed.join(', ')}` : undefined, ...missingGeneralPages(s, text), note: [capitalized, underscored].filter(Boolean).join(' ') || undefined, warnings: pageWarnings.length ? pageWarnings : undefined });
 }
 
 // ---- topic subpages --------------------------------------------------------------

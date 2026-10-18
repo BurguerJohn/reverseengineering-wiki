@@ -72,7 +72,7 @@ async function getJson(url: string, headers: Record<string, string> = {}): Promi
   return response.json();
 }
 
-export function parseRepoUrl(raw: string): { host: 'github' | 'gitlab' | 'codeberg'; owner: string; repo: string; url: string } {
+export function parseRepoUrl(raw: string): { host: 'github' | 'gitlab' | 'codeberg' | 'gitiles'; owner: string; repo: string; url: string } {
   let url: URL;
   try {
     url = new URL(raw.trim());
@@ -82,9 +82,13 @@ export function parseRepoUrl(raw: string): { host: 'github' | 'gitlab' | 'codebe
   if (url.protocol !== 'https:') throw new ToolError('BAD_REQUEST', 'Only https repository URLs are accepted.');
   const parts = url.pathname.replace(/\.git$/, '').split('/').filter(Boolean);
   const host = url.hostname.toLowerCase();
-  const kind = host === 'github.com' ? 'github' : host === 'gitlab.com' ? 'gitlab' : host === 'codeberg.org' ? 'codeberg' : null;
-  if (!kind || parts.length < 2) throw new ToolError('BAD_REQUEST', 'Supported hosts: github.com, gitlab.com, codeberg.org (https://host/owner/repo).');
-  const [owner, repo] = kind === 'gitlab' ? [parts.slice(0, -1).join('/'), parts[parts.length - 1]] : [parts[0], parts[1]];
+  // Gitiles (android.googlesource.com, chromium.googlesource.com): AOSP and Chromium live there, not on GitHub.
+  const kind = host === 'github.com' ? 'github' : host === 'gitlab.com' ? 'gitlab' : host === 'codeberg.org' ? 'codeberg' : /^[a-z0-9-]+\.googlesource\.com$/.test(host) ? 'gitiles' : null;
+  const cut = kind === 'gitiles' ? parts.indexOf('+') : -1;
+  const path = cut >= 0 ? parts.slice(0, cut) : parts;
+  if (!kind || path.length < (kind === 'gitiles' ? 1 : 2)) throw new ToolError('BAD_REQUEST', 'Supported hosts: github.com, gitlab.com, codeberg.org (https://host/owner/repo) and *.googlesource.com (https://android.googlesource.com/platform/...).');
+  const [owner, repo] = kind === 'gitlab' || kind === 'gitiles' ? [path.slice(0, -1).join('/'), path[path.length - 1]] : [path[0], path[1]];
+  if (kind === 'gitiles') return { host: kind, owner, repo, url: `https://${host}/${path.join('/')}` };
   return { host: kind, owner, repo, url: `https://${host}/${owner}/${repo}` };
 }
 
@@ -135,7 +139,36 @@ async function resolveWithoutApi(r: ReturnType<typeof parseRepoUrl>, commit?: st
   return { url: r.url, commit: sha, license, archived: false, lastCommit: null, binaryReleaseAssets: false, licenseHint: hint, limited: true };
 }
 
+/** Gitiles answers JSON behind a ")]}'" guard line, and files as base64 with ?format=TEXT. */
+async function gitilesJson(url: string): Promise<any> {
+  const res = await fetch(url, { headers: { 'User-Agent': 'REWikiGateway/0.1' } });
+  if (res.status === 404) throw new ToolError('NOT_FOUND', 'Repository or commit not found.');
+  if (res.status === 429 || res.status === 403) throw new ToolError('RATE_LIMITED', 'Repository host rate limit reached. Try again later.');
+  if (!res.ok) throw new ToolError('UPSTREAM_ERROR', `Repository host answered HTTP ${res.status}.`);
+  return JSON.parse((await res.text()).replace(/^\)\]\}'\s*/, ''));
+}
+
+export async function gitilesFile(repoUrl: string, commit: string, path: string): Promise<string | null> {
+  const res = await fetch(`${repoUrl}/+/${commit}/${path.split('/').map(encodeURIComponent).join('/')}?format=TEXT`, { headers: { 'User-Agent': 'REWikiGateway/0.1' } });
+  if (!res.ok) return null;
+  return Buffer.from(await res.text(), 'base64').toString('utf8');
+}
+
 async function resolveFresh(r: ReturnType<typeof parseRepoUrl>, commit?: string): Promise<RepoInfo> {
+  if (r.host === 'gitiles') {
+    const c = await gitilesJson(`${r.url}/+/${commit ?? 'HEAD'}?format=JSON`);
+    const sha = String(c.commit);
+    let license = 'unknown';
+    let hint: string | undefined;
+    for (const name of ['LICENSE', 'COPYING', 'NOTICE', 'LICENSE.txt']) {
+      const text = await gitilesFile(r.url, sha, name);
+      if (text === null) continue;
+      hint = licenseHint(text.slice(0, 20000));
+      license = hint ? `${hint} (read from ${name})` : `unrecognized (${name})`;
+      break;
+    }
+    return { url: r.url, commit: sha, license, archived: false, lastCommit: c.committer?.time ? new Date(c.committer.time).toISOString() : null, binaryReleaseAssets: false, licenseHint: hint };
+  }
   if (r.host === 'github') {
     const headers: Record<string, string> = process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {};
     const api = `https://api.github.com/repos/${r.owner}/${r.repo}`;

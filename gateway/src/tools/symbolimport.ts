@@ -83,6 +83,7 @@ function rawUrl(repoUrl: string, commit: string, path: string): string {
   const p = path.split('/').map(encodeURIComponent).join('/');
   if (r.host === 'github') return `https://raw.githubusercontent.com/${r.owner}/${r.repo}/${commit}/${p}`;
   if (r.host === 'gitlab') return `https://gitlab.com/${r.owner}/${r.repo}/-/raw/${commit}/${p}`;
+  if (r.host === 'gitiles') return `${r.url}/+/${commit}/${p}?format=TEXT`;
   return `https://codeberg.org/${r.owner}/${r.repo}/raw/commit/${commit}/${p}`;
 }
 
@@ -103,7 +104,8 @@ export async function importSymbols(s: Services, caller: Caller, args: {
   if (!response.ok) throw new ToolError('UPSTREAM_ERROR', `The repository host answered ${response.status} for ${path}.`);
   const length = Number(response.headers.get('content-length') ?? 0);
   if (length > MAX_FILE_BYTES) throw new ToolError('BAD_REQUEST', `${path} is larger than ${MAX_FILE_BYTES / 1024 / 1024} MB.`);
-  const text = await response.text();
+  // Gitiles sends files as base64.
+  const text = parseRepoUrl(info.url).host === 'gitiles' ? Buffer.from(await response.text(), 'base64').toString('utf8') : await response.text();
   if (text.length > MAX_FILE_BYTES) throw new ToolError('BAD_REQUEST', `${path} is larger than ${MAX_FILE_BYTES / 1024 / 1024} MB.`);
   const parsed = parseSymbolFile(text, args.format ?? 'auto');
   if (!parsed.symbols.length) throw new ToolError('BAD_REQUEST', `No symbols read from ${path} (formats: linker and splat "name = 0x80012345; // type:func size:0x40", decomp-toolkit "name = .text:0x80012345; // type:function size:0x40", nm "00401136 T main", pairs "0x80012345 name").`);

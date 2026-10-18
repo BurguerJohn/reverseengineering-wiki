@@ -1088,7 +1088,9 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   assert.deepEqual(topicCodeRead.metadata?.subjects, [chunkTopic, `Format:E2E Track ${run}`], JSON.stringify(topicCodeRead).slice(0, 600));
   const topicRelated = await call(anon, 'related', { title: chunkTopic, relation: 'has_code' });
   assert.ok(JSON.stringify(topicRelated).includes(topicCode.title), JSON.stringify(topicRelated).slice(0, 600));
-  await expectError(a, 'create_page', { type: 'format', title: `E2E Alias ${run}`, summary: 'A fictional page with a slashed alias.', body: '## Overview\n\nFictional.', aliases: [`E2E A/B ${run}`], dry_run: true }, 'BAD_TITLE');
+  // A "/" in an alias would make a subpage: it is created with "-" and the answer says so.
+  const slashAlias = await call(a, 'create_page', { type: 'format', title: `E2E Alias ${run}`, summary: 'A fictional page with a slashed alias.', body: '## Overview\n\nFictional.', aliases: [`E2E A/B ${run}`], dry_run: true });
+  assert.ok(slashAlias.aliases?.includes(`Format:E2E A-B ${run}`) && slashAlias.aliases_renamed, JSON.stringify(slashAlias).slice(0, 400));
   const cleared = await call(a, 'edit_fact', { target: topicFact.title, base_revision: topicFact.revision, summary: 'fictional: not about the topic', topic: '' });
   assert.deepEqual(cleared.changed, ['topic'], JSON.stringify(cleared).slice(0, 400));
   assert.equal((await call(anon, 'read', { title: chunkTopic })).facts, undefined);

@@ -360,3 +360,8 @@ Areas: GameMaker data files, Ren'Py RPA/RPYC, SWF and ABC, RPG Maker RGSSAD (9 p
 - "Alias redirects cost quota" came back (12 units for five pages): checked again, one charge per tool call; the batch's operations are what the dry run prices. Declined.
 - Required fields (create_page body, link_repo subjects/description/tested_on, add_fact scope and evidence detail) were named as friction: kept, they are what makes a page or fact usable.
 - New: `cli.ts feedback summary [N]` prints one line per report and the average rating.
+
+### Round 11 (0.8.49 → 0.8.50)
+Areas: CASC and CascLib, Westwood MIX, SCUMM and SCI resources, LE/LX executables (6 pages, 15 facts); Steamworks API (interface version strings that date the SDK), EOS SDK, Discord RPC, ENet, RakNet, GameNetworkingSockets, Photon (7 pages, 17 facts; recognition only); firmware: UEFI firmware volume, TE, capsule, uImage, FIT, Android boot image, FDT, SquashFS, JFFS2, UBI/UBIFS, cramfs (11 pages, 15 facts). Reports 32-34, all 4/5.
+- link_repo could not link AOSP's mkbootimg: *.googlesource.com (Gitiles) is now a repository host (commit from ?format=JSON, license and symbol files from ?format=TEXT, base64). Checked live on android.googlesource.com.
+- A "/" in an alias failed a batch for the second time (round 2, round 11): it is now created with "-" and the answer lists the renamed aliases.
