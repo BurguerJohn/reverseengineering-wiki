@@ -1,6 +1,29 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findPatterns } from '../src/tools/repoproposal.ts';
+import { findEnums, findPatterns } from '../src/tools/repoproposal.ts';
+
+test('constant tables from headers: enums with implicit values and #define runs', () => {
+  const src = [
+    'enum ChunkType : uint16_t {',
+    '  RES_NULL_TYPE = 0x0000, // nothing',
+    '  RES_STRING_POOL_TYPE = 0x0001,',
+    '  RES_TABLE_TYPE,',
+    '  RES_XML_TYPE = 3u',
+    '};',
+    'enum Tiny { A, B };',
+    '#define CSMAGIC_REQUIREMENT 0xfade0c00',
+    '#define CSMAGIC_REQUIREMENTS 0xfade0c01  /* set */',
+    '',
+    '#define CSMAGIC_CODEDIRECTORY 0xfade0c02',
+    'int unrelated;',
+    '#define OTHER_ONE 1',
+  ].join('\n');
+  const found = findEnums(src, 'include/types.h');
+  assert.deepEqual(found.map((e) => [e.name, e.line, e.end, e.values]), [
+    ['ChunkType', 1, 6, { '0x0': 'RES_NULL_TYPE', '0x1': 'RES_STRING_POOL_TYPE', '0x2': 'RES_TABLE_TYPE', '0x3': 'RES_XML_TYPE' }],
+    ['CSMAGIC', 8, 11, { '0xFADE0C00': 'CSMAGIC_REQUIREMENT', '0xFADE0C01': 'CSMAGIC_REQUIREMENTS', '0xFADE0C02': 'CSMAGIC_CODEDIRECTORY' }],
+  ]);
+});
 
 test('byte patterns as code writes them', () => {
   const src = [
