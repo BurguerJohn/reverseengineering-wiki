@@ -98,7 +98,8 @@ const REPO_TTL_MS = 6 * 3600_000;
 
 export async function resolveRepo(raw: string, commit?: string): Promise<RepoInfo> {
   const r = parseRepoUrl(raw);
-  if (commit && !/^[0-9a-f]{7,40}$/i.test(commit)) throw new ToolError('BAD_REQUEST', 'commit must be a hex SHA.');
+  // A branch or tag ("llvm-4.0", "v1.2.3") is resolved to the commit it points at now; the answer pins that SHA.
+  if (commit && !/^[0-9a-f]{7,40}$/i.test(commit) && !/^[\w][\w.\/-]{0,99}$/.test(commit)) throw new ToolError('BAD_REQUEST', 'commit must be a SHA, a branch or a tag.');
   const key = `${r.url}|${commit?.toLowerCase() ?? ''}`;
   const hit = REPO_CACHE.get(key);
   if (hit && Date.now() - hit.at < REPO_TTL_MS) return { ...hit.info };
@@ -118,13 +119,18 @@ export async function resolveRepo(raw: string, commit?: string): Promise<RepoInf
 
 /** The commit from git's own HTTP protocol, the license from the repository's files: no API call. */
 async function resolveWithoutApi(r: ReturnType<typeof parseRepoUrl>, commit?: string): Promise<RepoInfo> {
-  let sha = commit?.toLowerCase();
+  let sha = commit && /^[0-9a-f]{7,40}$/i.test(commit) ? commit.toLowerCase() : undefined;
   if (!sha) {
     const refs = await fetch(`https://github.com/${r.owner}/${r.repo}.git/info/refs?service=git-upload-pack`, { headers: { 'User-Agent': 'git/2.40 REWikiGateway' } });
     if (refs.status === 404 || refs.status === 401) throw new ToolError('NOT_FOUND', 'Repository not found or not public.');
     if (!refs.ok) throw new ToolError('RATE_LIMITED', 'Repository host rate limit reached. Try again later.');
-    const head = /([0-9a-f]{40}) HEAD/.exec(await refs.text());
-    if (!head) throw new ToolError('RATE_LIMITED', 'Repository host rate limit reached. Try again later.');
+    const listing = await refs.text();
+    const name = commit?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // A tag's peeled line (^{}) names the commit; a branch line names it directly.
+    const head = name
+      ? new RegExp(`([0-9a-f]{40}) refs/tags/${name}\\^\\{\\}`).exec(listing) ?? new RegExp(`([0-9a-f]{40}) refs/(?:heads|tags)/${name}(?:\\s|$)`, 'm').exec(listing)
+      : /([0-9a-f]{40}) HEAD/.exec(listing);
+    if (!head) throw new ToolError(name ? 'NOT_FOUND' : 'RATE_LIMITED', name ? `No branch or tag "${commit}" in ${r.url}.` : 'Repository host rate limit reached. Try again later.');
     sha = head[1];
   }
   let license = 'unknown';

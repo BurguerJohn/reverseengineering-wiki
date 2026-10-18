@@ -372,3 +372,9 @@ Areas: Xbox and Xbox 360 (Platform pages, XBE, XDVDFS, XEX2, STFS, XDBF; 27 fact
 - The Xbox agent wrote some prose from memory without marking it (XBE section names, XDK library names, XDBF offsets); the next round's chore checks it. The prompt already asks for "Unverified"; agents follow it for facts more than for prose.
 - Recurring friction, declined again: required fact fields found by error (a batch's arguments are free-form; the dry run lists every problem at once).
 - Chores for round 13: the XBE/XDK/XDBF prose above; a general Technique page for byte-signature (AOB) scanning, which three areas now point at.
+
+### Round 13 (0.8.51 → 0.8.52)
+Areas: Nintendo data formats (GCM/Wii disc header and partitions, SARC, BYML, J3D, BRSTM/BCSTM/BFSTM, BFRES, BNTX; 10 facts) and the Xbox prose checked against nxdk and xenia (cited or marked Unverified, 10 edits); Technique:Byte signature (AOB) scanning plus Havok, PhysX, Bullet, Box2D, Scaleform GFx (13 facts); Technique:Recognizing code obfuscation with native, .NET, Java/Android and JavaScript subpages (10 facts, recognition only). Reports 38-40, all 4/5. The "mark unread prose Unverified" rule in the prompt worked: all three did it.
+- link_repo and import_symbols take a branch or tag as commit and pin the SHA it points at (O-LLVM's passes live only on its llvm-4.0 branch); the git-protocol fallback reads refs/heads and peeled refs/tags. Tested on a branch and a tag.
+- data.export may be the exported name alone when the module varies (PhysX DLLs by generation).
+- One agent noted an unread claim inside a Havok fact (hkRootLevelContainer, virtual fixups): chore for round 14.

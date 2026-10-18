@@ -242,7 +242,8 @@ export function checkFactData(kind: FactKind, data: Record<string, unknown>): st
     case 'function':
       need('name');
       // A library's exported function is found by its export name ("binkw32.dll!_BinkOpen@8"), with no address.
-      if (data.export !== undefined && (typeof data.export !== 'string' || !/^[^\s!]+![^\s!]+$/.test(data.export.trim()))) problems.push('data.export is "<module>!<exported name>", e.g. "binkw32.dll!_BinkOpen@8" (data.ordinal for the ordinal)');
+      // "<module>!<name>" when the module is known; the bare export name when it varies (PhysX DLLs by generation).
+      if (data.export !== undefined && (typeof data.export !== 'string' || !/^(?:[^\s!]+!)?[^\s!]+$/.test(data.export.trim()))) problems.push('data.export is "<module>!<exported name>", e.g. "binkw32.dll!_BinkOpen@8", or the exported name alone when the module varies (data.ordinal for the ordinal)');
       if (!located && data.signature === undefined && data.export === undefined) problems.push('function facts need data.rva (PE), data.address {kind, value} (other binaries), data.signature, or data.export "<module>!<name>" for an exported function; an address plus a signature is best');
       break;
     case 'global':
