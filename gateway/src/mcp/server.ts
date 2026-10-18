@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.43';
+export const VERSION = '0.8.44';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -571,6 +571,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       infobox: z.record(z.string(), z.string()).optional().describe('With section "Infobox": fields to set (an empty string removes one); the others stay'),
       body: z.string().optional().describe('New section body in Markdown (without the heading); or use replace'),
       append: z.boolean().optional().describe('With body: add it after what the section has now instead of replacing it (no base_revision needed)'),
+      new_heading: z.string().optional().describe('Rename the section (alone, or with body, replace or append); Markdown backticks allowed'),
       replace: z.array(z.object({ old: z.string().min(1), new: z.string() })).min(1).max(20).optional()
         .describe("Small changes instead of body: each old text must occur exactly once in the section's Markdown (as read returns it)"),
       base_revision: z.number().int().optional().describe('The revision you read (needed with body; replace may leave it out and applies to the latest revision; inside a batch it may be left out for a page an earlier operation of the batch writes)'),
@@ -880,7 +881,7 @@ function amendStrings(value: unknown, edits: Array<{ old: string; new: string; a
     };
     const next = walk(out);
     if (hits === 0 || (hits > 1 && !edit.all)) {
-      throw new Error(`"${edit.old.slice(0, 60)}" occurs ${hits} times in the operation's text values (matched inside each string, not against the JSON)${hits > 1 ? '; pass all: true to replace every one' : ''}. To change a data field, pass replace = {"<operation number>": {corrected arguments}} instead.`);
+      throw new Error(`"${edit.old.slice(0, 60)}" occurs ${hits} times in the operation's text values (matched inside each string, not against the JSON)${hits > 1 ? '; pass all: true to replace every one' : ''}. To change a data field, pass replace = {"<operation number>": {fields to change}} instead. If an earlier dry run already applied this change, publish that dry run's check_id.`);
     }
     out = next;
   }

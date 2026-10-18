@@ -78,6 +78,40 @@ const ADDRESS_FORMAT: Record<(typeof ADDRESS_KINDS)[number], { re: RegExp; examp
   wasm: { re: /^func:\d+$/, example: 'func:123' },
 };
 
+const layoutNum = (v: unknown): number | null => {
+  if (typeof v === 'number' && Number.isInteger(v)) return v;
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  return /^0x[0-9a-f]+$/i.test(t) ? parseInt(t, 16) : /^\d+$/.test(t) ? parseInt(t, 10) : null;
+};
+
+/**
+ * A struct's fields against each other and its size: overlaps, fields past the end, and a gap-free layout whose sum
+ * differs from the size. Unions and conditional fields share offsets on purpose, so fields with `condition` or a
+ * repeated offset (a union member) are left out of the overlap check.
+ */
+export function structLayoutProblems(data: Record<string, unknown>): string[] {
+  const fields = Array.isArray(data.fields) ? data.fields as Array<Record<string, unknown>> : [];
+  const size = layoutNum(data.size);
+  const placed = fields.map((f) => ({ name: String(f.name ?? '?'), offset: layoutNum(f.offset), size: layoutNum(f.size), conditional: f.condition !== undefined }))
+    .filter((f) => f.offset !== null && f.size !== null && f.size > 0) as Array<{ name: string; offset: number; size: number; conditional: boolean }>;
+  const out: string[] = [];
+  const offsets = new Map<number, number>();
+  for (const f of placed) offsets.set(f.offset, (offsets.get(f.offset) ?? 0) + 1);
+  const plain = placed.filter((f) => !f.conditional && offsets.get(f.offset) === 1).sort((a, b) => a.offset - b.offset);
+  for (let i = 1; i < plain.length; i++) {
+    const prev = plain[i - 1];
+    if (prev.offset + prev.size > plain[i].offset) {
+      out.push(`${prev.name} (0x${prev.offset.toString(16)}, ${prev.size} bytes) overlaps ${plain[i].name} at 0x${plain[i].offset.toString(16)}`);
+    }
+  }
+  if (size !== null) {
+    const past = placed.filter((f) => f.offset + f.size > size);
+    if (past.length) out.push(`${past.map((f) => f.name).slice(0, 3).join(', ')} ${past.length > 1 ? 'end' : 'ends'} past the struct size 0x${size.toString(16)}`);
+  }
+  return out.slice(0, 5);
+}
+
 export function checkAddress(address: unknown): string | null {
   if (!address || typeof address !== 'object') return 'data.address must be an object {kind, value}, e.g. {"kind": "va", "value": "0x80003100"} (PE builds use data.rva instead)';
   const { kind, value } = address as { kind?: string; value?: string };

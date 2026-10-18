@@ -378,6 +378,10 @@ const afterAppend = await call(b, 'read', { title: game, section: 'Pitfalls' });
 assert.ok(appended.revision && /launcher runs/.test(JSON.stringify(afterAppend)) && /backup of the save folder/.test(JSON.stringify(afterAppend)), JSON.stringify(afterAppend).slice(0, 400));
 await expectError(b, 'edit_section', { title: game, section: 'Pitfalls', body: 'x', mode: 'append', summary: 'unknown argument' }, 'BAD_REQUEST');
 ok('edit_section append keeps the section and adds to it; an unknown argument stops a real write');
+const renamed = await call(b, 'edit_section', { title: game, section: 'Pitfalls', new_heading: 'Pitfalls (`SAVE_*` files)', summary: 'rename' });
+const renamedRead = await call(b, 'read', { title: game, section: 'Pitfalls (`SAVE_*` files)' });
+assert.ok(renamed.revision && /backup of the save folder/.test(JSON.stringify(renamedRead)), JSON.stringify(renamedRead).slice(0, 400));
+ok('edit_section new_heading renames a section and keeps its text');
 
 // ---- review: vandalism, history, diff, revert ------------------------------------------------
 const current = await call(anon, 'read', { title: game, section: 'Formats' });

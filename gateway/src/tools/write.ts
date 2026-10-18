@@ -22,6 +22,7 @@ import {
   symbolInputSchema, mergeSymbols, emptySymbolsDoc, topicPage, wordCount,
   LEADING_SECTIONS, TRAILING_SECTIONS, TOPIC_SPLIT_WORDS, MAX_SYMBOLS_PER_CALL, CODE_PAGE_LIMIT,
   type FactDoc, type BuildDoc, type CodeDoc, type SymbolsDoc, type SymbolInput, type SymbolConflict,
+  structLayoutProblems,
 } from '../wiki/pages.ts';
 import { repoRootFiles, resolveRepo, SPDX_EXPRESSION } from './repos.ts';
 
@@ -263,8 +264,10 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   }
   const sampleNote = missingCode.length ? `samples name Code pages that do not exist: ${missingCode.join(', ')}. Publish the generator with add_code first (a batch runs add_code before add_fact).` : undefined;
   const liftedNote = lifted.length ? `${lifted.join(' and ')} moved into data (they are data fields).` : undefined;
-  const warnings = unknown.length || subjectNote || enumNote || underscoreNote || sampleNote || liftedNote
-    ? [...(liftedNote ? [liftedNote] : []), ...(subjectNote ? [subjectNote] : []), ...(enumNote ? [enumNote] : []), ...(underscoreNote ? [underscoreNote] : []), ...(sampleNote ? [sampleNote] : []), ...(unknown.length ? [`data.${unknown.join(', data.')} ${unknown.length > 1 ? 'are' : 'is'} not standard for kind "${fact.kind}" (standard: ${[...FACT_DATA[fact.kind].required, ...(FACT_DATA[fact.kind].one_of ?? []), ...FACT_DATA[fact.kind].optional].join(', ')}). Kept, but tools like export_symbols and export_header only use standard fields. Several related addresses? One fact per address, or add_symbols for many names with their signatures.`] : [])]
+  const layout = fact.kind === 'struct' ? structLayoutProblems(fact.data) : [];
+  const layoutNote = layout.length ? `Check the layout: ${layout.join('; ')}. (Union members share an offset; a field with a condition may overlap.)` : undefined;
+  const warnings = unknown.length || subjectNote || enumNote || underscoreNote || sampleNote || liftedNote || layoutNote
+    ? [...(liftedNote ? [liftedNote] : []), ...(layoutNote ? [layoutNote] : []), ...(subjectNote ? [subjectNote] : []), ...(enumNote ? [enumNote] : []), ...(underscoreNote ? [underscoreNote] : []), ...(sampleNote ? [sampleNote] : []), ...(unknown.length ? [`data.${unknown.join(', data.')} ${unknown.length > 1 ? 'are' : 'is'} not standard for kind "${fact.kind}" (standard: ${[...FACT_DATA[fact.kind].required, ...(FACT_DATA[fact.kind].one_of ?? []), ...FACT_DATA[fact.kind].optional].join(', ')}). Kept, but tools like export_symbols and export_header only use standard fields. Several related addresses? One fact per address, or add_symbols for many names with their signatures.`] : [])]
     : undefined;
   const bytesOf = (v: unknown) => (typeof v === 'string' && /^(?:[0-9A-Fa-f]{2}|\?\?)(?:\s+(?:[0-9A-Fa-f]{2}|\?\?)){3,}$/.test(v.trim()) ? v.trim() : null);
   const sharedWith = new Set<string>();
@@ -444,11 +447,14 @@ export async function verify(s: Services, caller: Caller, args: { target: string
 // ---- articles --------------------------------------------------------------------
 
 export async function editSection(s: Services, caller: Caller, input: {
-  title: string; section: string; body?: string; replace?: Array<{ old: string; new: string }>; append?: boolean; base_revision?: number; summary: string; reason?: string; create_if_missing?: boolean;
+  title: string; section: string; body?: string; replace?: Array<{ old: string; new: string }>; append?: boolean; new_heading?: string; base_revision?: number; summary: string; reason?: string; create_if_missing?: boolean;
   infobox?: Record<string, string>;
 }) {
   const op = requireWriter(s, caller);
   const t = title(s, input.title, [...SUBJECTS, 'notes']);
+  // Only a new heading: the body stays as it is (a replace without changes, which needs no base_revision).
+  if (input.new_heading !== undefined && input.body === undefined && input.replace === undefined) input = { ...input, replace: [] };
+  if (input.new_heading !== undefined && !/^[^\n=]{1,120}$/.test(input.new_heading.trim())) throw new ToolError('BAD_REQUEST', 'new_heading is one line of up to 120 characters, without "=".');
   // Inside a batch, a page an earlier operation wrote needs no base_revision: the batch knows the one it started from.
   const fromBatch = batchContext.getStore()?.before?.get(t);
   // replace checks itself (each old text must still be there), so it may go without base_revision: the latest revision.
@@ -525,10 +531,16 @@ export async function editSection(s: Services, caller: Caller, input: {
   }
   if (target) {
     sections = replaceSectionBody(sections, args.section, newBody);
+    if (args.new_heading !== undefined && target.level > 0) {
+      const renamed = findSection(sections, args.section)!;
+      const wiki = args.new_heading.trim().replace(/`([^`]+)`/g, '<code><nowiki>$1</nowiki></code>');
+      const marks = '='.repeat(renamed.level);
+      sections = sections.map((x) => (x === renamed ? { ...x, heading: wiki, text: x.text.replace(/^[^\n]*/, `${marks} ${wiki} ${marks}`) } : x));
+    }
   } else {
     sections = insertSection(sections, args.section.trim(), newBody, TRAILING_SECTIONS);
   }
-  const heading = target ? (target.level === 0 ? 'Summary' : target.heading) : args.section.trim();
+  const heading = target ? (target.level === 0 ? 'Summary' : args.new_heading !== undefined ? findSection(sections, args.new_heading.trim().replace(/`([^`]+)`/g, '<code><nowiki>$1</nowiki></code>'))?.heading ?? target.heading : target.heading) : args.section.trim();
   const r = await mwEdit(s, op, {
     title: t, text: joinSections(sections), baserevid: page.revid, nocreate: true,
     summary: `/* ${heading} */ ${shortSummary(args.summary, 150)}${args.reason ? ` — reason: ${shortSummary(args.reason, 100)}` : ''}`,

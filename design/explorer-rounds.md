@@ -316,3 +316,11 @@ Areas: id Tech, Source and RenderWare formats (8 format pages, 10 facts, Softwar
 - Topic subpages drop aliases with a note instead of failing; the SPDX error mentions LicenseRef-<name>.
 - Declined: a second link_repo entry for the same repository on one page (one entry per repository, updated in place; the dry-run diff shows it).
 - Chores for round 5: objc4 license APSL-2.0 on Technique:Objective-C runtime metadata; the VTF "TEXTUREFLAGS_*" heading; the Open questions section of Library:Zlib (answered by the zlib-ng/miniz/libdeflate pages); bzip2, Snappy, LZO pages.
+
+### Round 5 (0.8.43 → 0.8.44)
+Areas: Nintendo DS/3DS/Switch (17 pages: NDS ROM, NARC, SDAT, NCSD, NCCH, ExeFS, RomFS, NRO, NSO, NACP, platforms, libnds/libctru/libnx, ndstool, 3dstool; 13 facts); Technique:Identifying cryptographic constants (10 facts) plus bzip2, Snappy, LZO (5 pages); FLIRT .pat/.sig, Ghidra Function ID and BSim, Microsoft Detours, Technique:Library function recognition (6 pages, 11 facts). Chores: objc4 APSL-2.0, Zlib open questions, VTF body (the heading could not be renamed). Reports 14-16, all 4/5.
+- edit_section takes new_heading (alone or with a body change), so a heading can be fixed; headings with code compare equal whether written `x` or stored <code><nowiki>x</nowiki></code>.
+- Struct facts are checked for overlapping fields and fields past the size (union members and conditional fields excluded): one agent fixed wrong Detours trampoline offsets by hand.
+- The amend "occurs 0 times" error says to publish the earlier dry run's check_id if that run already applied the change.
+- An agent corrected the brief: Detours' payload section is ".detour" (".detourc"/".detourd" are only pragmas in disasm.cpp). Briefs are leads too.
+- Declined: drafting struct facts with offsets from C headers in propose_from_repo (offsets depend on types, packing and ABI; a wrong draft is worse than none, and the layout check now catches hand errors).

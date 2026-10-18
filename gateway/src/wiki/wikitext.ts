@@ -60,7 +60,8 @@ export function joinSections(sections: Section[]): string {
 
 /** How headings are compared: entities decoded ("&amp;" = "&"), spaces collapsed, case-insensitive. */
 export function headingKey(heading: string): string {
-  return decodeEntities(heading).replace(/\s+/g, ' ').trim().toLowerCase();
+  // Code in headings: "`SAVE_*`" as an agent writes it is "<code><nowiki>SAVE_*</nowiki></code>" as stored.
+  return decodeEntities(heading).replace(/<\/?(?:code|nowiki)>|`/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 /** Finds a section by heading (case-insensitive), "lead"/"summary" for section 0, or by index. */

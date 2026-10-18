@@ -41,3 +41,12 @@ test('byte patterns as code writes them', () => {
   ]);
   assert.equal(found[0].path, 'src/hooks.cpp');
 });
+
+test('struct layout problems: overlaps and fields past the size, unions left alone', async () => {
+  const { structLayoutProblems } = await import('../src/wiki/pages.ts');
+  assert.deepEqual(structLayoutProblems({ size: '0x10', fields: [
+    { offset: '0x0', size: 8, name: 'a' }, { offset: '0x4', size: 4, name: 'b' }, { offset: '0xC', size: 8, name: 'c' },
+    { offset: '0x8', size: 4, name: 'u1' }, { offset: '0x8', size: 2, name: 'u2' },
+  ] }), ['a (0x0, 8 bytes) overlaps b at 0x4', 'c ends past the struct size 0x10']);
+  assert.deepEqual(structLayoutProblems({ size: 8, fields: [{ offset: 0, size: 4, name: 'x' }, { offset: 4, size: 4, name: 'y' }] }), []);
+});
