@@ -54,7 +54,8 @@ create table if not exists facts (
   level text not null,
   applies_to text not null,
   observed_in text not null,
-  data text not null
+  data text not null,
+  confidence text not null default ''
 );
 create index if not exists facts_subject on facts(subject);
 create table if not exists builds (
@@ -202,6 +203,12 @@ export class SearchIndex {
     const docs = this.db.prepare("select sql from sqlite_master where name = 'docs'").get() as { sql: string } | undefined;
     if (docs && !docs.sql.includes('porter')) {
       this.db.exec('drop table docs');
+      this.db.exec("create table if not exists state (key text primary key, value text not null); delete from state where key = 'rc_cursor';");
+    }
+    // Facts without the confidence column (search filters on it): rebuilt on the next pass.
+    const factCols = (this.db.prepare('pragma table_info(facts)').all() as Array<{ name: string }>).map((c) => c.name);
+    if (factCols.length && !factCols.includes('confidence')) {
+      this.db.exec('drop table facts');
       this.db.exec("create table if not exists state (key text primary key, value text not null); delete from state where key = 'rc_cursor';");
     }
     // Symbols without the absolute/overlay columns: same, rebuilt on the next pass.
@@ -377,10 +384,10 @@ export class SearchIndex {
       return;
     }
     this.insertPage(p, 'fact', doc.claim ?? '', doc.status ?? 'claimed', doc.subject ?? null, null, p.content);
-    this.db.prepare(`insert into facts (title, subject, kind, status, level, applies_to, observed_in, data)
-      values (?, ?, ?, ?, ?, ?, ?, ?)`)
+    this.db.prepare(`insert into facts (title, subject, kind, status, level, applies_to, observed_in, data, confidence)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(p.title, doc.subject ?? '', doc.kind ?? '', doc.status ?? 'claimed', doc.scope?.level ?? '',
-        doc.scope?.applies_to ?? '', JSON.stringify(doc.scope?.observed_in ?? []), JSON.stringify(doc.data ?? {}));
+        doc.scope?.applies_to ?? '', JSON.stringify(doc.scope?.observed_in ?? []), JSON.stringify(doc.data ?? {}), String((doc as { confidence?: string }).confidence ?? ''));
     const body = [doc.claim, `Scope: ${doc.scope?.level} — ${doc.scope?.applies_to}`, JSON.stringify(doc.data, null, 1),
       ...(doc.evidence ?? []).map((e) => `${e.type}: ${e.detail}`)].join('\n');
     this.doc(p.title, '', body, 'fact');
@@ -462,7 +469,7 @@ export class SearchIndex {
 
   // ---- search --------------------------------------------------------------------
 
-  search(opts: { query: string; types?: string[]; subject?: string; build?: string; status?: string; limit?: number; offset?: number; match?: 'all' | 'any' }): { hits: SearchHit[]; total: number } {
+  search(opts: { query: string; types?: string[]; subject?: string; build?: string; status?: string; confidence?: string; limit?: number; offset?: number; match?: 'all' | 'any' }): { hits: SearchHit[]; total: number } {
     const limit = Math.min(opts.limit ?? 10, 50);
     const offset = Math.max(0, opts.offset ?? 0);
     const scores = new Map<string, SearchHit>();
@@ -544,6 +551,11 @@ export class SearchIndex {
     let hits = [...scores.values()].filter((h) => h.type !== ('other' as PageType));
     if (opts.types?.length) hits = hits.filter((h) => opts.types!.includes(h.type));
     if (opts.status) hits = hits.filter((h) => h.status === opts.status);
+    // Facts at a confidence (low and medium ones are what verification rounds look for).
+    if (opts.confidence) {
+      const at = new Set((this.db.prepare('select title from facts where confidence = ?').all(opts.confidence) as Array<{ title: string }>).map((r) => r.title));
+      hits = hits.filter((h) => at.has(h.title));
+    }
     if (opts.subject) {
       const related = this.subjectFamily(opts.subject);
       hits = hits.filter((h) => related.has(h.title));

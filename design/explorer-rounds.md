@@ -477,3 +477,6 @@ Areas: Breath of the Wild's 72,278 function names imported into the 1.5.0 build 
 - Chore for round 29: link_repo GRAnimated/MinecraftLCE (a hand-written Repo line is on the Software page).
 
 - Owner extended loop 2 to 60 rounds. From round 29 each round has one verification sweep and two coverage agents.
+
+### Round 29 (0.8.68 → 0.8.69), in progress
+- The fact verification sweep found only 8 medium/low facts by guessing keywords: search takes confidence (facts indexed with their confidence; the facts table is rebuilt once). Its checks: 5 confirmed, 1 partial, 1 corrected (Crashpad's 'CPds' is a multi-character constant written in host order: 73 64 50 43 on little-endian). Verifies by the fact's own account do not change its status, by design.

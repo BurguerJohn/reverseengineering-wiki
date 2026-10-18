@@ -54,7 +54,7 @@ function truncate(text: string, maxTokens: number): { text: string; truncated: b
 
 // ---- search / identify / lookup ------------------------------------------------
 
-export function search(s: Services, args: { query: string; types?: string[]; subject?: string; build?: string; status?: string; limit?: number; cursor?: string; match?: 'all' | 'any' }) {
+export function search(s: Services, args: { query: string; types?: string[]; subject?: string; build?: string; status?: string; confidence?: string; limit?: number; cursor?: string; match?: 'all' | 'any' }) {
   const offset = offsetOf(args.cursor);
   const limit = args.limit ?? 10;
   if (args.query.trim() === '*') {

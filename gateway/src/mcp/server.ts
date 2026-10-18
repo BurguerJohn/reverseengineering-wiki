@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.68';
+export const VERSION = '0.8.69';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -336,6 +336,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       subject: z.string().optional().describe('Restrict to one subject page and what is attached to it, e.g. "Library:CRIWARE ADX2"'),
       build: z.string().optional().describe('Restrict facts to one Build: page'),
       status: z.enum(['claimed', 'verified', 'disputed', 'rejected', 'deprecated', 'broken', 'open']).optional(),
+      confidence: z.enum(['low', 'medium', 'high']).optional().describe('Only facts at this confidence (low and medium ones are worth checking)'),
       limit: z.number().int().min(1).max(50).optional(),
       cursor: z.string().optional().describe('next_cursor from the previous page'),
       match: z.enum(['all', 'any']).optional().describe('all (default): every term must match. any: pages with any of the terms, noisier'),
