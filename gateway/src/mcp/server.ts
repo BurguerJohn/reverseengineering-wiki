@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.81';
+export const VERSION = '0.8.82';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -339,6 +339,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       confidence: z.enum(['low', 'medium', 'high']).optional().describe('Only facts at this confidence (low and medium ones are worth checking)'),
       unchecked: z.union([z.boolean(), z.enum(['true', 'false'])]).optional().describe('With query "*": only facts nobody has verified yet'),
       title_from: z.string().optional().describe('With query "*": start the listing at this title ("Fact:L"); then page with next_cursor'),
+      unverified: z.union([z.boolean(), z.enum(['true', 'false'])]).optional().describe('With query "*": only pages whose text has "Unverified:" sentences (read lists them)'),
       checkable: z.union([z.boolean(), z.enum(['true', 'false'])]).optional().describe('With query "*": only facts whose evidence names a repository (checkable by reading it)'),
       limit: z.number().int().min(1).max(50).optional(),
       cursor: z.string().optional().describe('next_cursor from the previous page'),
@@ -921,7 +922,7 @@ function amendStrings(value: unknown, edits: Array<{ old: string; new: string; a
     };
     const next = walk(out);
     if (hits === 0 || (hits > 1 && !edit.all)) {
-      throw new Error(`"${edit.old.slice(0, 60)}" occurs ${hits} times in the operation's text values (matched inside each string, not against the JSON)${hits > 1 ? '; pass all: true to replace every one' : ''}. To change a data field, pass replace = {"<operation number>": {fields to change}} instead. If an earlier dry run already applied this change, publish that dry run's check_id.`);
+      throw new Error(`"${edit.old.slice(0, 60)}" occurs ${hits} times in the operation's text values (matched inside each string, not against the JSON${hits ? '' : '; if an earlier amend or replace of this check succeeded, its changes live under the check_id that answer returned'})${hits > 1 ? '; pass all: true to replace every one' : ''}. To change a data field, pass replace = {"<operation number>": {fields to change}} instead. If an earlier dry run already applied this change, publish that dry run's check_id.`);
     }
     out = next;
   }

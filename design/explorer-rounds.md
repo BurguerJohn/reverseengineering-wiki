@@ -537,3 +537,9 @@ Areas: Unity data (SerializedFile versions 2-22 with Unity releases, header and 
 - Raising a confidence took an edit_fact, which made the fact "claimed" again: verify with confirmed takes confidence (medium or high) and keeps the status.
 - A sweep could not start at a letter: the "*" listing takes title_from.
 - A replace whose text sits in another section names that section.
+
+### Round 39 (0.8.81 → 0.8.82)
+Areas: Sony executables (Platform:PlayStation 4, Format:SCE ELF extensions (PlayStation consoles), Format:CPE (Psy-Q executable), Format:PSF1 and minipsf; PS-X EXE loader view, PRX stubs settled, SELF and IRX lines cited; 11 facts; no keys or decryption); Unverified prose of rounds 37-38 (13 of 14 settled, 0 corrected: SLL byte order, -y LINUX_SLL2, OTA data_offset base, LP backup geometry and slot offsets, SSLKEYLOGFILE readers (NSS with NSS_ALLOW_SSLKEYLOGFILE, curl; OpenSSL and Go only callbacks), PyOxidizer blob location, Nuitka sections); embedded databases (Format:ESE database (EDB), Format:Berkeley DB database file; LevelDB and RocksDB Unverified settled; 12 facts). Reports 116-118.
+- Four reports asked for the open claims of a page: read lists a subject page's "Unverified:" sentences by section, and the "*" listing takes unverified (pages that have them).
+- The emphasis warning quotes the words around the identifier; the amend "occurs 0 times" error says an earlier change lives under the check_id it returned.
+- Agents cited one commit and read the default branch: briefs say to read raw files at the cited commit.

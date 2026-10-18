@@ -55,8 +55,11 @@ export function renderWarnings(markdown: string | undefined): string[] {
   const prose = markdown.replace(CODE, '');
   // An escaped line break sits between sentences or words ("done.\nNext"); "dex\n035" is a magic written out.
   if (/(?:[.:;!?)]|\s)\\[nt]|\\[nt](?:\s|[A-Z*#-])|\\n\\n/.test(prose)) out.push('The text has a literal "\\n" or "\\t": an escaped line break arrived as two characters (escaped twice?). Send real line breaks.');
-  const emphasis = /(?:^|[\s(,])(_{1,2}[A-Za-z]\w*|[A-Za-z]\w*_\*)/m.exec(prose.replace(/https?:\/\/\S+/g, ''));
-  if (emphasis) out.push(`"${emphasis[1]}" outside backticks: Markdown reads leading underscores and _* as italics or bold. Put identifiers in backticks (\`${emphasis[1]}\`).`);
+  const plainProse = prose.replace(/https?:\/\/\S+/g, '');
+  const emphasis = /(?:^|[\s(,])(_{1,2}[A-Za-z]\w*|[A-Za-z]\w*_\*)/m.exec(plainProse);
+  // With the words around it: agents could not find which "_lib" was meant.
+  const around = emphasis ? plainProse.slice(Math.max(0, emphasis.index - 30), emphasis.index + emphasis[0].length + 30).replace(/\s+/g, ' ').trim() : '';
+  if (emphasis) out.push(`"${emphasis[1]}" outside backticks (in "…${around}…"): Markdown reads leading underscores and _* as italics or bold. Put identifiers in backticks (\`${emphasis[1]}\`).`);
   return out;
 }
 

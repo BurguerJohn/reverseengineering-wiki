@@ -54,7 +54,7 @@ function truncate(text: string, maxTokens: number): { text: string; truncated: b
 
 // ---- search / identify / lookup ------------------------------------------------
 
-export function search(s: Services, args: { query: string; types?: string[]; subject?: string; build?: string; status?: string; confidence?: string; checkable?: boolean | string; unchecked?: boolean | string; title_from?: string; limit?: number; cursor?: string; match?: 'all' | 'any' }) {
+export function search(s: Services, args: { query: string; types?: string[]; subject?: string; build?: string; status?: string; confidence?: string; checkable?: boolean | string; unchecked?: boolean | string; unverified?: boolean | string; title_from?: string; limit?: number; cursor?: string; match?: 'all' | 'any' }) {
   const offset = args.cursor?.startsWith('after:') ? 0 : offsetOf(args.cursor);
   const limit = args.limit ?? 10;
   if (args.query.trim() === '*') {
@@ -67,7 +67,7 @@ export function search(s: Services, args: { query: string; types?: string[]; sub
     const from = args.title_from?.trim() ? args.title_from.trim() : undefined;
     const after = args.cursor?.startsWith('after:') ? Buffer.from(args.cursor.slice(6), 'base64url').toString('utf8')
       : from ? from.slice(0, -1) + String.fromCodePoint(Math.max(0, from.codePointAt(from.length - 1)! - 1)) + '\uFFFF' : undefined;
-    const listed = s.index.listPages(types, after === undefined ? offset : 0, Math.min(limit, 50), subject, { status: args.status, confidence: args.confidence, checkable: args.checkable === true || args.checkable === 'true', unchecked: args.unchecked === true || args.unchecked === 'true', after });
+    const listed = s.index.listPages(types, after === undefined ? offset : 0, Math.min(limit, 50), subject, { status: args.status, confidence: args.confidence, checkable: args.checkable === true || args.checkable === 'true', unchecked: args.unchecked === true || args.unchecked === 'true', unverified: args.unverified === true || args.unverified === 'true', after });
     const last = listed.hits.at(-1)?.title;
     const full = listed.hits.length === Math.min(limit, 50);
     return { query: '*', types, total: listed.total, hits: listed.hits, next_cursor: last && full ? `after:${Buffer.from(last, 'utf8').toString('base64url')}` : undefined };
@@ -470,9 +470,13 @@ export async function read(s: Services, args: { title: string; section?: string;
   const topics = isSubject ? s.index.topicsOf(root).filter((t) => t.title !== title) : [];
   // What a game's formats, platforms and libraries already hold: often more than the game page.
   const general = isSubject && root === title ? s.index.generalNeighbors(title) : [];
+  // The page's open claims, by section: what a checker can settle against a source (edit them with replace).
+  const unverified = isSubject ? sections.flatMap((x) => [...wikitextToMarkdown(x.level === 0 ? splitInfobox(x.text).rest : x.body)
+    .matchAll(/Unverified:[^\n]*?(?:[.!?](?=\s|$)|\n|$)/g)].map((m) => ({ section: x.level === 0 ? 'Summary' : x.heading, text: m[0].trim().slice(0, 240) }))) : [];
   return {
     ...base,
     section: sectionName,
+    unverified: unverified.length && !args.section ? unverified.slice(0, 30) : undefined,
     subsections_note: subsectionsNote,
     parent: isTopicPage(title) ? root : undefined,
     topics: topics.length ? topics.map((t) => ({ title: t.title, summary: t.summary.slice(0, 200) })) : undefined,
