@@ -52,7 +52,8 @@ export function renderWarnings(markdown: string | undefined): string[] {
   const doubled = code.find((c) => c.includes('\\\\'));
   if (doubled) out.push(`Code here has two backslashes in a row (${doubled.slice(0, 60).replace(/\n/g, ' ')}): in Markdown code a backslash is literal, so it renders as two. Write one (Mods\\Plugins); only the JSON string escapes it.`);
   const prose = markdown.replace(CODE, '');
-  if (/\\n|\\t/.test(prose)) out.push('The text has a literal "\\n" or "\\t": an escaped line break arrived as two characters (escaped twice?). Send real line breaks.');
+  // An escaped line break sits between sentences or words ("done.\nNext"); "dex\n035" is a magic written out.
+  if (/(?:[.:;!?)]|\s)\\[nt]|\\[nt](?:\s|[A-Z*#-])|\\n\\n/.test(prose)) out.push('The text has a literal "\\n" or "\\t": an escaped line break arrived as two characters (escaped twice?). Send real line breaks.');
   const emphasis = /(?:^|[\s(,])(_{1,2}[A-Za-z]\w*|[A-Za-z]\w*_\*)/m.exec(prose.replace(/https?:\/\/\S+/g, ''));
   if (emphasis) out.push(`"${emphasis[1]}" outside backticks: Markdown reads leading underscores and _* as italics or bold. Put identifiers in backticks (\`${emphasis[1]}\`).`);
   return out;
@@ -443,7 +444,7 @@ export async function verify(s: Services, caller: Caller, args: { target: string
 // ---- articles --------------------------------------------------------------------
 
 export async function editSection(s: Services, caller: Caller, input: {
-  title: string; section: string; body?: string; replace?: Array<{ old: string; new: string }>; base_revision?: number; summary: string; reason?: string; create_if_missing?: boolean;
+  title: string; section: string; body?: string; replace?: Array<{ old: string; new: string }>; append?: boolean; base_revision?: number; summary: string; reason?: string; create_if_missing?: boolean;
   infobox?: Record<string, string>;
 }) {
   const op = requireWriter(s, caller);
@@ -453,9 +454,9 @@ export async function editSection(s: Services, caller: Caller, input: {
   // replace checks itself (each old text must still be there), so it may go without base_revision: the latest revision.
   let latest: number | undefined;
   if (input.base_revision === undefined && fromBatch === undefined && !input.infobox) {
-    const page = input.replace || input.create_if_missing ? await currentPage(s, t) : null;
-    // A section that does not exist yet cannot conflict with anyone's edit of it.
-    if (page && (input.replace || !findSection(parseSections(page.content), input.section))) latest = page.revid;
+    const page = input.replace || input.append || input.create_if_missing ? await currentPage(s, t) : null;
+    // A section that does not exist yet cannot conflict with anyone's edit of it; replace and append check themselves.
+    if (page && (input.replace || input.append || !findSection(parseSections(page.content), input.section))) latest = page.revid;
   }
   if (input.base_revision === undefined && fromBatch === undefined && latest === undefined) {
     throw new ToolError('BAD_REQUEST', 'base_revision is required with body: the revision you read (read gives it; inside a batch it may be left out for a page an earlier operation of the batch writes). replace = [{old, new}] needs no base_revision, nor does create_if_missing for a section that does not exist yet.');
@@ -470,7 +471,7 @@ export async function editSection(s: Services, caller: Caller, input: {
 
   let sections = parseSections(page.content);
   const target = findSection(sections, args.section);
-  const usedReplace = !!args.replace;
+  const usedReplace = !!args.replace || !!args.append;
   // Only this batch's own earlier operations changed the page since base_revision (link_repo and add_code list
   // their entries in "Code & repositories"): a replace applies on top of them.
   const ownChanges = page.revid !== args.base_revision && batchContext.getStore()?.before?.get(t) === args.base_revision;
@@ -490,6 +491,11 @@ export async function editSection(s: Services, caller: Caller, input: {
     }
     if (problems.length) throw new ToolError('REPLACE_FAILED', `Nothing was changed. ${problems.join('; ')}.`, { problems });
     args = { ...args, body: markdown };
+  }
+  // append: the body goes after what the section has now (a new section when it does not exist).
+  if (args.append && target) {
+    const current = wikitextToMarkdown(target.level === 0 ? splitInfobox(target.text).rest : target.body);
+    args = { ...args, body: `${current.trimEnd()}\n\n${args.body!.trim()}` };
   }
   const body = args.body!;
   assertClean([...scanText(body, 'article'), ...scanText(`${args.summary}\n${args.reason ?? ''}`, 'summary')]);
@@ -511,7 +517,7 @@ export async function editSection(s: Services, caller: Caller, input: {
   if (!target && args.create_if_missing === false) throw new ToolError('NOT_FOUND', `No section "${args.section}".`);
 
   // replace edits only what it names: the blank lines after the heading stay as they were.
-  const keepLead = args.replace && target && target.level > 0 ? (/^\n*/.exec(target.body)?.[0] ?? '') : '';
+  const keepLead = (args.replace || args.append) && target && target.level > 0 ? (/^\n*/.exec(target.body)?.[0] ?? '') : '';
   const newBody = keepLead + markdownToWikitext(body, { topLevel: target && target.level > 0 ? Math.min(target.level + 1, 6) : 3 });
   const oldBody = target ? (target.level === 0 ? splitInfobox(target.text).rest : target.body) : '';
   if (target && oldBody.trim().length > 200 && newBody.length < oldBody.trim().length * 0.7 && !args.reason) {
@@ -709,7 +715,8 @@ async function createTopic(s: Services, op: Writer, t: string, args: { summary: 
   const root = subjectRoot(t);
   if ((t.match(/\//g) ?? []).length > 1) throw new ToolError('BAD_TITLE', `Topic subpages are one level deep: use "${root}/<topic>".`);
   if (args.infobox && Object.keys(args.infobox).length) throw new ToolError('BAD_TITLE', `"/" makes "${t}" a topic subpage of ${root}, and topic subpages have no infobox. If the slash is part of the name ("utoc/ucas"), write it with "-" or "and" instead.`);
-  if (args.aliases?.length) throw new ToolError('BAD_REQUEST', 'Topic subpages have no aliases.');
+  // Topic subpages have no aliases: they are dropped, and the answer says so.
+  const droppedAliases = args.aliases?.length ? args.aliases : undefined;
   if (args.summary.trim().length < 20) throw new ToolError('BAD_REQUEST', 'summary must be 1–3 sentences (at least 20 characters).');
   assertClean([...scanText(args.body, 'article'), ...scanText(args.summary, 'summary')]);
   const parent = await currentPage(s, root);
@@ -731,7 +738,7 @@ async function createTopic(s: Services, op: Writer, t: string, args: { summary: 
   if (pending) pending.set(root, [...(pending.get(root) ?? []), line]);
   else await linkTopics(s, op, root, [line]).catch(() => {});
   await afterWrite(s, op, pending ? [t] : [t, root]);
-  return result(s, t, r.newrevid, { parent: root, ...missingGeneralPages(s, text) });
+  return result(s, t, r.newrevid, { parent: root, ...missingGeneralPages(s, text), aliases_dropped: droppedAliases ? `Topic subpages have no aliases; not created: ${droppedAliases.join(', ')}.` : undefined });
 }
 
 async function linkTopics(s: Services, op: Writer, root: string, lines: string[]): Promise<void> {
@@ -1068,7 +1075,7 @@ export async function linkRepo(s: Services, caller: Caller, args: {
     info.license = `${args.license} (declared by the contributor; GitHub's detector did not recognize ${file ?? 'a license file'})`;
   } else if (args.license && args.license.trim() !== info.license) {
     // The files used may be under another license than the repository's root (libstdc++ in GCC).
-    if (!SPDX_EXPRESSION.test(args.license.trim())) throw new ToolError('BAD_REQUEST', 'license must be an SPDX id or expression, e.g. MIT, GPL-2.0-only, "Apache-2.0 WITH LLVM-exception".');
+    if (!SPDX_EXPRESSION.test(args.license.trim())) throw new ToolError('BAD_REQUEST', 'license must be an SPDX id or expression, e.g. MIT, GPL-2.0-only, "Apache-2.0 WITH LLVM-exception", or LicenseRef-<name> for a license without an SPDX id.');
     info.license = `${args.license.trim()} (declared by the contributor for the files used; GitHub reports ${info.license} for the repository)`;
   }
   const checked = [

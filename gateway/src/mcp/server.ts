@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.42';
+export const VERSION = '0.8.43';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -208,6 +208,10 @@ function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Ca
   return handler(async (args: any, extra: Extra) => {
     const ignored = known ? Object.keys(args ?? {}).filter((k) => !known.has(k)) : [];
     if (!ignored.length) return withFeedbackRequest(await body(args, extra), args);
+    // A real write without an argument the agent meant ("mode": "append") can do something else than it expects.
+    if (!args?.dry_run) {
+      throw new ToolError('BAD_REQUEST', `${ignored.join(', ')}: not parameters of ${name}. Nothing was published. Known: ${[...known!].filter((k) => k !== 'review_id').join(', ')}.`);
+    }
     const out = await body(Object.fromEntries(Object.entries(args).filter(([k]) => known!.has(k))), extra);
     return withFeedbackRequest({ ...out, ignored_arguments: `${ignored.join(', ')}: not parameters of ${name}, ignored (a typo, or a field that belongs inside data?).` }, args);
   });
@@ -566,6 +570,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       section: z.string().describe('Heading, "Summary" for the lead, or "Infobox" with infobox'),
       infobox: z.record(z.string(), z.string()).optional().describe('With section "Infobox": fields to set (an empty string removes one); the others stay'),
       body: z.string().optional().describe('New section body in Markdown (without the heading); or use replace'),
+      append: z.boolean().optional().describe('With body: add it after what the section has now instead of replacing it (no base_revision needed)'),
       replace: z.array(z.object({ old: z.string().min(1), new: z.string() })).min(1).max(20).optional()
         .describe("Small changes instead of body: each old text must occur exactly once in the section's Markdown (as read returns it)"),
       base_revision: z.number().int().optional().describe('The revision you read (needed with body; replace may leave it out and applies to the latest revision; inside a batch it may be left out for a page an earlier operation of the batch writes)'),
@@ -771,9 +776,9 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('publish_checked', {
     title: 'Publish what a dry run checked',
-    description: 'Publish exactly what a dry run (of any write tool or batch) checked, by its check_id, without resending (two hours, same account). Safe to retry after a lost answer: a used check_id returns what it published. replace swaps whole operations of a batch; amend fixes small texts; with dry_run true it checks again.',
+    description: 'Publish exactly what a dry run (of any write tool or batch) checked, by its check_id, without resending (two hours, same account). Safe to retry after a lost answer: a used check_id returns what it published. replace changes fields of batch operations; amend fixes small texts. Without dry_run it publishes at once (also after replace or amend); with dry_run true it checks again first.',
     inputSchema: { check_id: z.string(), dry_run: DRY_RUN,
-      replace: z.record(z.string(), z.union([z.record(z.string(), z.unknown()), z.null()])).optional().describe('Batches only: {"3": {corrected arguments}} keeps the tool, {"3": {tool, arguments}} swaps it, {"3": null} drops the operation'),
+      replace: z.record(z.string(), z.union([z.record(z.string(), z.unknown()), z.null()])).optional().describe('Batches only: {"3": {fields to change}} keeps the tool and the other fields (a field set to null is removed), {"3": {tool, arguments}} swaps the whole operation, {"3": null} drops it'),
       quiet: z.boolean().optional().describe('With dry_run: list the pages without their contents'),
       append: z.array(z.object({ tool: z.string(), arguments: z.record(z.string(), z.unknown()) })).max(50).optional().describe('More operations to add to what was checked (it becomes a batch)'),
       merge: z.array(z.string()).max(10).optional().describe('Other check_ids of yours to publish together with this one, as one batch'),
@@ -826,7 +831,9 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
         if (v === null) { dropped.add(n - 1); continue; }
         const swap = typeof v.tool === 'string' && v.arguments && typeof v.arguments === 'object' && Object.keys(v).length === 2;
         if (swap && !handlers.has(String(v.tool))) return fail(new ToolError('BAD_REQUEST', `replace: "${v.tool}" is not a write tool.`));
-        ops[n - 1] = swap ? { tool: String(v.tool), arguments: v.arguments as Record<string, unknown> } : { tool: ops[n - 1].tool, arguments: v };
+        // Same tool: the given fields replace those of the checked operation (null removes one); the rest is kept.
+        const merged = Object.fromEntries(Object.entries({ ...ops[n - 1].arguments, ...v }).filter(([, x]) => x !== null));
+        ops[n - 1] = swap ? { tool: String(v.tool), arguments: v.arguments as Record<string, unknown> } : { tool: ops[n - 1].tool, arguments: merged };
       }
       args = { ...args, operations: ops.filter((_, i) => !dropped.has(i)) };
     }
@@ -918,6 +925,9 @@ async function runBatch(
     const parsed = schema.safeParse(p.args);
     const shape = (schema as z.ZodObject<any>).shape as Record<string, unknown> | undefined;
     if (shape) ignoredArgs.set(p.index, Object.keys(p.args).filter((k) => !(k in shape)));
+    // As for a single write: a real batch does not run an operation without an argument the agent meant.
+    const unknown = ignoredArgs.get(p.index) ?? [];
+    if (!op.dryRun && unknown.length) problems.push(`operation ${p.index + 1} (${p.tool}): ${unknown.join(', ')} ${unknown.length > 1 ? 'are not parameters' : 'is not a parameter'} of ${p.tool}`);
     if (!parsed.success) problems.push(`operation ${p.index + 1} (${p.tool}): ${parsed.error.issues.map((i) => `${i.path.join('.') || 'arguments'}: ${i.message}`).join('; ')}`);
     else p.args = parsed.data as Record<string, unknown>;
   }

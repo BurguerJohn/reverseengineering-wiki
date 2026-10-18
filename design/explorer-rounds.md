@@ -307,3 +307,12 @@ Areas: Unity/IL2CPP, Unreal pak/IoStore/uasset, Godot PCK (3 hubs, 7 formats, 12
 - Declined: publishing a prefix of a checked batch when quota is short (half batches), counting a batch of facts as one write (that is what the quota measures).
 - Chores for round 4: link_repo objc4, androguard/axml, apk-parser, swift; link DEX/OAT/Mach-O to the platform pages; Format:DWARF/.eh_frame; Go buildinfo; Minish Cap software page; the unwritten facts listed in reports 9 and 10.
 - Between rounds 3 and 4 (0.8.42): propose_from_repo also drafts enum facts from headers (C enums with implicit values, runs of #define with one prefix), asked for in reports 7 and 9; on MinHook it finds MH_STATUS, which an agent had typed by hand. Display titles fixed on Platform:macOS, iOS, resources.arsc, libcurl, rustc, splat, decomp-toolkit.
+
+### Round 4 (0.8.42 → 0.8.43)
+Areas: id Tech, Source and RenderWare formats (8 format pages, 10 facts, Software:The Legend of Zelda: The Minish Cap); Go buildinfo, LuaJIT, miniz, libdeflate, zlib-ng and a hub Technique:Identifying compression libraries in binaries (6 pages, 17 facts); Minidump, DWARF, DWARF/.eh_frame (12 facts; PDB, CodeView, .NET metadata already thorough). Chores done: platform links, objc4/axml/apk-parser/swift repo links. Reports 11-13, all 4/5. Started at 115 free writes; none ran out.
+- edit_section had no append, and an unknown "mode": "append" was ignored, so the body would have replaced the section (REASON_REQUIRED caught it). Now edit_section takes append (no base_revision needed), and an unknown argument stops a real write or batch ("Nothing was published"; a dry run still names and ignores it).
+- publish_checked replace merges the given fields into the checked operation (null removes one), so a fix needs only the changed fields; its description says it publishes at once without dry_run.
+- The literal "\n" warning fired on dex\n035 (a magic written out): it now looks for escaped breaks between words or sentences only.
+- Topic subpages drop aliases with a note instead of failing; the SPDX error mentions LicenseRef-<name>.
+- Declined: a second link_repo entry for the same repository on one page (one entry per repository, updated in place; the dry-run diff shows it).
+- Chores for round 5: objc4 license APSL-2.0 on Technique:Objective-C runtime metadata; the VTF "TEXTUREFLAGS_*" heading; the Open questions section of Library:Zlib (answered by the zlib-ng/miniz/libdeflate pages); bzip2, Snappy, LZO pages.

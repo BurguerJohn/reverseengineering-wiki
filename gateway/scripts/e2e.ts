@@ -373,6 +373,11 @@ const noBase = await call(b, 'edit_section', { title: game, section: 'Pitfalls',
 assert.ok(noBase.revision, JSON.stringify(noBase));
 await expectError(b, 'edit_section', { title: game, section: 'Pitfalls', body: 'Whole new text.', summary: 'no base' }, 'BAD_REQUEST');
 ok('edit_section: replace without base_revision applies to the latest revision; body without it is refused');
+const appended = await call(b, 'edit_section', { title: game, section: 'Pitfalls', body: 'Keep a backup of the save folder.', append: true, summary: 'one more pitfall' });
+const afterAppend = await call(b, 'read', { title: game, section: 'Pitfalls' });
+assert.ok(appended.revision && /launcher runs/.test(JSON.stringify(afterAppend)) && /backup of the save folder/.test(JSON.stringify(afterAppend)), JSON.stringify(afterAppend).slice(0, 400));
+await expectError(b, 'edit_section', { title: game, section: 'Pitfalls', body: 'x', mode: 'append', summary: 'unknown argument' }, 'BAD_REQUEST');
+ok('edit_section append keeps the section and adds to it; an unknown argument stops a real write');
 
 // ---- review: vandalism, history, diff, revert ------------------------------------------------
 const current = await call(anon, 'read', { title: game, section: 'Formats' });
@@ -1083,10 +1088,12 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const sameBase = await call(a, 'batch', { operations: [
     { tool: 'edit_section', arguments: { title: `Format:E2E Track ${run}`, section: 'Tools', body: 'Fictional tools.', base_revision: trackRead.revision, summary: 'fictional tools' } },
     { tool: 'edit_section', arguments: { title: `Format:E2E Track ${run}`, section: 'Infobox', infobox: { extensions: '.trk' }, base_revision: trackRead.revision, summary: 'fictional extension' } },
-    { tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A fictional note with a stray argument.', confidence: 'low', notes_extra: 'typo' } },
+    { tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A fictional note about the track format.', confidence: 'low' } },
   ] });
   assert.ok(!sameBase.error && sameBase.operations === 3, JSON.stringify(sameBase).slice(0, 600));
-  assert.ok(sameBase.results.some((r: any) => /notes_extra/.test(r.ignored_arguments ?? '')), JSON.stringify(sameBase.results).slice(0, 600));
+  // An unknown argument stops a real batch before anything is written (a dry run names it and goes on).
+  const strayBatch = await call(a, 'batch', { operations: [{ tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A fictional note with a stray argument.', confidence: 'low', notes_extra: 'typo' } }] });
+  assert.match(strayBatch.message ?? '', /notes_extra is not a parameter of add_note/, JSON.stringify(strayBatch).slice(0, 400));
   const stray = await call(a, 'add_note', { subject: `Format:E2E Track ${run}`, body: 'Another fictional note with a stray argument.', confidence: 'low', data_samples_note: 'x', dry_run: true });
   assert.match(stray.ignored_arguments ?? '', /data_samples_note/, JSON.stringify(stray).slice(0, 400));
   // A versioned ELF import is found by its bare name and its version node.
