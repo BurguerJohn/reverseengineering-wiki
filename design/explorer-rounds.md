@@ -365,3 +365,10 @@ Areas: GameMaker data files, Ren'Py RPA/RPYC, SWF and ABC, RPG Maker RGSSAD (9 p
 Areas: CASC and CascLib, Westwood MIX, SCUMM and SCI resources, LE/LX executables (6 pages, 15 facts); Steamworks API (interface version strings that date the SDK), EOS SDK, Discord RPC, ENet, RakNet, GameNetworkingSockets, Photon (7 pages, 17 facts; recognition only); firmware: UEFI firmware volume, TE, capsule, uImage, FIT, Android boot image, FDT, SquashFS, JFFS2, UBI/UBIFS, cramfs (11 pages, 15 facts). Reports 32-34, all 4/5.
 - link_repo could not link AOSP's mkbootimg: *.googlesource.com (Gitiles) is now a repository host (commit from ?format=JSON, license and symbol files from ?format=TEXT, base64). Checked live on android.googlesource.com.
 - A "/" in an alias failed a batch for the second time (round 2, round 11): it is now created with "-" and the answer lists the renamed aliases.
+
+### Round 12 (0.8.50 → 0.8.51)
+Areas: Xbox and Xbox 360 (Platform pages, XBE, XDVDFS, XEX2, STFS, XDBF; 27 facts from xenia, nxdk, extract-xiso); Library:Unreal Engine/Reflection data and Tool:UE4SS (FNamePool, FUObjectArray, UObject/UStruct/UClass/FProperty layouts by version; 18 facts); Platform:Windows/Kernel drivers (IRP_MJ, CTL_CODE with test vectors, DRIVER_OBJECT, IO_STACK_LOCATION, KMDF WdfVersionBind and function-table indexes; 12 facts). Reports 35-37, all 4/5.
+- A struct ending in a flexible array ("entries[]") was warned as running past its size: trailing [], [0] and [1] arrays are left out of the layout check.
+- The Xbox agent wrote some prose from memory without marking it (XBE section names, XDK library names, XDBF offsets); the next round's chore checks it. The prompt already asks for "Unverified"; agents follow it for facts more than for prose.
+- Recurring friction, declined again: required fact fields found by error (a batch's arguments are free-form; the dry run lists every problem at once).
+- Chores for round 13: the XBE/XDK/XDBF prose above; a general Technique page for byte-signature (AOB) scanning, which three areas now point at.

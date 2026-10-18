@@ -93,7 +93,9 @@ const layoutNum = (v: unknown): number | null => {
 export function structLayoutProblems(data: Record<string, unknown>): string[] {
   const fields = Array.isArray(data.fields) ? data.fields as Array<Record<string, unknown>> : [];
   const size = layoutNum(data.size);
-  const placed = fields.map((f) => ({ name: String(f.name ?? '?'), offset: layoutNum(f.offset), size: layoutNum(f.size), conditional: f.condition !== undefined }))
+  // A trailing flexible array ("entries[]", "data[1]", "name[0]") runs past the fixed size on purpose.
+  const flexible = (f: Record<string, unknown>) => /\[\s*[01]?\s*\]\s*$/.test(`${f.type ?? ''}`) || /\[\s*[01]?\s*\]\s*$/.test(`${f.name ?? ''}`);
+  const placed = fields.filter((f) => !flexible(f)).map((f) => ({ name: String(f.name ?? '?'), offset: layoutNum(f.offset), size: layoutNum(f.size), conditional: f.condition !== undefined }))
     .filter((f) => f.offset !== null && f.size !== null && f.size > 0) as Array<{ name: string; offset: number; size: number; conditional: boolean }>;
   const out: string[] = [];
   const offsets = new Map<number, number>();
