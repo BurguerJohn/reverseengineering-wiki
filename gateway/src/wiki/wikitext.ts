@@ -152,7 +152,7 @@ export function parseInfobox(wikitext: string): Infobox {
 
 export const INFOBOX_FIELDS = [
   'type', 'developer', 'publisher', 'vendor', 'engine', 'uses', 'platforms', 'languages', 'versions',
-  'release', 'magic', 'extensions', 'endianness', 'used_by', 'license', 'website', 'aliases',
+  'release', 'cpu', 'magic', 'extensions', 'endianness', 'used_by', 'license', 'website', 'aliases',
   // The name as written when MediaWiki capitalized its first letter ("macOS"): the page shows it as its title.
   'display_title',
 ] as const;

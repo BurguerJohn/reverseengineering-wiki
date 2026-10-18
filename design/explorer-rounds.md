@@ -391,3 +391,10 @@ Areas: PlayStation 1 data and disc formats (TIM, SPU-ADPCM, VAG, VAB, SEQ/SEP, C
 - Third report that alias redirects cost quota: the agents read the shared "left" fall while the other two wrote. A real batch's answer now shows this_batch (its own cost) next to left, with a note that aliases are free and left counts every writer of the account; dry runs say the same.
 - The brief was wrong about jPSXdec's license (non-commercial, not Apache-2.0): the agent cited it without linking. Agents check licenses themselves; good.
 - One agent wanted several commits in one evidence entry (a comparison of release branches): evidence is a list, one entry per branch.
+
+### Round 16 (0.8.54 → 0.8.55)
+Areas: arcade boards from MAME drivers (Tool:MAME, Platform:Neo Geo, Capcom CPS-1, Sega System 16, Namco System 1 and 2; 14 hardware-address facts); Windows GUI frameworks (MFC, ATL, WTL, wxWidgets, Technique:Identifying Windows GUI frameworks, RT_DIALOG/RT_MENU/RT_ACCELERATOR formats; 8 facts; MFC layouts marked Unverified since its source is not public); Mach-O chained fixups, bind/rebase opcodes, encryption info (recognition only), IPA, provisioning profile, Swift name mangling (6 pages, 8 facts). Reports 47-49, all 4/5.
+- Platform infoboxes take cpu (processors and clocks); a block of memory-mapped registers is a struct fact with data.address kind hardware (Fact reference explains it).
+- A struct whose fields have no offsets was accepted silently: the layout check names fields without an offset.
+- Known license texts now also cover the wxWindows Library Licence, MPL-2.0 and ISC. LGPL/GPL texts stay hints only (the text does not say "only" or "or later").
+- Prompt: WebFetch summarizes with a small model, so exact values come from the raw file; Git Bash sparse checkouts need MSYS_NO_PATHCONV=1 and --no-cone.

@@ -98,6 +98,8 @@ export function structLayoutProblems(data: Record<string, unknown>): string[] {
   const placed = fields.filter((f) => !flexible(f)).map((f) => ({ name: String(f.name ?? '?'), offset: layoutNum(f.offset), size: layoutNum(f.size), conditional: f.condition !== undefined }))
     .filter((f) => f.offset !== null && f.size !== null && f.size > 0) as Array<{ name: string; offset: number; size: number; conditional: boolean }>;
   const out: string[] = [];
+  const unplaced = fields.filter((f) => !flexible(f) && layoutNum(f.offset) === null).map((f) => String(f.name ?? '?'));
+  if (unplaced.length) out.push(`${unplaced.slice(0, 3).join(', ')}${unplaced.length > 3 ? ` and ${unplaced.length - 3} more` : ''} ${unplaced.length > 1 ? 'have' : 'has'} no offset (fields are {offset, size, type, name}; exports place fields by offset)`);
   const offsets = new Map<number, number>();
   for (const f of placed) offsets.set(f.offset, (offsets.get(f.offset) ?? 0) + 1);
   const plain = placed.filter((f) => !f.conditional && offsets.get(f.offset) === 1).sort((a, b) => a.offset - b.offset);
@@ -180,7 +182,7 @@ export interface FactDoc extends FactInput {
 export const FACT_DATA: Record<FactKind, { required: string[]; one_of?: string[]; optional: string[]; example: Record<string, unknown> }> = {
   function: { required: ['name'], one_of: ['rva', 'address', 'signature', 'export'], optional: ['ordinal', 'prototype', 'calling_convention', 'size', 'rva_end', 'signature_offset', 'multiple'], example: { name: 'Player::TakeDamage', rva: '0x141230', signature: '48 89 5C 24 ?? 57 48 83 EC 20', prototype: 'void __fastcall(Player*, float)' } },
   global: { required: ['name', 'type'], one_of: ['rva', 'address', 'signature'], optional: ['size', 'signature_offset', 'multiple'], example: { name: 'g_GameState', type: 'GameState*', rva: '0x2F1A80' } },
-  struct: { required: ['name', 'fields'], one_of: ['size', 'size_min'], optional: ['size_max', 'alignment', 'abi', 'variant'], example: { name: 'Weapon', size: '0x88', fields: [{ offset: '0x0', size: 8, type: 'void*', name: 'vtable' }, { offset: '0x8', size: 1, type: 'uint8_t', name: 'kind', notes: '0 = rifle, 1 = shotgun' }, { offset: '0x9', size: 1, type: 'uint8_t', name: 'flags', bits: [{ bit: '0', name: 'is_loaded' }, { bit: '4-5', name: 'palette', notes: 'CGB only' }] }] } },
+  struct: { required: ['name', 'fields'], one_of: ['size', 'size_min'], optional: ['size_max', 'alignment', 'abi', 'variant', 'address'], example: { name: 'Weapon', size: '0x88', fields: [{ offset: '0x0', size: 8, type: 'void*', name: 'vtable' }, { offset: '0x8', size: 1, type: 'uint8_t', name: 'kind', notes: '0 = rifle, 1 = shotgun' }, { offset: '0x9', size: 1, type: 'uint8_t', name: 'flags', bits: [{ bit: '0', name: 'is_loaded' }, { bit: '4-5', name: 'palette', notes: 'CGB only' }] }] } },
   vtable: { required: ['class', 'slots'], one_of: ['rva', 'address', 'rtti', 'iid'], optional: ['base'], example: { class: 'Weapon', rtti: '.?AVWeapon@@', rva: '0x1D3E00', slots: [{ index: 0, name: '~Weapon' }] } },
   enum: { required: ['name', 'values'], optional: ['underlying_type'], example: { name: 'WeaponClass', values: { 0: 'AssaultRifle', 1: 'Shotgun' } } },
   typedef: { required: ['name', 'type'], optional: ['abi'], example: { name: 'FT_Long', type: 'int32_t', abi: 'win64' } },

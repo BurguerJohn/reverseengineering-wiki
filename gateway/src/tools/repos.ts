@@ -41,6 +41,9 @@ export function licenseHint(text: string): string | undefined {
     [/Apache License,? Version 2\.0/i, 'Apache-2.0'],
     [/Redistribution and use in source and binary forms[\s\S]*Neither the name/i, 'BSD-3-Clause'],
     [/Redistribution and use in source and binary forms/i, 'BSD-2-Clause'],
+    [/wxWindows Library Licence/i, 'wxWindows'],
+    [/Mozilla Public License,? (?:v. |version )2.0/i, 'MPL-2.0'],
+    [/ISC License/i, 'ISC'],
   ];
   return KNOWN_TEXTS.find(([re]) => re.test(flat))?.[1];
 }

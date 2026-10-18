@@ -27,6 +27,7 @@ Every kind also takes `test_vectors` and `samples` (below). Every fact needs `ev
   - `banked` (cartridges): `"03:8000"`.
   - `wasm` (WebAssembly function index, imported functions counted first): `"func:123"`.
   - `hardware` (memory-mapped I/O, vectors, BIOS calls, the same in every program of a platform): `"0xFF46"`, on the `Platform:` page with `scope.level = "platform"`.
+  - A block of memory-mapped registers: one struct fact with `data.address` `{kind: "hardware", value: "<base>"}` and the registers as fields at offsets from the base (`{offset: "0x0", size: 2, name: "LSPC_VRAMADDR"}`), on the `Platform:` page; a single register is a global fact with its own address.
 - Builds (`register_build`): file hashes and metadata, never the file. SHA-256 is best; consoles may use the SHA-1/MD5/CRC32 that ROM and disc databases publish; without the file, size plus PE timestamp or version text is a partial identity. A library's own DLL is a build of its `Library:` page (software `"Library:Name"`).
 
 ## Structs, typedefs and enums

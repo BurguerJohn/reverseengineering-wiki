@@ -26,7 +26,10 @@
 {{!}} {{{versions}}}}}{{#if:{{{release|}}}|<nowiki/>
 {{!}}-
 ! style="text-align:left; width:35%;" {{!}} Release
-{{!}} {{{release}}}}}{{#if:{{{magic|}}}|<nowiki/>
+{{!}} {{{release}}}}}{{#if:{{{cpu|}}}|<nowiki/>
+{{!}}-
+! style="text-align:left; width:35%;" {{!}} CPU
+{{!}} {{{cpu}}}}}{{#if:{{{magic|}}}|<nowiki/>
 {{!}}-
 ! style="text-align:left; width:35%;" {{!}} Magic
 {{!}} {{{magic}}}}}{{#if:{{{extensions|}}}|<nowiki/>
@@ -51,4 +54,4 @@
 |-
 ! style="text-align:left; width:35%;" | On this wiki
 | [[Special:PrefixIndex/Fact:{{PAGENAME}}/|Facts]] · [[Special:PrefixIndex/Code:{{PAGENAME}}/|Code]] · [[Special:PrefixIndex/Notes:{{PAGENAME}}/|Notes]] · [[Special:PrefixIndex/{{FULLPAGENAME}}/|Topics]]
-|}</includeonly><noinclude>Infobox for subject pages. The gateway writes it; fields are machine-readable. Parameters: type, developer, publisher, vendor, engine, uses, platforms, languages, versions, release, magic, extensions, endianness, used_by, license, website, aliases, display_title (the name as written when MediaWiki capitalized its first letter, e.g. macOS).</noinclude>
+|}</includeonly><noinclude>Infobox for subject pages. The gateway writes it; fields are machine-readable. Parameters: type, developer, publisher, vendor, engine, uses, platforms, languages, versions, release, cpu (platforms: processors and clocks), magic, extensions, endianness, used_by, license, website, aliases, display_title (the name as written when MediaWiki capitalized its first letter, e.g. macOS).</noinclude>
