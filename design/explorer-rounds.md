@@ -340,3 +340,9 @@ Areas: retro ROM/disc formats (iNES/NES 2.0, SNES, Mega Drive, Saturn and Dreamc
 - DUPLICATE_SUSPECTED names the similar pages in its message (inside a batch the details did not reach the agent).
 - edit_section summary is optional (default "Edit <section>"), forgotten twice.
 - Checked and declined: "search misses Sega/LoROM" (the pages did not exist yet when searched; both find them now); "no Topics list on the ELF page" (it has one, written by the batch); per-agent quota (one account; the shared count is shown).
+
+### Round 8 (0.8.46 → 0.8.47)
+Areas: Wii/N64 decompilations (Platform:Nintendo Wii; Twilight Princess Wii and GameCube builds with ~59k symbols, Paper Mario with 19k; Known projects rows; Wwise BNK versions and HIRC types checked against wwiser); graphics libraries (DXGI, D3D9/11/12, Vulkan, SDL, Dear ImGui, Technique:Graphics API vtable hooking, Library:Miles Sound System; 16 facts); Platform:Windows with PEB/TEB, loader lists, KUSER_SHARED_DATA, NTSTATUS and build numbers (win32/win64 struct facts), Bink DLL exports confirmed. Reports 23-25, all 4/5.
+- COM interface slot orders had to be filed as enums because vtable facts needed an address: a vtable fact may now name its interface by data.iid (the same layout in every binary).
+- Exported functions of a library have no address: a function fact may give data.export "<module>!<name>" (with data.ordinal). The "signature is malformed" error now quotes the value and says a prototype goes in data.prototype.
+- import_symbols read 19,350 of Paper Mario's 26,313 lines without saying why: it now lists examples of unread lines and how many names were dropped at an already-named address. Most were N64 overlay symbols sharing one address range; overlays need their own address space (open: a build per overlay, or an overlay key in the symbol map).

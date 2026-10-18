@@ -382,6 +382,16 @@ const renamed = await call(b, 'edit_section', { title: game, section: 'Pitfalls'
 const renamedRead = await call(b, 'read', { title: game, section: 'Pitfalls (`SAVE_*` files)' });
 assert.ok(renamed.revision && /backup of the save folder/.test(JSON.stringify(renamedRead)), JSON.stringify(renamedRead).slice(0, 400));
 ok('edit_section new_heading renames a section and keeps its text');
+// Facts without an address: a COM interface's slot order by its IID, an exported function by its export name.
+const iface = await call(a, 'add_fact', { kind: 'vtable', subject: game, claim: 'The fictional IE2EThing interface has QueryInterface, AddRef, Release, then Frob.', scope: { level: 'software', applies_to: 'every build' },
+  data: { class: 'IE2EThing', iid: '01234567-89ab-cdef-0123-456789abcdef', slots: [{ index: 0, name: 'QueryInterface' }, { index: 1, name: 'AddRef' }, { index: 2, name: 'Release' }, { index: 3, name: 'Frob' }] },
+  evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low', dry_run: true });
+assert.ok(iface.would_publish !== false && !iface.error, JSON.stringify(iface).slice(0, 400));
+const exported = await call(a, 'add_fact', { kind: 'function', subject: game, claim: 'The fictional e2e.dll exports _E2EOpen@8.', scope: { level: 'software', applies_to: 'every build' },
+  data: { name: 'E2EOpen', export: 'e2e.dll!_E2EOpen@8', prototype: 'void* __stdcall E2EOpen(const char*, int)' },
+  evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low', dry_run: true });
+assert.ok(exported.would_publish !== false && !exported.error, JSON.stringify(exported).slice(0, 400));
+ok('vtable facts by iid and function facts by export name need no address');
 
 // ---- review: vandalism, history, diff, revert ------------------------------------------------
 const current = await call(anon, 'read', { title: game, section: 'Formats' });

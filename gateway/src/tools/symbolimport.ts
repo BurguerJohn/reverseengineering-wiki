@@ -60,7 +60,7 @@ function parseLine(line: string, format: SymbolFileFormat): ParsedSymbol | null 
 }
 
 /** Parses a symbol file; format "auto" takes the format that reads the most lines. */
-export function parseSymbolFile(text: string, format: (typeof SYMBOL_FILE_FORMATS)[number] = 'auto'): { format: SymbolFileFormat; symbols: ParsedSymbol[]; lines: number; unread: number } {
+export function parseSymbolFile(text: string, format: (typeof SYMBOL_FILE_FORMATS)[number] = 'auto'): { format: SymbolFileFormat; symbols: ParsedSymbol[]; lines: number; unread: number; unread_examples: string[]; same_address: number } {
   const lines = text.split(/\r?\n/);
   const formats: SymbolFileFormat[] = format === 'auto' ? ['linker', 'nm', 'pairs'] : [format];
   let best: { format: SymbolFileFormat; symbols: ParsedSymbol[] } = { format: formats[0], symbols: [] };
@@ -71,8 +71,11 @@ export function parseSymbolFile(text: string, format: (typeof SYMBOL_FILE_FORMAT
   // One name per address (the first), as add_symbols requires.
   const seen = new Set<string>();
   const symbols = best.symbols.filter((x) => (seen.has(x.va) ? false : (seen.add(x.va), true)));
-  const content = lines.filter((l) => l.trim() && !/^\s*(?:#|\/\/|;)/.test(l)).length;
-  return { format: best.format, symbols, lines: content, unread: content - best.symbols.length };
+  const meaningful = (l: string) => l.trim() && !/^\s*(?:#|\/\/|;)/.test(l);
+  const content = lines.filter(meaningful).length;
+  // A few lines the format did not read, so the agent sees why (another syntax, sections, sizes only).
+  const examples = lines.filter((l) => meaningful(l) && parseLine(l, best.format) === null).slice(0, 5).map((l) => l.trim().slice(0, 120));
+  return { format: best.format, symbols, lines: content, unread: content - best.symbols.length, unread_examples: examples, same_address: best.symbols.length - symbols.length };
 }
 
 function rawUrl(repoUrl: string, commit: string, path: string): string {
@@ -126,7 +129,8 @@ export async function importSymbols(s: Services, caller: Caller, args: {
   return {
     build: args.build, repository: { url: info.url, commit: info.commit, path, license },
     license_note: unlicensed && !args.license ? 'The repository states no license: only names, addresses, sizes and data types were imported, never code or comments; the build page records the source.' : undefined,
-    format: parsed.format, read: parsed.symbols.length, unread_lines: parsed.unread || undefined, skipped_names: skippedNames || undefined, writes: results.length, results,
+    format: parsed.format, read: parsed.symbols.length, unread_lines: parsed.unread || undefined, unread_examples: parsed.unread ? parsed.unread_examples : undefined,
+    same_address_dropped: parsed.same_address ? `${parsed.same_address} names at an address that already had one (the first is kept; on overlay platforms such as N64, PS1 and PS2 several overlays reuse one address range, so overlay symbols collide)` : undefined, skipped_names: skippedNames || undefined, writes: results.length, results,
     merge_rule: 'Nothing is removed. A symbol already on the map with the same name stays and only gains missing details ("updated"); a different name at the same address replaces it only with a higher confidence (or force), otherwise it is listed as a conflict and the existing name stays.',
     next: `link_repo url="${info.url}" commit="${info.commit}" on the build's software page, so readers find where the names come from.`,
   };

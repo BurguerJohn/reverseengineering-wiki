@@ -176,10 +176,10 @@ export interface FactDoc extends FactInput {
  * ones. Published in tools.json and the add_fact description; fields outside it get a warning.
  */
 export const FACT_DATA: Record<FactKind, { required: string[]; one_of?: string[]; optional: string[]; example: Record<string, unknown> }> = {
-  function: { required: ['name'], one_of: ['rva', 'address', 'signature'], optional: ['prototype', 'calling_convention', 'size', 'rva_end', 'signature_offset', 'multiple'], example: { name: 'Player::TakeDamage', rva: '0x141230', signature: '48 89 5C 24 ?? 57 48 83 EC 20', prototype: 'void __fastcall(Player*, float)' } },
+  function: { required: ['name'], one_of: ['rva', 'address', 'signature', 'export'], optional: ['ordinal', 'prototype', 'calling_convention', 'size', 'rva_end', 'signature_offset', 'multiple'], example: { name: 'Player::TakeDamage', rva: '0x141230', signature: '48 89 5C 24 ?? 57 48 83 EC 20', prototype: 'void __fastcall(Player*, float)' } },
   global: { required: ['name', 'type'], one_of: ['rva', 'address', 'signature'], optional: ['size', 'signature_offset', 'multiple'], example: { name: 'g_GameState', type: 'GameState*', rva: '0x2F1A80' } },
   struct: { required: ['name', 'fields'], one_of: ['size', 'size_min'], optional: ['size_max', 'alignment', 'abi', 'variant'], example: { name: 'Weapon', size: '0x88', fields: [{ offset: '0x0', size: 8, type: 'void*', name: 'vtable' }, { offset: '0x8', size: 1, type: 'uint8_t', name: 'kind', notes: '0 = rifle, 1 = shotgun' }, { offset: '0x9', size: 1, type: 'uint8_t', name: 'flags', bits: [{ bit: '0', name: 'is_loaded' }, { bit: '4-5', name: 'palette', notes: 'CGB only' }] }] } },
-  vtable: { required: ['class', 'slots'], one_of: ['rva', 'address', 'rtti'], optional: [], example: { class: 'Weapon', rtti: '.?AVWeapon@@', rva: '0x1D3E00', slots: [{ index: 0, name: '~Weapon' }] } },
+  vtable: { required: ['class', 'slots'], one_of: ['rva', 'address', 'rtti', 'iid'], optional: ['base'], example: { class: 'Weapon', rtti: '.?AVWeapon@@', rva: '0x1D3E00', slots: [{ index: 0, name: '~Weapon' }] } },
   enum: { required: ['name', 'values'], optional: ['underlying_type'], example: { name: 'WeaponClass', values: { 0: 'AssaultRifle', 1: 'Shotgun' } } },
   typedef: { required: ['name', 'type'], optional: ['abi'], example: { name: 'FT_Long', type: 'int32_t', abi: 'win64' } },
   magic: { required: ['bytes', 'offset', 'meaning'], optional: ['mask', 'relative_to'], example: { bytes: '52 41 42 00', offset: '0x0', meaning: 'RAB archive header' } },
@@ -224,7 +224,7 @@ export function checkFactData(kind: FactKind, data: Record<string, unknown>): st
   };
   const str = (field: string, schema: z.ZodType) => {
     if (data[field] !== undefined && !schema.safeParse(data[field]).success) {
-      problems.push(`data.${field} is malformed (${field === 'signature' || field === 'pattern' || field === 'bytes' ? 'uppercase hex pairs, ?? wildcards' : '0x-prefixed hex'})`);
+      problems.push(`data.${field} is malformed: ${JSON.stringify(data[field]).slice(0, 60)} (${field === 'signature' || field === 'pattern' || field === 'bytes' ? 'bytes as uppercase hex pairs with ?? wildcards; a C prototype goes in data.prototype' : '0x-prefixed hex'})`);
     }
   };
   str('rva', hex);
@@ -239,7 +239,9 @@ export function checkFactData(kind: FactKind, data: Record<string, unknown>): st
   switch (kind) {
     case 'function':
       need('name');
-      if (!located && data.signature === undefined) problems.push('function facts need data.rva (PE), data.address {kind, value} (other binaries) or data.signature; an address plus a signature is best');
+      // A library's exported function is found by its export name ("binkw32.dll!_BinkOpen@8"), with no address.
+      if (data.export !== undefined && (typeof data.export !== 'string' || !/^[^\s!]+![^\s!]+$/.test(data.export.trim()))) problems.push('data.export is "<module>!<exported name>", e.g. "binkw32.dll!_BinkOpen@8" (data.ordinal for the ordinal)');
+      if (!located && data.signature === undefined && data.export === undefined) problems.push('function facts need data.rva (PE), data.address {kind, value} (other binaries), data.signature, or data.export "<module>!<name>" for an exported function; an address plus a signature is best');
       break;
     case 'global':
       need('name'); need('type');
@@ -268,7 +270,9 @@ export function checkFactData(kind: FactKind, data: Record<string, unknown>): st
     }
     case 'vtable':
       need('class'); need('slots');
-      if (!located && data.rtti === undefined) problems.push('vtable facts need data.rva, data.address or data.rtti');
+      // A COM interface (IDXGISwapChain) has one slot order everywhere: its IID names it, no address needed.
+      if (data.iid !== undefined && (typeof data.iid !== 'string' || !/^\{?[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}?$/.test(data.iid.trim()))) problems.push('data.iid is the interface GUID, e.g. "310d36a0-d2e7-4c0a-aa04-6a9d23b8886a"');
+      if (!located && data.rtti === undefined && data.iid === undefined) problems.push('vtable facts need data.rva, data.address or data.rtti (a vtable in a binary), or data.iid (a COM interface, the same in every binary)');
       break;
     case 'enum': need('name'); need('values'); break;
     case 'typedef':
