@@ -441,8 +441,12 @@ export class SearchIndex {
     for (const x of symbols) {
       const rva = parseInt(String(x.rva), 16);
       if (!Number.isFinite(rva) || typeof x.name !== 'string') continue;
-      stmt.run(p.title, doc.build, rva, x.name, x.kind ?? 'function', x.confidence ?? 'low', x.source ?? 'other',
-        x.type ?? null, x.signature ?? null, x.size ?? null, 1 + (x.seen_by?.length ?? 0), x.absolute ? 1 : 0, x.overlay ?? null);
+      // Only text and numbers reach SQLite: one entry with an object or boolean in a field stopped the whole index
+      // poll ("cannot be bound to SQLite parameter 8") until it was fixed by hand.
+      const text = (v: unknown) => (typeof v === 'string' ? v : v === undefined || v === null ? null : JSON.stringify(v));
+      stmt.run(p.title, String(doc.build ?? ''), rva, x.name, text(x.kind) ?? 'function', text(x.confidence) ?? 'low', text(x.source) ?? 'other',
+        text(x.type), text(x.signature), typeof x.size === 'number' && Number.isFinite(x.size) ? x.size : null,
+        1 + (Array.isArray(x.seen_by) ? x.seen_by.length : 0), x.absolute ? 1 : 0, text(x.overlay));
     }
     this.edge(p.title, 'symbols_of', doc.build);
   }

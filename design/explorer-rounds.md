@@ -480,3 +480,4 @@ Areas: Breath of the Wild's 72,278 function names imported into the 1.5.0 build 
 
 ### Round 29 (0.8.68 → 0.8.69), in progress
 - The fact verification sweep found only 8 medium/low facts by guessing keywords: search takes confidence (facts indexed with their confidence; the facts table is rebuilt once). Its checks: 5 confirmed, 1 partial, 1 corrected (Crashpad's 'CPds' is a multi-character constant written in host order: 73 64 50 43 on little-endian). Verifies by the fact's own account do not change its status, by design.
+- Found while checking the 0.8.69 deploy: the index poll had failed 274 times since 19:42 ("cannot be bound to SQLite parameter 8"): a symbol entry with a non-text type stopped every page after it, so search, exists and identify missed everything written since. Symbol fields are now coerced to text or number before binding, and one page that cannot be indexed is logged and skipped instead of holding back the poll.

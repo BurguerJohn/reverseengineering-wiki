@@ -26,7 +26,7 @@ export class Indexer {
       const titles: string[] = [];
       for await (const page of this.mw.allPages(ns)) titles.push(page.title);
       for (const page of await this.mw.getPages(titles)) {
-        this.index.indexPage(page);
+        this.indexOne(page);
         count++;
       }
       if (titles.length) log(`namespace ${ns}: ${titles.length} pages`);
@@ -40,8 +40,17 @@ export class Indexer {
     const unique = [...new Set(titles)];
     const pages = await this.mw.getPages(unique);
     const found = new Set(pages.map((p) => p.title));
-    for (const page of pages) this.index.indexPage(page);
+    // One page that cannot be indexed is logged and skipped: it must not hold back every page after it.
+    for (const page of pages) this.indexOne(page);
     for (const title of unique) if (!found.has(title)) this.index.removePage(title);
+  }
+
+  private indexOne(page: Parameters<SearchIndex['indexPage']>[0]): void {
+    try {
+      this.index.indexPage(page);
+    } catch (error) {
+      console.error(`[index] ${page.title}: ${(error as Error).message}`);
+    }
   }
 
   async poll(): Promise<number> {
