@@ -41,7 +41,7 @@ function parseCsvSymbols(lines: string[]): ParsedSymbol[] | null {
 }
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
-const MAX_IMPORT = 50_000;
+const MAX_IMPORT = 150_000;
 const NAME = String.raw`[A-Za-z_.$?@][\w.$@?:<>~]*`;
 // CodeWarrior-mangled template names keep their commas ("vector<pair<Ui,Ui>,alloc>"): in "name = address" lines the "=" ends the name.
 const LINKER_NAME = String.raw`[A-Za-z_.$?@][\w.$@?:<>~,*&]*`;

@@ -512,6 +512,11 @@ export async function editSection(s: Services, caller: Caller, input: {
     args = { ...args, body: `${current.trimEnd()}\n\n${args.body!.trim()}` };
   }
   const body = args.body!;
+  // A body that repeats the page's next sections ("## Pitfalls" after the edited one) would nest them under this
+  // section one level down: refused, so each section is edited on its own.
+  const otherHeadings = new Set(sections.filter((x) => x.level > 0 && x !== target).map((x) => headingKey(x.heading)));
+  const repeated = [...body.matchAll(/^#{1,6}\s+(.+?)\s*#*\s*$/gm)].map((m) => m[1]).find((h) => otherHeadings.has(headingKey(h)));
+  if (repeated) throw new ToolError('BAD_REQUEST', `The body contains the heading "${repeated}", which is another section of ${t}: edit that section on its own (the body is only "${args.section}").`);
   assertClean([...scanText(body, 'article'), ...scanText(`${args.summary}\n${args.reason ?? ''}`, 'summary')]);
   if (page.revid !== args.base_revision) {
     const base = await s.sessions.reader.getRevision(args.base_revision);

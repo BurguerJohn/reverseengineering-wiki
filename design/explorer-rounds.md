@@ -462,3 +462,10 @@ Areas: game saves (Technique:Reverse engineering game save files, Unreal GVAS, R
 - "ar archive" was suspected a duplicate of "ASAR archive (Electron)" because its letters occur inside it: similar names now compare whole words.
 - publish_checked replace worked on batch checks only, so confirm_new could not be added to a single create_page check: a single tool's check takes {"1": {fields to change}}.
 - Before round 27 (0.8.66): import_symbols reads CSV function lists with a header (Address,Quality,Size,Name as the Switch decompilations keep them; rows without a name skipped, decimal sizes). zeldaret/botw's uking_functions.csv parses to 72,319 named functions of 113,491 rows.
+
+### Round 27 (0.8.66 → 0.8.67), interrupted by the weekly API limit and resumed
+Areas: Switch decompilations (Software pages for Breath of the Wild and Super Mario Odyssey, builds by the uncompressed main NSO SHA-256 from each tools/setup.py, data symbols imported (BotW ~520, Odyssey 2,659), Tool:Nx-decomp-tools, Library:Sead, Format:NSO address mapping); a verification sweep (13 Unverified claims settled: 9 confirmed, 4 wrong and corrected: the ZIP Unicode comment id 0x6375, the 0xCAFE JAR marker, Master System 0x7FFE nibbles, the Mach-O 64_KERNEL_CACHE stride); Platform:Android/Native libraries and JNI (8 facts, the 233-slot JNINativeInterface). Reports 80-82, all 4/5.
+- One check in three of "Unverified" claims was wrong: the remaining rounds spend an agent on verification.
+- BotW's 72,319-name function list exceeded the 50,000-symbol import limit: raised to 150,000 (one write per 5,000).
+- A section body that repeated the page's following headings nested them a level down (Technique:Matching decompilation lost three level-2 sections; restored by a maintenance edit). edit_section now refuses a body containing another section's heading.
+- API function tables (JNI's JNINativeInterface) can be vtable facts with data.api.
