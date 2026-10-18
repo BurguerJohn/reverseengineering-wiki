@@ -245,6 +245,13 @@ export class SearchIndex {
     return this.db.prepare('select * from pages where title = ?').get(title) as any;
   }
 
+  /** Facts of one subject page with this name under any kind ("Fact:X/string/Banner" for a link to "Fact:X/identification/Banner"). */
+  factsNamed(subjectPrefix: string, name: string): string[] {
+    const likeEscape = (x: string) => x.replace(/[!%_]/g, (c) => `!${c}`);
+    return (this.db.prepare(`select title from pages where type = 'fact' and title like ? escape '!' and title like ? escape '!' limit 3`)
+      .all(`Fact:${likeEscape(subjectPrefix)}/%`, `%/${likeEscape(name)}`) as Array<{ title: string }>).map((x) => x.title);
+  }
+
   /**
    * The current title of a page: through a redirect, or through MediaWiki's move log for
    * pages that cannot hold a redirect (JSON pages: builds, facts, symbol maps).

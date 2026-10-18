@@ -117,7 +117,7 @@ async function mustExist(s: Services, t: string, hint: string): Promise<void> {
  * exist yet: the writer is told to create them, so general knowledge gets its own page instead
  * of staying on one game's page.
  */
-function missingGeneralPages(s: Services, wikitext: string): { missing_pages?: string[]; missing_pages_hint?: string } {
+function missingGeneralPages(s: Services, wikitext: string): { missing_pages?: string[]; missing_pages_hint?: string; broken_links?: string[]; broken_links_hint?: string } {
   const created = batchContext.getStore()?.created;
   const missing = new Set<string>();
   for (const m of wikitext.matchAll(/\[\[\s*((?:Format|Platform|Library|Technique|Tool)\s*:[^\]|#\n]+)/gi)) {
@@ -129,9 +129,25 @@ function missingGeneralPages(s: Services, wikitext: string): { missing_pages?: s
     }
     if (!s.index.page(t) && !created?.has(t)) missing.add(t);
   }
-  if (!missing.size) return {};
+  // Links to facts, notes and other pages that do not exist (a fact linked under the wrong kind is a red link).
+  const broken: string[] = [];
+  for (const m of wikitext.matchAll(/\[\[\s*((?:Fact|Note|Code|Build|Software)\s*:[^\]|#\n]+)/gi)) {
+    let t: string;
+    try {
+      t = normalizeTitle(m[1]);
+    } catch {
+      continue;
+    }
+    if (s.index.page(t) || created?.has(t) || broken.some((b) => b.startsWith(`${t} `) || b === t)) continue;
+    const fact = /^Fact:(.+?)\/[^/]+\/([^/]+)$/.exec(t);
+    const near = fact ? s.index.factsNamed(fact[1], fact[2]).concat([...(created?.keys() ?? [])].filter((c) => c.startsWith(`Fact:${fact[1]}/`) && c.endsWith(`/${fact[2]}`))) : [];
+    broken.push(near.length ? `${t} (did you mean ${near[0]}?)` : t);
+  }
+  const brokenOut = broken.length ? { broken_links: broken.slice(0, 10), broken_links_hint: 'These linked pages do not exist (red links). A fact\'s title is Fact:<subject>/<kind>/<name>: the kind must be the one it was stored under.' } : {};
+  if (!missing.size) return brokenOut;
   const list = [...missing].slice(0, 10);
   return {
+    ...brokenOut,
     missing_pages: list,
     missing_pages_hint: `${list.join(', ')} ${list.length > 1 ? 'do' : 'does'} not exist yet. If you know something general about ${list.length > 1 ? 'them' : 'it'} (true beyond this subject), create ${list.length > 1 ? 'them' : 'it'} with create_page: a short page with a summary and what you found is enough, and other agents add to it. Search first in case it exists under another name.`,
   };

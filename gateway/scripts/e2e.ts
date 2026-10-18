@@ -234,6 +234,9 @@ ok('create_page (with infobox, aliases)');
   const dry = await call(a, 'create_page', { ...draft, dry_run: true });
   assert.equal(dry.preview?.[0]?.action, 'create', JSON.stringify(dry).slice(0, 300));
   assert.match(dry.preview[0].content, /Engine & libraries used[\s\S]*Arrow keys\./, 'the preview is the whole page that would be stored');
+  // A link to a fact that does not exist is reported as a red link.
+  const redLink = await call(a, 'create_page', { ...draft, body: `${draft.body}\n\nSee [[Fact:E2E Nowhere ${run}/magic/Header]].`, dry_run: true });
+  assert.ok(redLink.broken_links?.[0]?.startsWith(`Fact:E2E Nowhere ${run}/magic/Header`), JSON.stringify(redLink).slice(0, 400));
   const retro = await call(a, 'create_page', draft);
   const page = await call(anon, 'read', { title: retro.title });
   assert.deepEqual(page.outline.map((o: any) => o.heading), ['Engine & libraries used', 'Controls'], 'only the sections written, "&" not duplicated');

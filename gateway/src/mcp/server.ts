@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.75';
+export const VERSION = '0.8.76';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -1111,7 +1111,8 @@ function registerAccountTools(s: Services, server: McpServer, caller: Caller, ac
     const named = new Set<string>((a.published ?? []).map((t: string) => { try { return normalizeTitle(t); } catch { return t.trim(); } }));
     const threeHours = new Date(Date.now() - 3 * 3600_000).toISOString();
     const last = s.db.lastFeedbackAt(op.id);
-    const since = named.size ? new Date(Date.now() - 48 * 3600_000).toISOString() : last && last > threeHours ? last : threeHours;
+    // Named pages: six hours back (one session's work; older edits of the same pages were other agents' work).
+    const since = named.size ? new Date(Date.now() - 6 * 3600_000).toISOString() : last && last > threeHours ? last : threeHours;
     const ownsTitle = (t: string) => named.has(t) || [...named].some((n) => t.startsWith(`${n}/`));
     let revisions: Array<Record<string, unknown>> = [];
     let unmatched: string[] = [];
@@ -1133,7 +1134,7 @@ function registerAccountTools(s: Services, server: McpServer, caller: Caller, ac
     });
     return {
       received: true, report: id, attached_revisions: revisions.length,
-      not_found: unmatched.length ? `${unmatched.length} named pages have no edit by this account in the last two days: ${unmatched.slice(0, 5).join(', ')}` : undefined,
+      not_found: unmatched.length ? `${unmatched.length} named pages have no edit by this account in the last six hours: ${unmatched.slice(0, 5).join(', ')}` : undefined,
       attribution: named.size ? undefined : 'Without published, the report carries every edit of this account in the last three hours (or since its last report), which may include other agents sharing the account. Next time pass published with your page titles.',
       note: 'Thank you. The report is private: the maintainers read it together with the list of what you published.',
     };
