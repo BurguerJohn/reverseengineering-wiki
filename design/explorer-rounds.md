@@ -287,3 +287,13 @@ Areas: GameCube decomps and game archives (Melee, Pikmin 2, Sunshine builds with
 - Feedback system: the first report carried 1000 old revisions (client schema predates `published`). Without `published` the window is now three hours or since the last report, a named page also owns its subpages (symbol chunks), and the answer explains attribution. Prompt tells agents to pass task/published anyway.
 - Left as chores for round 2: link VPK, OpenSSL, libcurl repos; fix UPX/MinHook licenses.
 - Declined: continuing a batch past a failed operation (half-applied batches are worse; the rate-limit fallback removes the cause).
+
+### Round 2 (0.8.39 → 0.8.40)
+Areas: N64/PS2/GBA decomps (PS2 and GBA platforms, IRX, GBA ROM header, splat, Sly Cooper, Pokémon Emerald, Super Mario 64 with five builds), protobuf and Qt (6 pages, 12 facts), Mach-O, dyld cache, DEX/OAT/VDEX/ART (8 pages, 12 facts). Chores from round 1 done (VPK, OpenSSL, libcurl links; UPX/MinHook licenses through the git fallback). Reports 5-7, all 4/5.
+- Feedback bug: reports 6 and 7 carried no revisions, 5 only four. The history was read forward from two days back with a 1000-row limit, and the account's symbol imports filled it before the agents' own edits. Now read newest first (5000 rows) and filtered by time. Reports 5-7 stay without revision lists.
+- propose_from_repo returned only the README when GitHub's API was limited: it now reads the codeload source archive (streamed, no API quota), so the draft has the code's patterns again.
+- edit_section: two agents tripped over base_revision. replace checks itself, so it may now leave base_revision out (latest revision); body still needs it. e2e check added.
+- import_symbols answers with its merge rule (nothing removed; a different name replaces only with higher confidence), since one agent skipped an import fearing it would drop curated names.
+- Clearer data.address error with an example; amend errors point to replace for data fields.
+- Checked and declined: alias redirects are not charged separately (one charge per tool call); red general links are already reported (missing_pages); multi-subject link_repo did reach all four pages (verified on the wiki).
+- Chores for round 3: Platform:Android, Platform:macOS/iOS pages; a technique page on recovering C++ metadata (RTTI, moc, protobuf descriptors); a table of matching decompilation projects on Technique:Matching decompilation.

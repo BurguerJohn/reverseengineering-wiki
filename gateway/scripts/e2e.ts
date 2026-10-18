@@ -368,6 +368,11 @@ await expectError(b, 'edit_section', { title: game, section: 'Formats', body: 'S
 const sameSectionOk = await call(b, 'edit_section', { title: game, section: 'Pitfalls', body: 'Do not patch the exe while the launcher is open.', base_revision: readGame.revision, summary: 'stale base, other section' });
 assert.ok(sameSectionOk.revision, JSON.stringify(sameSectionOk));
 ok('edit_section: stale base on the same section → EDIT_CONFLICT; other sections merge');
+// replace checks itself: no base_revision needed (the latest revision); body still needs one.
+const noBase = await call(b, 'edit_section', { title: game, section: 'Pitfalls', replace: [{ old: 'while the launcher is open', new: 'while the launcher runs' }], summary: 'wording' });
+assert.ok(noBase.revision, JSON.stringify(noBase));
+await expectError(b, 'edit_section', { title: game, section: 'Pitfalls', body: 'Whole new text.', summary: 'no base' }, 'BAD_REQUEST');
+ok('edit_section: replace without base_revision applies to the latest revision; body without it is refused');
 
 // ---- review: vandalism, history, diff, revert ------------------------------------------------
 const current = await call(anon, 'read', { title: game, section: 'Formats' });

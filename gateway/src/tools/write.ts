@@ -450,10 +450,13 @@ export async function editSection(s: Services, caller: Caller, input: {
   const t = title(s, input.title, [...SUBJECTS, 'notes']);
   // Inside a batch, a page an earlier operation wrote needs no base_revision: the batch knows the one it started from.
   const fromBatch = batchContext.getStore()?.before?.get(t);
-  if (input.base_revision === undefined && fromBatch === undefined) {
-    throw new ToolError('BAD_REQUEST', 'base_revision is required: the revision you read (inside a batch it may be left out for a page an earlier operation of the batch writes).');
+  // replace checks itself (each old text must still be there), so it may go without base_revision: the latest revision.
+  const latest = input.base_revision === undefined && fromBatch === undefined && input.replace && !input.infobox
+    ? (await currentPage(s, t))?.revid : undefined;
+  if (input.base_revision === undefined && fromBatch === undefined && latest === undefined) {
+    throw new ToolError('BAD_REQUEST', 'base_revision is required with body: the revision you read (read gives it; inside a batch it may be left out for a page an earlier operation of the batch writes). replace = [{old, new}] needs no base_revision.');
   }
-  let args = { ...input, base_revision: input.base_revision ?? fromBatch! };
+  let args = { ...input, base_revision: input.base_revision ?? fromBatch ?? latest! };
   if (args.infobox || /^infobox$/i.test(args.section.trim())) return editInfobox(s, op, t, args);
   if ((args.body === undefined) === (args.replace === undefined)) {
     throw new ToolError('BAD_REQUEST', 'Give either body (the whole new section) or replace (small changes: [{old, new}]), not both.');

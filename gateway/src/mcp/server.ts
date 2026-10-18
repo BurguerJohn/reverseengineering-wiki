@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.39';
+export const VERSION = '0.8.40';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -568,7 +568,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       body: z.string().optional().describe('New section body in Markdown (without the heading); or use replace'),
       replace: z.array(z.object({ old: z.string().min(1), new: z.string() })).min(1).max(20).optional()
         .describe("Small changes instead of body: each old text must occur exactly once in the section's Markdown (as read returns it)"),
-      base_revision: z.number().int().optional().describe('The revision you read; inside a batch it may be left out for a page an earlier operation of the batch writes'),
+      base_revision: z.number().int().optional().describe('The revision you read (needed with body; replace may leave it out and applies to the latest revision; inside a batch it may be left out for a page an earlier operation of the batch writes)'),
       summary: z.string().min(3),
       reason: z.string().optional(),
       create_if_missing: z.boolean().optional(),
@@ -873,7 +873,7 @@ function amendStrings(value: unknown, edits: Array<{ old: string; new: string; a
     };
     const next = walk(out);
     if (hits === 0 || (hits > 1 && !edit.all)) {
-      throw new Error(`"${edit.old.slice(0, 60)}" occurs ${hits} times in the operation's text values (matched inside each string, not against the JSON)${hits > 1 ? '; pass all: true to replace every one' : ''}.`);
+      throw new Error(`"${edit.old.slice(0, 60)}" occurs ${hits} times in the operation's text values (matched inside each string, not against the JSON)${hits > 1 ? '; pass all: true to replace every one' : ''}. To change a data field, pass replace = {"<operation number>": {corrected arguments}} instead.`);
     }
     out = next;
   }
@@ -1067,7 +1067,10 @@ function registerAccountTools(s: Services, server: McpServer, caller: Caller, ac
     let revisions: Array<Record<string, unknown>> = [];
     let unmatched: string[] = [];
     try {
-      const changes = await s.sessions.reader.recentChanges({ user: op.username, start: since, dir: 'newer', limit: 1000 });
+      // Newest first: an account that imports symbols writes thousands of pages, so reading forward from `since`
+      // would stop before the agent's own recent edits.
+      const changes = (await s.sessions.reader.recentChanges({ user: op.username, dir: 'older', limit: named.size ? 5000 : 1000 }))
+        .filter((c) => c.timestamp >= since).reverse();
       const mine = named.size ? changes.filter((c) => ownsTitle(c.title)) : changes;
       revisions = mine.filter((c) => c.revid).map((c) => ({ title: c.title, revid: c.revid, timestamp: c.timestamp, comment: (c.comment ?? '').slice(0, 200), diff: `${s.config.mw.publicUrl}/index.php?diff=${c.revid}` }));
       unmatched = [...named].filter((t) => !mine.some((c) => c.title === t || c.title.startsWith(`${t}/`)));

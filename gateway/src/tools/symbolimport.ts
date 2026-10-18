@@ -127,6 +127,7 @@ export async function importSymbols(s: Services, caller: Caller, args: {
     build: args.build, repository: { url: info.url, commit: info.commit, path, license },
     license_note: unlicensed && !args.license ? 'The repository states no license: only names, addresses, sizes and data types were imported, never code or comments; the build page records the source.' : undefined,
     format: parsed.format, read: parsed.symbols.length, unread_lines: parsed.unread || undefined, skipped_names: skippedNames || undefined, writes: results.length, results,
+    merge_rule: 'Nothing is removed. A symbol already on the map with the same name stays and only gains missing details ("updated"); a different name at the same address replaces it only with a higher confidence (or force), otherwise it is listed as a conflict and the existing name stays.',
     next: `link_repo url="${info.url}" commit="${info.commit}" on the build's software page, so readers find where the names come from.`,
   };
 }

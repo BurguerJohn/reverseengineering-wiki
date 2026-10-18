@@ -79,7 +79,7 @@ const ADDRESS_FORMAT: Record<(typeof ADDRESS_KINDS)[number], { re: RegExp; examp
 };
 
 export function checkAddress(address: unknown): string | null {
-  if (!address || typeof address !== 'object') return 'data.address must be {kind, value}';
+  if (!address || typeof address !== 'object') return 'data.address must be an object {kind, value}, e.g. {"kind": "va", "value": "0x80003100"} (PE builds use data.rva instead)';
   const { kind, value } = address as { kind?: string; value?: string };
   const format = ADDRESS_FORMAT[kind as keyof typeof ADDRESS_FORMAT];
   if (!format) return `data.address.kind must be one of ${ADDRESS_KINDS.join(', ')} (PE builds use data.rva instead)`;
