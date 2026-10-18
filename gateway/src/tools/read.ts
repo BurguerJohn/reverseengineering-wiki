@@ -62,7 +62,7 @@ export function search(s: Services, args: { query: string; types?: string[]; sub
     const subject = args.subject ? s.index.resolveRedirect(normalizeTitle(args.subject)) : undefined;
     // Subjects by default; with a subject, everything of it (facts, notes, code, builds).
     const types = args.types?.length ? args.types : subject ? ['fact', 'notes', 'code', 'build', 'symbols', 'software', 'library', 'format', 'platform', 'technique', 'tool'] : ['software', 'library', 'format', 'platform', 'technique', 'tool'];
-    const listed = s.index.listPages(types, offset, Math.min(limit, 50), subject);
+    const listed = s.index.listPages(types, offset, Math.min(limit, 50), subject, { status: args.status, confidence: args.confidence });
     return { query: '*', types, total: listed.total, hits: listed.hits, next_cursor: offset + listed.hits.length < listed.total ? String(offset + listed.hits.length) : undefined };
   }
   const { hits, total } = s.index.search({

@@ -782,11 +782,13 @@ export class SearchIndex {
   }
 
   /** Every page of some types, by title (search with query "*"). */
-  listPages(types: string[], offset: number, limit: number, subject?: string): { hits: Array<{ title: string; type: string; summary: string; status: string | null; revision: number }>; total: number } {
+  listPages(types: string[], offset: number, limit: number, subject?: string, filters: { status?: string; confidence?: string } = {}): { hits: Array<{ title: string; type: string; summary: string; status: string | null; revision: number }>; total: number } {
     const placeholders = types.map(() => '?').join(', ');
-    // With a subject: its own pages (facts, notes, code, builds of it).
-    const where = `redirect_to is null and type in (${placeholders})${subject ? ' and (subject = ? or title = ?)' : ''}`;
-    const params = [...types, ...(subject ? [subject, subject] : [])];
+    // With a subject: its own pages (facts, notes, code, builds of it). status and confidence narrow the listing too
+    // (the "*" listing ignored them, so "facts at low confidence" listed every fact).
+    const where = `redirect_to is null and type in (${placeholders})${subject ? ' and (subject = ? or title = ?)' : ''}`
+      + `${filters.status ? ' and status = ?' : ''}${filters.confidence ? ' and title in (select title from facts where confidence = ?)' : ''}`;
+    const params = [...types, ...(subject ? [subject, subject] : []), ...(filters.status ? [filters.status] : []), ...(filters.confidence ? [filters.confidence] : [])];
     const total = (this.db.prepare(`select count(*) as n from pages where ${where}`).get(...params) as { n: number }).n;
     const hits = this.db.prepare(`select title, type, summary, status, revision from pages where ${where} order by title limit ? offset ?`)
       .all(...params, limit, offset) as any[];
