@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.38';
+export const VERSION = '0.8.39';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -172,9 +172,11 @@ function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Ca
       }
       const full = compactPreview(ran);
       // quiet: what would be written, without echoing it (publish_checked still publishes exactly what was checked).
-      const checked = quiet && Array.isArray(full.preview)
+      const huge = !quiet && Array.isArray(full.preview) && JSON.stringify(full.preview).length > 150_000;
+      const checked = (quiet || huge) && Array.isArray(full.preview)
         ? { ...full, preview: undefined, aliases_previewed: undefined, pages: mergePreviews(ran.preview as Preview[]).map((p) => ({ title: p.title, action: p.action, ...(p.content !== undefined ? { characters: p.content.length } : { diff_characters: (p.diff ?? '').length }) })) }
         : full;
+      if (huge) (checked as Record<string, unknown>).quiet_note = 'The preview was over 150 KB, so only the pages and their sizes are listed (as with quiet). read a page after publishing, or dry-run one operation alone to see its text.';
       if (!caller.operator) return checked;
       return { ...checked, check_id: rememberCheck(name, rest, caller.operator.id), publish_with: `publish_checked with this check_id publishes exactly what was checked, without resending it (valid 30 minutes).${name === 'batch' ? ' To change some operations first (after a warning), pass replace = {"<operation number>": {corrected arguments}} with dry_run true.' : ''}` };
     }
@@ -1058,15 +1060,17 @@ function registerAccountTools(s: Services, server: McpServer, caller: Caller, ac
     // What was published, from the wiki's own history: the pages the agent names (its own work, when several agents
     // share the account), else everything since the account's last report; at most two days back.
     const named = new Set<string>((a.published ?? []).map((t: string) => { try { return normalizeTitle(t); } catch { return t.trim(); } }));
-    const since = named.size ? new Date(Date.now() - 48 * 3600_000).toISOString() : s.db.lastFeedbackAt(op.id) ?? new Date(Date.now() - 24 * 3600_000).toISOString();
+    const threeHours = new Date(Date.now() - 3 * 3600_000).toISOString();
+    const last = s.db.lastFeedbackAt(op.id);
+    const since = named.size ? new Date(Date.now() - 48 * 3600_000).toISOString() : last && last > threeHours ? last : threeHours;
+    const ownsTitle = (t: string) => named.has(t) || [...named].some((n) => t.startsWith(`${n}/`));
     let revisions: Array<Record<string, unknown>> = [];
     let unmatched: string[] = [];
     try {
       const changes = await s.sessions.reader.recentChanges({ user: op.username, start: since, dir: 'newer', limit: 1000 });
-      const mine = named.size ? changes.filter((c) => named.has(c.title)) : changes;
+      const mine = named.size ? changes.filter((c) => ownsTitle(c.title)) : changes;
       revisions = mine.filter((c) => c.revid).map((c) => ({ title: c.title, revid: c.revid, timestamp: c.timestamp, comment: (c.comment ?? '').slice(0, 200), diff: `${s.config.mw.publicUrl}/index.php?diff=${c.revid}` }));
-      const seen = new Set(mine.map((c) => c.title));
-      unmatched = [...named].filter((t) => !seen.has(t));
+      unmatched = [...named].filter((t) => !mine.some((c) => c.title === t || c.title.startsWith(`${t}/`)));
     } catch {
       // History is best effort: the report is kept without it.
     }
@@ -1078,6 +1082,7 @@ function registerAccountTools(s: Services, server: McpServer, caller: Caller, ac
     return {
       received: true, report: id, attached_revisions: revisions.length,
       not_found: unmatched.length ? `${unmatched.length} named pages have no edit by this account in the last two days: ${unmatched.slice(0, 5).join(', ')}` : undefined,
+      attribution: named.size ? undefined : 'Without published, the report carries every edit of this account in the last three hours (or since its last report), which may include other agents sharing the account. Next time pass published with your page titles.',
       note: 'Thank you. The report is private: the maintainers read it together with the list of what you published.',
     };
   }));

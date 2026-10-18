@@ -53,6 +53,8 @@ export function renderWarnings(markdown: string | undefined): string[] {
   if (doubled) out.push(`Code here has two backslashes in a row (${doubled.slice(0, 60).replace(/\n/g, ' ')}): in Markdown code a backslash is literal, so it renders as two. Write one (Mods\\Plugins); only the JSON string escapes it.`);
   const prose = markdown.replace(CODE, '');
   if (/\\n|\\t/.test(prose)) out.push('The text has a literal "\\n" or "\\t": an escaped line break arrived as two characters (escaped twice?). Send real line breaks.');
+  const emphasis = /(?:^|[\s(,])(_{1,2}[A-Za-z]\w*|[A-Za-z]\w*_\*)/m.exec(prose.replace(/https?:\/\/\S+/g, ''));
+  if (emphasis) out.push(`"${emphasis[1]}" outside backticks: Markdown reads leading underscores and _* as italics or bold. Put identifiers in backticks (\`${emphasis[1]}\`).`);
   return out;
 }
 
@@ -1047,7 +1049,7 @@ export async function linkRepo(s: Services, caller: Caller, args: {
   if (args.license && (['none', 'unknown', 'NOASSERTION'].includes(info.license) || info.license.startsWith('unrecognized'))) {
     // An SPDX id or expression: "MIT", "Apache-2.0 WITH LLVM-exception", "(MIT OR Apache-2.0)".
     if (!SPDX_EXPRESSION.test(args.license.trim())) {
-      throw new ToolError('BAD_REQUEST', 'license must be an SPDX id or expression, e.g. MIT, GPL-2.0-only, "Apache-2.0 WITH LLVM-exception" or "MIT OR Apache-2.0".');
+      throw new ToolError('BAD_REQUEST', 'license must be an SPDX id or expression, e.g. MIT, GPL-2.0-only, "Apache-2.0 WITH LLVM-exception", "MIT OR Apache-2.0", or for a custom exception "GPL-2.0-or-later WITH LicenseRef-UPX-exception".');
     }
     const file = /^unrecognized \(([^)]+)\)/.exec(info.license)?.[1];
     info.license = `${args.license} (declared by the contributor; GitHub's detector did not recognize ${file ?? 'a license file'})`;
@@ -1099,6 +1101,7 @@ export async function linkRepo(s: Services, caller: Caller, args: {
     repository: info, warnings: [info.license.startsWith('unrecognized') ? `GitHub did not recognize the license file ${info.license.slice(14, -1)}.${info.licenseHint ? ` It names "${info.licenseHint}".` : ''} Read it and run link_repo again with license (its SPDX id or expression): the entry is replaced.${info.licenseHint ? ' (In a dry run: pass license in the real call and no second call is needed.)' : ''}` : null,
       info.license === 'none' ? 'GitHub detected no license. If the repository has a license file or license headers, run link_repo again with license (its SPDX id, e.g. "Zlib"): the entry is replaced. Without a license, agents cannot legally reuse it.' : null,
       info.binaryReleaseAssets ? 'Release contains binaries; they are flagged, not linked.' : null,
+      info.limited ? 'GitHub\'s API limit was reached, so the commit came from git and the license from the repository\'s license file; the archive state and last activity are unknown. Pass license if the one shown is wrong.' : null,
       info.archived ? `The repository is archived (read-only${info.lastCommit ? `, last activity ${info.lastCommit.slice(0, 10)}` : ''}): its successor, if any, may be worth linking too.` : null].filter(Boolean),
   });
 }

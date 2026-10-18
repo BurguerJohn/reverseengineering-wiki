@@ -13,6 +13,8 @@ export interface RepoInfo {
   binaryReleaseAssets: boolean;
   /** An SPDX expression found in a license file GitHub did not recognize: a hint, never applied on its own. */
   licenseHint?: string;
+  /** GitHub's API was rate-limited: commit and license come from git and the repository's files, archive state is unknown. */
+  limited?: boolean;
 }
 
 /** An SPDX id or expression: "MIT", "Apache-2.0 WITH LLVM-exception", "(MIT OR Apache-2.0)". */
@@ -34,7 +36,9 @@ export function licenseHint(text: string): string | undefined {
   const KNOWN_TEXTS: Array<[RegExp, string]> = [
     [/This is free and unencumbered software released into the public domain/i, 'Unlicense'],
     [/Boost Software License - Version 1\.0/i, 'BSL-1.0'],
-    [/Permission is granted to anyone to use this software for any purpose, including commercial applications, and to alter it and redistribute it freely/i, 'Zlib'],  ];
+    [/Permission is granted to anyone to use this software for any purpose, including commercial applications, and to alter it and redistribute it freely/i, 'Zlib'],
+    [/Permission is hereby granted, free of charge, to any person obtaining a copy of this software/i, 'MIT'],
+    [/Apache License,? Version 2\.0/i, 'Apache-2.0'],  ];
   return KNOWN_TEXTS.find(([re]) => re.test(flat))?.[1];
 }
 
@@ -56,7 +60,11 @@ export async function repoRootFiles(url: string, commit: string): Promise<string
 async function getJson(url: string, headers: Record<string, string> = {}): Promise<any> {
   const response = await fetch(url, { headers: { 'User-Agent': 'REWikiGateway/0.1', Accept: 'application/json', ...headers } });
   if (response.status === 404) throw new ToolError('NOT_FOUND', 'Repository not found or not public.');
-  if (response.status === 403 || response.status === 429) throw new ToolError('RATE_LIMITED', 'Repository host rate limit reached. Try again later.');
+  if (response.status === 403 || response.status === 429) {
+    const reset = Number(response.headers.get('x-ratelimit-reset') ?? 0);
+    const minutes = reset ? Math.max(1, Math.ceil((reset * 1000 - Date.now()) / 60_000)) : 0;
+    throw new ToolError('RATE_LIMITED', `Repository host rate limit reached. ${minutes ? `It resets in about ${minutes} minutes.` : 'Try again later.'}`, minutes ? { retry_after_minutes: minutes } : undefined);
+  }
   if (!response.ok) throw new ToolError('UPSTREAM_ERROR', `Repository host answered HTTP ${response.status}.`);
   return response.json();
 }
@@ -77,10 +85,54 @@ export function parseRepoUrl(raw: string): { host: 'github' | 'gitlab' | 'codebe
   return { host: kind, owner, repo, url: `https://${host}/${owner}/${repo}` };
 }
 
+// Several agents link the same repositories: one answer per repository and commit for six hours.
+const REPO_CACHE = new Map<string, { at: number; info: RepoInfo }>();
+const REPO_TTL_MS = 6 * 3600_000;
+
 export async function resolveRepo(raw: string, commit?: string): Promise<RepoInfo> {
   const r = parseRepoUrl(raw);
   if (commit && !/^[0-9a-f]{7,40}$/i.test(commit)) throw new ToolError('BAD_REQUEST', 'commit must be a hex SHA.');
+  const key = `${r.url}|${commit?.toLowerCase() ?? ''}`;
+  const hit = REPO_CACHE.get(key);
+  if (hit && Date.now() - hit.at < REPO_TTL_MS) return { ...hit.info };
+  let info: RepoInfo;
+  try {
+    info = await resolveFresh(r, commit);
+  } catch (error) {
+    // GitHub's API allows 60 calls an hour without a token: git and the raw files are not counted.
+    if (!(error instanceof ToolError) || error.code !== 'RATE_LIMITED' || r.host !== 'github') throw error;
+    info = await resolveWithoutApi(r, commit);
+  }
+  if (REPO_CACHE.size > 2000) REPO_CACHE.delete(REPO_CACHE.keys().next().value!);
+  REPO_CACHE.set(key, { at: Date.now(), info });
+  if (!commit) REPO_CACHE.set(`${r.url}|${info.commit}`, { at: Date.now(), info });
+  return { ...info };
+}
 
+/** The commit from git's own HTTP protocol, the license from the repository's files: no API call. */
+async function resolveWithoutApi(r: ReturnType<typeof parseRepoUrl>, commit?: string): Promise<RepoInfo> {
+  let sha = commit?.toLowerCase();
+  if (!sha) {
+    const refs = await fetch(`https://github.com/${r.owner}/${r.repo}.git/info/refs?service=git-upload-pack`, { headers: { 'User-Agent': 'git/2.40 REWikiGateway' } });
+    if (refs.status === 404 || refs.status === 401) throw new ToolError('NOT_FOUND', 'Repository not found or not public.');
+    if (!refs.ok) throw new ToolError('RATE_LIMITED', 'Repository host rate limit reached. Try again later.');
+    const head = /([0-9a-f]{40}) HEAD/.exec(await refs.text());
+    if (!head) throw new ToolError('RATE_LIMITED', 'Repository host rate limit reached. Try again later.');
+    sha = head[1];
+  }
+  let license = 'unknown';
+  let hint: string | undefined;
+  for (const name of ['LICENSE', 'LICENSE.txt', 'LICENSE.md', 'COPYING', 'LICENCE', 'LICENSE.TXT', 'COPYING.txt', 'UNLICENSE']) {
+    const res = await fetch(`https://raw.githubusercontent.com/${r.owner}/${r.repo}/${sha}/${name}`, { headers: { 'User-Agent': 'REWikiGateway/0.1' } });
+    if (!res.ok) continue;
+    hint = licenseHint((await res.text()).slice(0, 20000));
+    license = hint ? `${hint} (read from ${name}; GitHub's API was busy)` : `unrecognized (${name})`;
+    break;
+  }
+  return { url: r.url, commit: sha, license, archived: false, lastCommit: null, binaryReleaseAssets: false, licenseHint: hint, limited: true };
+}
+
+async function resolveFresh(r: ReturnType<typeof parseRepoUrl>, commit?: string): Promise<RepoInfo> {
   if (r.host === 'github') {
     const headers: Record<string, string> = process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {};
     const api = `https://api.github.com/repos/${r.owner}/${r.repo}`;
