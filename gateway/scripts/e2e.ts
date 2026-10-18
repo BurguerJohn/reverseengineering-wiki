@@ -1216,6 +1216,9 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   ] });
   const oneLeft = await call(a, 'publish_checked', { check_id: twoNotes.check_id, dry_run: true, replace: { 2: null } });
   assert.equal(oneLeft.operations, 1, JSON.stringify(oneLeft).slice(0, 300));
+  // A change without dry_run is checked again, not published: a new check_id comes back.
+  const rechecked = await call(a, 'publish_checked', { check_id: twoNotes.check_id, replace: { 2: null } });
+  assert.ok(rechecked.check_id && rechecked.check_id !== twoNotes.check_id && rechecked.operations === 1, JSON.stringify(rechecked).slice(0, 300));
   const swapped = await call(a, 'publish_checked', { check_id: twoNotes.check_id, dry_run: true, replace: { 2: { tool: 'ask', arguments: { subject: `Format:E2E Track ${run}`, question: 'Is the fictional dropped note needed at all?' } } } });
   assert.ok(!swapped.error && swapped.operations === 2 && JSON.stringify(swapped).includes('"ask"'), JSON.stringify(swapped).slice(0, 400));
 

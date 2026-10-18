@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.74';
+export const VERSION = '0.8.75';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -337,7 +337,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       build: z.string().optional().describe('Restrict facts to one Build: page'),
       status: z.enum(['claimed', 'verified', 'disputed', 'rejected', 'deprecated', 'broken', 'open']).optional(),
       confidence: z.enum(['low', 'medium', 'high']).optional().describe('Only facts at this confidence (low and medium ones are worth checking)'),
-      checkable: z.boolean().optional().describe('With query "*": only facts whose evidence names a repository (checkable by reading it)'),
+      checkable: z.union([z.boolean(), z.enum(['true', 'false'])]).optional().describe('With query "*": only facts whose evidence names a repository (checkable by reading it)'),
       limit: z.number().int().min(1).max(50).optional(),
       cursor: z.string().optional().describe('next_cursor from the previous page'),
       match: z.enum(['all', 'any']).optional().describe('all (default): every term must match. any: pages with any of the terms, noisier'),
@@ -784,7 +784,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('publish_checked', {
     title: 'Publish what a dry run checked',
-    description: 'Publish exactly what a dry run (of any write tool or batch) checked, by its check_id, without resending (two hours, same account). Safe to retry after a lost answer: a used check_id returns what it published. replace changes fields of batch operations; amend fixes small texts. Without dry_run it publishes at once (also after replace or amend); with dry_run true it checks again first.',
+    description: 'Publish exactly what a dry run (of any write tool or batch) checked, by its check_id, without resending (two hours, same account). Safe to retry after a lost answer: a used check_id returns what it published. replace changes fields of batch operations; amend fixes small texts. Without changes it publishes at once. With replace, amend or append it checks the changed version first and returns a new check_id to publish (dry_run false publishes the changes at once).',
     inputSchema: { check_id: z.string(), dry_run: DRY_RUN,
       replace: z.record(z.string(), z.union([z.record(z.string(), z.unknown()), z.null()])).optional().describe('Batches only: {"3": {fields to change}} keeps the tool and the other fields (a field set to null is removed), {"3": {tool, arguments}} swaps the whole operation, {"3": null} drops it'),
       quiet: z.boolean().optional().describe('With dry_run: list the pages without their contents'),
@@ -877,7 +877,11 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       }
       if (ops) args = { ...args, operations: ops };
     }
-    const result = await handlers.get(tool)!({ ...args, ...(a.dry_run ? { dry_run: true, ...(a.quiet ? { quiet: true } : {}) } : {}), ...(a.review_id ? { review_id: a.review_id } : {}) }, extra);
+    // Changed operations are checked again before they are published (agents kept publishing a fix they meant to
+    // check): replace, amend or append without dry_run make a dry run with a new check_id; dry_run false publishes now.
+    const changed = !!((a.replace && Object.keys(a.replace).length) || (a.amend && Object.keys(a.amend).length) || (Array.isArray(a.append) && a.append.length));
+    const dry = a.dry_run ?? changed;
+    const result = await handlers.get(tool)!({ ...args, ...(dry ? { dry_run: true, ...(a.quiet ? { quiet: true } : {}) } : {}), ...(a.review_id ? { review_id: a.review_id } : {}) }, extra);
     for (const id of a.merge ?? []) if (!result.isError && !a.dry_run) { const other = CHECKED.get(String(id)); if (other) other.published = result; }
     if (!result.isError && !a.dry_run) checked.published = result;
     return result;

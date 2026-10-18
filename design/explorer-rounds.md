@@ -495,3 +495,8 @@ Areas: reccmp-based Win32 decompilations (Tool:Reccmp; LEGO Island 1.1 with ISLE
 Areas: overlay symbols recovered by re-import (Paper Mario US +9,639, JP +1,079, PAL +1,156, iQue +1,165; the other splat projects had nothing lost); fact sweep of the 10 low and 7 medium facts (13 confirmed, 5 partial, 0 corrected; confidence raised on 12); Apple app data (BOM, Assets.car, NIBArchive, NSKeyedArchiver, Core Data (from general knowledge, marked Unverified), Tool:Asset Catalog Tinkerer; 9 facts). Reports 92-94, all 4/5.
 - import_symbols reports totals over all its writes (added, updated, conflicts), so a re-import says what it kept.
 - The sweep could not tell checkable facts from game-binary facts with no public source: the "*" listing takes checkable (facts whose evidence names a repository; the facts table is rebuilt once with that column).
+
+### Round 32 (0.8.74 → 0.8.75)
+Areas: Valve KeyValues and Steam client data (Format:KeyValues1 (VDF, ACF), Format:Steam appinfo and packageinfo, Format:Steam depot manifest, Format:Steam client data files, Library:ValveKeyValue; 4 facts); fact sweep of 18 medium facts (15 confirmed, 11 raised to high, 3 partial, 0 refuted; SWF FileAttributes completed with bit 0); HTML5 engines (Library:NW.js, PixiJS, Phaser, PlayCanvas, GDevelop, Construct, Format:RPG Maker MV encrypted assets (header recognition only), Technique:Identifying HTML5 game engines; 8 facts). Reports 95-97.
+- An agent published with publish_checked replace when it meant to check the fix: replace, amend or append now check the changed version first and return a new check_id (dry_run false publishes at once).
+- checkable sent as the string "true" was refused: the search accepts "true"/"false" too.
