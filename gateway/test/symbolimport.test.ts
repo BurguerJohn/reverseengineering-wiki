@@ -32,7 +32,7 @@ test('decomp-toolkit symbols.txt', () => {
   assert.equal(r.format, 'linker');
   assert.deepEqual(r.symbols[0], { va: '0x802BEE24', name: 'decodeSZS__9JKRDecompFPUcPUcUlUl', kind: 'function', size: 0xE4 });
   assert.equal(r.symbols[1].kind, 'global');
-  assert.equal(r.symbols.length, 3);
+  assert.equal(r.symbols.length, 4);
 });
 
 test('nm output and address/name pairs', () => {
