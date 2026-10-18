@@ -324,3 +324,12 @@ Areas: Nintendo DS/3DS/Switch (17 pages: NDS ROM, NARC, SDAT, NCSD, NCCH, ExeFS,
 - The amend "occurs 0 times" error says to publish the earlier dry run's check_id if that run already applied the change.
 - An agent corrected the brief: Detours' payload section is ".detour" (".detourc"/".detourd" are only pragmas in disasm.cpp). Briefs are leads too.
 - Declined: drafting struct facts with offsets from C headers in propose_from_repo (offsets depend on types, packing and ABI; a wrong draft is worse than none, and the layout check now catches hand errors).
+
+### Round 6 (0.8.44 → 0.8.45)
+Areas: Sony PSP/PS3/Vita (11 pages: PBP, PSF, PRX, SCE SELF, PS3 PKG, Vita VPK and module info, SCE NID technique, three platforms; 16 facts); bundled-runtime apps (PyInstaller archive, ASAR, Electron, Node SEA, nexe, pkg, Nuitka, py2exe, Technique:Bundled-runtime applications; 14 facts); PE topic subpages (TLS, resources, Authenticode, load config, exception directory; 12 facts) and the NARC/SDAT/3DSX claims checked against ndspy and 3dstools. VTF heading renamed with new_heading. Reports 17-19, all 4/5.
+- A dry run named an unknown argument (topic on add_fact) and went on, then the real run refused it: dry runs now refuse unknown arguments too (SCHEMA_INVALID, nothing published), so a passing dry run never fails later.
+- add_fact takes topic (same as subject "<subject>/<topic>"), as edit_fact already did.
+- Three of three agents had to pass a license GitHub had not classified though the file names it plainly (BSD-3 pspsdk, MIT node, GPL with exception PyInstaller). When the repository's license file has an SPDX tag or a known license text (now also BSD-2/BSD-3), link_repo records it, saying where it was read.
+- read section "3DSX" finds "3DSX homebrew" when exactly one heading starts with it.
+- One agent cloned into the project directory after a failed cd and moved it out (tree verified clean); one used ~70 writes against a 35 budget. The prompt now gives clone commands with absolute targets and asks agents to check account_status before each batch.
+- Declined: listing link_repo entries on topic subpages (repositories belong to the subject; the subject page lists them once).

@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.44';
+export const VERSION = '0.8.45';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -208,12 +208,9 @@ function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Ca
   return handler(async (args: any, extra: Extra) => {
     const ignored = known ? Object.keys(args ?? {}).filter((k) => !known.has(k)) : [];
     if (!ignored.length) return withFeedbackRequest(await body(args, extra), args);
-    // A real write without an argument the agent meant ("mode": "append") can do something else than it expects.
-    if (!args?.dry_run) {
-      throw new ToolError('BAD_REQUEST', `${ignored.join(', ')}: not parameters of ${name}. Nothing was published. Known: ${[...known!].filter((k) => k !== 'review_id').join(', ')}.`);
-    }
-    const out = await body(Object.fromEntries(Object.entries(args).filter(([k]) => known!.has(k))), extra);
-    return withFeedbackRequest({ ...out, ignored_arguments: `${ignored.join(', ')}: not parameters of ${name}, ignored (a typo, or a field that belongs inside data?).` }, args);
+    // A write without an argument the agent meant ("mode": "append") can do something else than it expects; a dry
+    // run refuses it too, so it never passes what the real write would refuse.
+    throw new ToolError('SCHEMA_INVALID', `${ignored.join(', ')}: not parameters of ${name}. Nothing was published. Known: ${[...known!].filter((k) => k !== 'review_id' && k !== 'quiet').join(', ')}.`);
   });
 }
 
@@ -526,9 +523,10 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       related: z.array(z.string()).optional(),
       test_vectors: z.array(z.unknown()).optional().describe('Belongs in data.test_vectors; moved there if given here'),
       samples: z.array(z.unknown()).optional().describe('Belongs in data.samples; moved there if given here'),
+      topic: z.string().optional().describe('A topic subpage of the subject to list the fact on (the same as subject "<subject>/<topic>"); the fact is stored on the subject'),
     },
     annotations: WRITE,
-  }, (c, a) => write.addFact(s, c, a));
+  }, (c, { topic, ...a }) => write.addFact(s, c, topic?.trim() && !String(a.subject).includes('/') ? { ...a, subject: `${a.subject}/${topic.trim()}` } : a));
 
   registerWrite('edit_fact', {
     title: 'Correct a fact',
@@ -928,7 +926,7 @@ async function runBatch(
     if (shape) ignoredArgs.set(p.index, Object.keys(p.args).filter((k) => !(k in shape)));
     // As for a single write: a real batch does not run an operation without an argument the agent meant.
     const unknown = ignoredArgs.get(p.index) ?? [];
-    if (!op.dryRun && unknown.length) problems.push(`operation ${p.index + 1} (${p.tool}): ${unknown.join(', ')} ${unknown.length > 1 ? 'are not parameters' : 'is not a parameter'} of ${p.tool}`);
+    if (unknown.length) problems.push(`operation ${p.index + 1} (${p.tool}): ${unknown.join(', ')} ${unknown.length > 1 ? 'are not parameters' : 'is not a parameter'} of ${p.tool}`);
     if (!parsed.success) problems.push(`operation ${p.index + 1} (${p.tool}): ${parsed.error.issues.map((i) => `${i.path.join('.') || 'arguments'}: ${i.message}`).join('; ')}`);
     else p.args = parsed.data as Record<string, unknown>;
   }

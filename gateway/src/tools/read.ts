@@ -8,7 +8,7 @@ import type { Evidence } from '../index/identifiers.ts';
 import {
   normalizeTitle, validateTitle, typeOfTitle, isTopicPage, subjectRoot, CONTENT_NAMESPACE_IDS, NAMESPACES, SUBJECT_TYPES, TitleError, type SubjectType,
 } from '../wiki/titles.ts';
-import { parseSections, findSection, parseInfobox, splitInfobox, wikitextToMarkdown, sectionBlock } from '../wiki/wikitext.ts';
+import { parseSections, findSection, parseInfobox, splitInfobox, wikitextToMarkdown, sectionBlock, headingKey } from '../wiki/wikitext.ts';
 import { parseCodePage, suggestedSections, wordCount, TOPIC_SPLIT_WORDS, type FactDoc } from '../wiki/pages.ts';
 import type { SymbolRow } from '../index/index.ts';
 import { DUMP_KINDS, listDumps } from '../dumps.ts';
@@ -432,7 +432,9 @@ export async function read(s: Services, args: { title: string; section?: string;
   let body: string;
   let sectionName: string | undefined;
   if (args.section !== undefined && args.section !== '') {
-    const sec = findSection(sections, args.section);
+    // "3DSX" for "3DSX homebrew": a heading that starts with what was asked, when only one does.
+    const starts = sections.filter((x) => x.level > 0 && headingKey(x.heading).startsWith(headingKey(args.section!)));
+    const sec = findSection(sections, args.section) ?? (starts.length === 1 ? starts[0] : undefined);
     if (!sec) throw new ToolError('NOT_FOUND', `No section "${args.section}".`, { outline });
     sectionName = sec.level === 0 ? 'Summary' : sec.heading;
     body = sec.level === 0 ? wikitextToMarkdown(splitInfobox(sec.text).rest) : wikitextToMarkdown(sec.body);

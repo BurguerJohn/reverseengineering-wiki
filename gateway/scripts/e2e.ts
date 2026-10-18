@@ -376,7 +376,7 @@ ok('edit_section: replace without base_revision applies to the latest revision; 
 const appended = await call(b, 'edit_section', { title: game, section: 'Pitfalls', body: 'Keep a backup of the save folder.', append: true, summary: 'one more pitfall' });
 const afterAppend = await call(b, 'read', { title: game, section: 'Pitfalls' });
 assert.ok(appended.revision && /launcher runs/.test(JSON.stringify(afterAppend)) && /backup of the save folder/.test(JSON.stringify(afterAppend)), JSON.stringify(afterAppend).slice(0, 400));
-await expectError(b, 'edit_section', { title: game, section: 'Pitfalls', body: 'x', mode: 'append', summary: 'unknown argument' }, 'BAD_REQUEST');
+await expectError(b, 'edit_section', { title: game, section: 'Pitfalls', body: 'x', mode: 'append', summary: 'unknown argument' }, 'SCHEMA_INVALID');
 ok('edit_section append keeps the section and adds to it; an unknown argument stops a real write');
 const renamed = await call(b, 'edit_section', { title: game, section: 'Pitfalls', new_heading: 'Pitfalls (`SAVE_*` files)', summary: 'rename' });
 const renamedRead = await call(b, 'read', { title: game, section: 'Pitfalls (`SAVE_*` files)' });
@@ -1099,7 +1099,7 @@ An NE executable, see [[Format:E2E NE ${run}]] and [[Software:${cave}]].`, dry_r
   const strayBatch = await call(a, 'batch', { operations: [{ tool: 'add_note', arguments: { subject: `Format:E2E Track ${run}`, body: 'A fictional note with a stray argument.', confidence: 'low', notes_extra: 'typo' } }] });
   assert.match(strayBatch.message ?? '', /notes_extra is not a parameter of add_note/, JSON.stringify(strayBatch).slice(0, 400));
   const stray = await call(a, 'add_note', { subject: `Format:E2E Track ${run}`, body: 'Another fictional note with a stray argument.', confidence: 'low', data_samples_note: 'x', dry_run: true });
-  assert.match(stray.ignored_arguments ?? '', /data_samples_note/, JSON.stringify(stray).slice(0, 400));
+  assert.ok(stray.error === 'SCHEMA_INVALID' && /data_samples_note/.test(stray.message ?? ''), JSON.stringify(stray).slice(0, 400));
   // A versioned ELF import is found by its bare name and its version node.
   await call(a, 'add_fact', { kind: 'identification', subject: `Format:E2E Track ${run}`, claim: `Fictional track players import \`e2e${run}_start_main@E2ETRK_2.34\` since 2.34.`, scope: { level: 'format', applies_to: 'all versions' },
     data: { method: 'import', indicator: `e2e${run}_start_main@E2ETRK_2.34` }, evidence: [{ type: 'documentation', detail: 'fictional' }], confidence: 'low' });

@@ -38,7 +38,10 @@ export function licenseHint(text: string): string | undefined {
     [/Boost Software License - Version 1\.0/i, 'BSL-1.0'],
     [/Permission is granted to anyone to use this software for any purpose, including commercial applications, and to alter it and redistribute it freely/i, 'Zlib'],
     [/Permission is hereby granted, free of charge, to any person obtaining a copy of this software/i, 'MIT'],
-    [/Apache License,? Version 2\.0/i, 'Apache-2.0'],  ];
+    [/Apache License,? Version 2\.0/i, 'Apache-2.0'],
+    [/Redistribution and use in source and binary forms[\s\S]*Neither the name/i, 'BSD-3-Clause'],
+    [/Redistribution and use in source and binary forms/i, 'BSD-2-Clause'],
+  ];
   return KNOWN_TEXTS.find(([re]) => re.test(flat))?.[1];
 }
 
@@ -157,6 +160,8 @@ async function resolveFresh(r: ReturnType<typeof parseRepoUrl>, commit?: string)
           license = `unrecognized (${file.name})`;
           const body = await getJson(`${api}/contents/${encodeURIComponent(file.name)}?ref=${c.sha}`, headers) as { content?: string; encoding?: string };
           if (body.encoding === 'base64' && body.content) hint = licenseHint(Buffer.from(body.content, 'base64').toString('utf8').slice(0, 20000));
+          // The file names its license clearly (an SPDX tag or a known text): recorded, and said where it comes from.
+          if (hint) license = `${hint} (read from ${file.name}; GitHub's detector did not classify it)`;
         }
       } catch {
         // Listing failed: keep "none".
