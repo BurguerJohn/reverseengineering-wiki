@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.61';
+export const VERSION = '0.8.62';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -574,7 +574,8 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       section: z.string().describe('Heading, "Summary" for the lead, or "Infobox" with infobox'),
       infobox: z.record(z.string(), z.string()).optional().describe('With section "Infobox": fields to set (an empty string removes one); the others stay'),
       body: z.string().optional().describe('New section body in Markdown (without the heading); or use replace'),
-      append: z.boolean().optional().describe('With body: add it after what the section has now instead of replacing it (no base_revision needed)'),
+      // A string append is the text to add (agents write it that way); "true"/"false" are read as booleans.
+      append: z.union([z.boolean(), z.string()]).optional().describe('true with body: add body after what the section has now instead of replacing it (no base_revision needed); a text here is added the same way'),
       new_heading: z.string().optional().describe('Rename the section (alone, or with body, replace or append); Markdown backticks allowed'),
       replace: z.array(z.object({ old: z.string().min(1), new: z.string() })).min(1).max(20).optional()
         .describe("Small changes instead of body: each old text must occur exactly once in the section's Markdown (as read returns it)"),

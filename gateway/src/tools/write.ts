@@ -452,6 +452,13 @@ export async function editSection(s: Services, caller: Caller, input: {
 }) {
   const op = requireWriter(s, caller);
   const t = title(s, input.title, [...SUBJECTS, 'notes']);
+  // append given as text: that text is what to add.
+  const rawAppend = (input as { append?: boolean | string }).append;
+  if (typeof rawAppend === 'string') {
+    if (/^(?:true|false)$/i.test(rawAppend.trim())) input = { ...input, append: /^true$/i.test(rawAppend.trim()) };
+    else if (input.body === undefined) input = { ...input, body: rawAppend, append: true };
+    else throw new ToolError('BAD_REQUEST', 'append is true or false; the text to add goes in body.');
+  }
   input = { ...input, summary: input.summary?.trim() || `Edit ${input.new_heading ? `heading of ${input.section}` : input.section}` };
   // Only a new heading: the body stays as it is (a replace without changes, which needs no base_revision).
   if (input.new_heading !== undefined && input.body === undefined && input.replace === undefined) input = { ...input, replace: [] };
@@ -1136,7 +1143,7 @@ export async function linkRepo(s: Services, caller: Caller, args: {
     repository: info, warnings: [info.license.startsWith('unrecognized') ? `GitHub did not recognize the license file ${info.license.slice(14, -1)}.${info.licenseHint ? ` It names "${info.licenseHint}".` : ''} Read it and run link_repo again with license (its SPDX id or expression): the entry is replaced.${info.licenseHint ? ' (In a dry run: pass license in the real call and no second call is needed.)' : ''}` : null,
       info.license === 'none' ? 'GitHub detected no license. If the repository has a license file or license headers, run link_repo again with license (its SPDX id, e.g. "Zlib"): the entry is replaced. Without a license, agents cannot legally reuse it.' : null,
       info.binaryReleaseAssets ? 'The latest release has binary downloads: the wiki links the source repository only, never the release files.' : null,
-      info.limited ? 'GitHub\'s API limit was reached, so the commit came from git and the license from the repository\'s license file; the archive state and last activity are unknown. Pass license if the one shown is wrong.' : null,
+      info.limited ? `Linked; GitHub's API was busy, so the commit came from git and the license from ${/read from/.test(info.license) ? 'the license file' : 'nowhere (none found)'}. Nothing to do unless the license shown is wrong (then pass license).` : null,
       info.archived ? `The repository is archived (read-only${info.lastCommit ? `, last activity ${info.lastCommit.slice(0, 10)}` : ''}): its successor, if any, may be worth linking too.` : null].filter(Boolean),
   });
 }
