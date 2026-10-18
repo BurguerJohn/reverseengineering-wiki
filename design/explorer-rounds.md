@@ -469,3 +469,9 @@ Areas: Switch decompilations (Software pages for Breath of the Wild and Super Ma
 - BotW's 72,319-name function list exceeded the 50,000-symbol import limit: raised to 150,000 (one write per 5,000).
 - A section body that repeated the page's following headings nested them a level down (Technique:Matching decompilation lost three level-2 sections; restored by a maintenance edit). edit_section now refuses a body containing another section's heading.
 - API function tables (JNI's JNINativeInterface) can be vtable facts with data.api.
+
+### Round 28 (0.8.67 → 0.8.68)
+Areas: Breath of the Wild's 72,278 function names imported into the 1.5.0 build (15 writes), the nx-decomp-tools quality letters settled (O matching, m equivalent, M non-matching, W WIP, U not decompiled, L library), Minecraft: Nintendo Switch Edition 1.0.17 build with 21,104 function names (names only); a second verification sweep (about 20 claims: 18 confirmed, 2 corrected: Dart arm64 x15 is the stack pointer and x26 the thread, ONNX Runtime's DirectML provider is static; 6 left open with the reason); Technique:Choosing a decompiler with 17 new Tool pages and a Decompilers section on eight format pages. Reports 83-85, all 4/5.
+- CSV imports reported nameless rows as "unread lines", which read like failures: they are now "rows without a name, skipped".
+- Considered and kept: "Tool:Ghidra" suspected as a duplicate of "Tool:Ghidra Function ID" (contained names also catch real duplicates such as Wii / Nintendo Wii; confirm_new with a justification settles it).
+- Chore for round 29: link_repo GRAnimated/MinecraftLCE (a hand-written Repo line is on the Software page).
