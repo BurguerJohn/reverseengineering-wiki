@@ -805,7 +805,9 @@ export class SearchIndex {
       const inner = /\(([^)]*)\)\s*$/.exec(base)?.[1]?.trim();
       if (base === n) out.push({ title, via: 'title' });
       else if (outer === n || inner === n) out.push({ title, via: 'short name' });
-      else if (new RegExp(`(?:^|[\\s(/-])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[\\s)/-])`).test(base) || base.startsWith(`${n} `)) out.push({ title, via: 'similar title' });
+      else if (new RegExp(`(?:^|[\\s(/-])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[\\s)/-])`).test(base) || base.startsWith(`${n} `)
+        // "Rust" for Rustc, "curl" for libcurl: the name with a short suffix or a lib prefix.
+        || (n.length >= 3 && ((base.startsWith(n) && base.length - n.length <= 2 && /^[a-z0-9]+$/.test(base)) || base === `lib${n}` || outer === `lib${n}`))) out.push({ title, via: 'similar title' });
     }
     return out.sort((a, b) => ['title', 'short name', 'similar title'].indexOf(a.via) - ['title', 'short name', 'similar title'].indexOf(b.via)).slice(0, 5);
   }

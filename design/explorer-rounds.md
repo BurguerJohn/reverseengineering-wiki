@@ -346,3 +346,10 @@ Areas: Wii/N64 decompilations (Platform:Nintendo Wii; Twilight Princess Wii and 
 - COM interface slot orders had to be filed as enums because vtable facts needed an address: a vtable fact may now name its interface by data.iid (the same layout in every binary).
 - Exported functions of a library have no address: a function fact may give data.export "<module>!<name>" (with data.ordinal). The "signature is malformed" error now quotes the value and says a prototype goes in data.prototype.
 - import_symbols read 19,350 of Paper Mario's 26,313 lines without saying why: it now lists examples of unread lines and how many names were dropped at an already-named address. Most were N64 overlay symbols sharing one address range; overlays need their own address space (open: a build per overlay, or an overlay key in the symbol map).
+
+### Round 9 (0.8.47 → 0.8.48)
+Areas: Bethesda BSA/BA2, ESP/ESM/ESL, NIF; Source 2 compiled resources, binary KV3, VPK version 2 (7 facts; ReShade and RenderDoc hooking answered from source); Flutter/Dart AOT snapshot, Hermes bytecode, Xamarin assembly store, ProGuard/R8 mapping files, Technique:Cross-platform app frameworks (9 facts; SDL2 corrected: SDL_Linked_Version is SDL 1.2); toolchain identification from Detect It Easy (16 pages: installers, protectors for recognition only, Delphi, MinGW, Nim, PureBasic, AutoIt, Technique:Identifying the toolchain of a binary; 15 facts). Reports 26-28, all 4/5.
+- The policy scanner refused a page quoting KV3's text header `<!-- kv3 ... -->` as a hidden comment: comments inside Markdown code are shown as text, so the html-comment rule now ignores code spans (a bare comment in prose is still refused).
+- "(_c)" was stored and shown as "( c)": create_page keeps underscores in display_title too.
+- exists("Rust") missed Tool:Rustc: a name with a one- or two-letter suffix or a lib prefix (curl → libcurl) now counts as a similar title.
+- Prompt: on Windows, deep repositories (dart-lang/sdk, pyinstaller) fail checkout with "Filename too long"; agents are told to clone with core.longpaths and a sparse checkout.

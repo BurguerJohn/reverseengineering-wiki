@@ -657,9 +657,10 @@ export async function createPage(s: Services, caller: Caller, args: {
   if (isTopicPage(t)) return createTopic(s, op, t, args);
   const infobox = Object.fromEntries(Object.entries(args.infobox ?? {}).map(([k, v]) => [k, String(v)]));
   // "macOS", "libcurl": MediaWiki stores the first letter capitalized; the infobox shows the name as written.
-  const asWritten = args.title.trim().replace(/^[A-Za-z]+:/, '').replace(/_/g, ' ');
+  // An underscore ("(_c)", "__TEXT") is stored as a space too; the display title keeps it.
+  const asWritten = args.title.trim().replace(/^[A-Za-z]+:/, '');
   const storedName = t.slice(t.indexOf(':') + 1);
-  if (asWritten && asWritten !== storedName && asWritten.slice(1) === storedName.slice(1)) infobox.display_title ??= asWritten;
+  if (asWritten && asWritten !== storedName && asWritten.replace(/_/g, ' ').slice(1) === storedName.slice(1)) infobox.display_title ??= asWritten;
   assertClean([
     ...scanText(args.body, 'article'),
     ...scanText(`${args.summary}\n${args.justification ?? ''}\n${(args.aliases ?? []).join('\n')}`, 'summary'),

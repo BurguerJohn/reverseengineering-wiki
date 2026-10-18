@@ -124,6 +124,8 @@ export function scanText(text: string, context: ScanContext, fileName?: string):
   for (const rule of RULES) {
     // Code pages legitimately contain comments and markup-like syntax.
     if (rule.id === 'html-comment' && context === 'code') continue;
+    // A comment quoted in Markdown code (`<!-- kv3 ... -->`, a format's header) is shown as text, not hidden.
+    const subject = rule.id === 'html-comment' ? text.replace(/```[\s\S]*?```|`[^`\n]+`/g, (x) => ' '.repeat(x.length)) : text;
     let m: RegExpExecArray | null;
     if (rule.id === 'public-ipv4') {
       const all = new RegExp(rule.regex.source, `${rule.regex.flags}g`);
@@ -135,7 +137,7 @@ export function scanText(text: string, context: ScanContext, fileName?: string):
         }
       }
     } else {
-      m = rule.regex.exec(text);
+      m = rule.regex.exec(subject);
     }
     if (m) {
       findings.push({ rule: rule.id, category: rule.category, label: rule.label, line: lineOf(text, m.index), file: fileName, where: contextBefore(text, m.index) });
