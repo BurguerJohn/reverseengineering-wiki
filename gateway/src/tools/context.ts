@@ -30,6 +30,8 @@ export interface Caller {
   previews?: Preview[];
   /** The operator approved this call (review mode, remote MCP): it costs one write, whatever its size. */
   approved?: 'client' | 'page';
+  /** This session already asked the agent for its report (help improve the wiki): once is enough. */
+  feedbackAsked?: boolean;
 }
 
 /** What one edit of a dry run would store: the whole page when new, a diff when it changes one. */

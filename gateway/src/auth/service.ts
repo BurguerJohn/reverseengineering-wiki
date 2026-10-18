@@ -202,7 +202,7 @@ export class AuthService {
   }
 
   /** Creates the account and its MediaWiki user. The email must already be proven (a checked code). */
-  async createOperator(fields: { username: string; email: string; termsVersion?: string; termsAcceptedAt?: string; mode?: Mode }): Promise<number> {
+  async createOperator(fields: { username: string; email: string; termsVersion?: string; termsAcceptedAt?: string; mode?: Mode; feedback?: boolean }): Promise<number> {
     // Re-check: someone may have taken the name since the availability check.
     const availability = await this.usernameAvailable(fields.username);
     if (!availability.available) {
@@ -214,7 +214,7 @@ export class AuthService {
     await mw.createAccount(username, mwPassword);
     await mw.userRights(username, ['agent'], [], 'ReverseEngineering.wiki operator account');
     try {
-      return this.db.insertOperator({
+      const id = this.db.insertOperator({
         username,
         username_key: usernameKey(username),
         skeleton: checkUsername(username).skeleton,
@@ -227,6 +227,8 @@ export class AuthService {
         terms_accepted_at: fields.termsAcceptedAt ?? new Date().toISOString(),
         created_at: new Date().toISOString(),
       });
+      if (fields.feedback) this.db.setFeedback(id, true);
+      return id;
     } catch {
       throw new AuthError('USERNAME_UNAVAILABLE', 'That username or email was registered a moment ago. Start again.', 409);
     }

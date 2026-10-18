@@ -158,6 +158,7 @@ const wrong = await browser.post({ action: 'verify', code: '000000' });
 assert.match(wrong.html, /invalid or expired/);
 step1 = await browser.post({ action: 'verify', code: await codeFor(email) });
 assert.match(step1.html, /Create your account/);
+assert.match(step1.html, /name="help_improve" value="1">/, 'the help-improve choice is offered, off by default');
 const suggested = /name="username"[^>]*value="([^"]+)"/.exec(step1.html)?.[1] ?? '';
 assert.match(suggested, /^[A-Z][a-z]+[A-Z][a-z]+\d{2,4}$/, `a random username is suggested (${suggested})`);
 assert.match(step1.html, /value="review" checked/, 'new accounts start in review mode');
@@ -284,6 +285,23 @@ const direct = parse(await client.callTool({ name: 'add_note', arguments: { subj
 assert.ok(direct.title, JSON.stringify(direct));
 assert.equal(prompts.length, promptsNow, 'no prompt in write mode');
 ok('write mode after the operator confirms in the client: publishes without prompts');
+
+// ---- help improve the wiki: off by default; on only with the operator's OK; one private report with what was published
+assert.equal(parse(await client.callTool({ name: 'account_status', arguments: {} })).feedback, 'off');
+assert.equal(parse(await client.callTool({ name: 'send_feedback', arguments: { experience: 'Not opted in, so this report must be refused.' } })).error, 'FEEDBACK_OFF');
+answer = { confirm: true };
+assert.equal(parse(await client.callTool({ name: 'account_set_feedback', arguments: { enabled: true } })).feedback, 'on');
+assert.match(prompts.at(-1)!, /help improve the wiki/i, 'the operator confirms in the client');
+const askedOnce = parse(await client.callTool({ name: 'add_note', arguments: { subject, body: 'Published with the help-improve choice on.', confidence: 'low' } }));
+assert.match(askedOnce.feedback_request ?? '', /send_feedback/, JSON.stringify(askedOnce));
+const notAgain = parse(await client.callTool({ name: 'add_note', arguments: { subject, body: 'A second publication in the same session.', confidence: 'low' } }));
+assert.equal(notAgain.feedback_request, undefined, 'asked once per session');
+const report = parse(await client.callTool({ name: 'send_feedback', arguments: { experience: 'The notes published fine; the review prompt was clear.', suggestions: 'Nothing for this test.', rating: 5 } }));
+assert.ok(report.received && report.attached_revisions >= 2, JSON.stringify(report));
+const promptsBeforeOff = prompts.length;
+assert.equal(parse(await client.callTool({ name: 'account_set_feedback', arguments: { enabled: false } })).feedback, 'off');
+assert.equal(prompts.length, promptsBeforeOff, 'turning it off needs no confirmation');
+ok('help improve the wiki: off by default, on only after the operator confirms, the agent is asked once after publishing, the private report carries what was published, off at any time');
 
 // ---- renaming: same account, new public name ---------------------------------------------
 const renamedTo = `OAuthRenamed-${run}`;

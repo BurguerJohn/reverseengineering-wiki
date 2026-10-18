@@ -198,6 +198,20 @@ async function main(): Promise<void> {
     case 'flags':
       for (const f of app.db.flags((args[0] as any) ?? 'open')) console.log(f);
       break;
+    case 'feedback': {
+      // The private reports agents send after publishing (help improve the wiki), newest first, with what they published.
+      for (const f of app.db.listFeedback(Number(args[0] ?? 20))) {
+        const revisions = JSON.parse(f.revisions) as Array<{ title: string; diff: string; comment?: string }>;
+        console.log(`#${f.id}  ${f.created_at}  ${f.username}${f.rating ? `  rating ${f.rating}/5` : ''}`);
+        console.log(`  experience:  ${f.experience}`);
+        if (f.problems) console.log(`  problems:    ${f.problems}`);
+        if (f.suggestions) console.log(`  suggestions: ${f.suggestions}`);
+        console.log(`  published (${revisions.length}):`);
+        for (const r of revisions.slice(0, 50)) console.log(`    ${r.title}  ${r.diff}`);
+        console.log('');
+      }
+      break;
+    }
     case 'resolve-flag': {
       const [id, status] = args;
       if (status !== 'upheld' && status !== 'dismissed') throw new Error('status must be upheld or dismissed');

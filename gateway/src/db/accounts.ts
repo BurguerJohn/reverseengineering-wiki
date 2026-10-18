@@ -20,6 +20,23 @@ export interface Operator {
   created_at: string;
   blocked_at: string | null;
   writes: number;
+  /** 1: the operator chose to help improve the wiki (their agent sends a private report after publishing). */
+  feedback?: number;
+}
+
+/** A private report from an agent after publishing: how it went, and what it published (from the wiki's history). */
+export interface FeedbackRow {
+  id: number;
+  operator_id: number;
+  username: string;
+  created_at: string;
+  client: string | null;
+  experience: string;
+  problems: string | null;
+  suggestions: string | null;
+  rating: number | null;
+  /** JSON: [{title, revid, timestamp, comment, diff}] of what the account published before the report. */
+  revisions: string;
 }
 
 export interface TokenRow {
@@ -119,6 +136,20 @@ create table if not exists operators (
   writes integer not null default 0
 );
 create index if not exists operators_skeleton on operators(skeleton);
+
+create table if not exists feedback (
+  id integer primary key,
+  operator_id integer not null references operators(id),
+  username text not null,
+  created_at text not null,
+  client text,
+  experience text not null,
+  problems text,
+  suggestions text,
+  rating integer,
+  revisions text not null default '[]'
+);
+create index if not exists feedback_operator on feedback(operator_id, created_at);
 
 create table if not exists tokens (
   id integer primary key,
@@ -267,6 +298,8 @@ export class AccountsDb {
     // Columns added after the first release (create table if not exists keeps old tables as they were).
     const tokenColumns = (this.db.prepare('pragma table_info(tokens)').all() as Array<{ name: string }>).map((c) => c.name);
     if (!tokenColumns.includes('oauth_client_id')) this.db.exec('alter table tokens add column oauth_client_id text');
+    const operatorColumns = (this.db.prepare('pragma table_info(operators)').all() as Array<{ name: string }>).map((c) => c.name);
+    if (!operatorColumns.includes('feedback')) this.db.exec('alter table operators add column feedback integer not null default 0');
   }
 
   // ---- operators -----------------------------------------------------------
@@ -337,6 +370,24 @@ export class AccountsDb {
 
   setMode(id: number, mode: Mode): void {
     this.db.prepare('update operators set mode = ? where id = ?').run(mode, id);
+  }
+
+  setFeedback(id: number, on: boolean): void {
+    this.db.prepare('update operators set feedback = ? where id = ?').run(on ? 1 : 0, id);
+  }
+
+  insertFeedback(f: Omit<FeedbackRow, 'id'>): number {
+    const r = this.db.prepare(`insert into feedback (operator_id, username, created_at, client, experience, problems, suggestions, rating, revisions)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(f.operator_id, f.username, f.created_at, f.client, f.experience, f.problems, f.suggestions, f.rating, f.revisions);
+    return Number(r.lastInsertRowid);
+  }
+
+  lastFeedbackAt(operatorId: number): string | null {
+    return (this.db.prepare('select max(created_at) as at from feedback where operator_id = ?').get(operatorId) as { at: string | null }).at;
+  }
+
+  listFeedback(limit: number): FeedbackRow[] {
+    return this.db.prepare('select * from feedback order by id desc limit ?').all(limit) as unknown as FeedbackRow[];
   }
 
   setBlocked(id: number, blocked: boolean): void {

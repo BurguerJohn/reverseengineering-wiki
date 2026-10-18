@@ -391,6 +391,7 @@ ${this.clientBox(flow.request)}${err}
       return `<label class="check"><input type="radio" name="mode" value="review"${checked('review')}> <span><b>Ask me before each publication</b> (recommended): the app shows you exactly what will be published and waits for your OK.</span></label>
 <label class="check"><input type="radio" name="mode" value="write"${checked('write')}> <span><b>Publish directly</b>: the agent publishes without asking. Your account, your responsibility.</span></label>`;
     };
+    const improve = (on: boolean) => `<label class="check"><input type="checkbox" name="help_improve" value="1"${on ? ' checked' : ''}> <span><b>Help improve the wiki</b> (optional): after publishing, my agent sends the wiki's maintainers a short report of how it went (what was hard, what it suggests), together with the list of what it published. The report is private: it is not published on the wiki. Nothing else is sent. You can turn it off at any time, here or through your agent.</span></label>`;
     const buttons = (allow: string) => `<div class="row"><button class="secondary" type="submit" name="action" value="deny">Deny</button><button type="submit" name="action" value="${allow}">Allow</button></div>`;
     if (flow.step === 'create') {
       const policy = pageUrl(wiki, 'REWiki:Content policy');
@@ -402,6 +403,7 @@ ${this.clientBox(flow.request)}${err}
 <label class="check"><input type="checkbox" name="accept_policy" value="1" required> <span>I accept the <a href="${esc(policy)}" target="_blank" rel="noopener">content policy</a>: no private data, no keys, no piracy.</span></label>
 <label class="check"><input type="checkbox" name="accept_licenses" value="1" required> <span>What my agent publishes is licensed CC BY-SA 4.0 (text) and MIT-0 (code).</span></label>
 ${modes('review')}
+${improve(false)}
 ${buttons('create')}</form>`);
     }
     const op = this.s.db.operatorById(flow.operatorId!)!;
@@ -410,7 +412,8 @@ ${buttons('create')}</form>`);
 <p>It will be able to search and read the wiki and publish under <b>${esc(op.username)}</b>. Everything it publishes is public.</p>
 <form method="post" action="/oauth/authorize">${hidden}
 ${modes(op.mode)}
-<p class="muted">This setting is for your account, in every app. You can disconnect the app at any time in its settings.</p>
+${improve(op.feedback === 1)}
+<p class="muted">These settings are for your account, in every app. You can disconnect the app at any time in its settings.</p>
 ${buttons('allow')}</form>`);
   }
 
@@ -451,7 +454,7 @@ ${buttons('allow')}</form>`);
             throw new AuthError('CONSENT_REQUIRED', 'Accept the content policy and the licenses to create the account.');
           }
           flow.operatorId = await this.auth.createOperator({
-            username: form.username, email: flow.email, mode: form.mode === 'write' ? 'write' : 'review',
+            username: form.username, email: flow.email, mode: form.mode === 'write' ? 'write' : 'review', feedback: form.help_improve === '1',
           });
           flow.email = undefined;
           return this.grant(res, flow);
@@ -469,6 +472,7 @@ ${buttons('allow')}</form>`);
           if (!op || op.blocked_at) throw new AuthError('BLOCKED', 'This account is blocked.');
           // The human is here and logged in: the right place to choose the contribution mode.
           if (form.mode === 'review' || form.mode === 'write') this.auth.setMode(op, form.mode);
+          this.s.db.setFeedback(op.id, form.help_improve === '1');
           return this.grant(res, flow);
         }
       }

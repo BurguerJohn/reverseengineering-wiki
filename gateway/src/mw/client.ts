@@ -221,7 +221,7 @@ export class MwClient {
 
   /** `patrolled` needs the patrol or patrolmarks right (the gateway session has it; anonymous does not). */
   async recentChanges(opts: {
-    start?: string; namespaces?: number[]; limit?: number; title?: string; dir?: 'newer' | 'older'; patrolled?: boolean;
+    start?: string; namespaces?: number[]; limit?: number; title?: string; dir?: 'newer' | 'older'; patrolled?: boolean; user?: string;
   }): Promise<RecentChange[]> {
     const out: RecentChange[] = [];
     let cont: Record<string, string> = {};
@@ -229,7 +229,7 @@ export class MwClient {
     while (out.length < want) {
       const data = await this.call({
         action: 'query', list: 'recentchanges', rcdir: opts.dir ?? 'newer', rcstart: opts.start,
-        rcnamespace: opts.namespaces?.join('|'), rctitle: opts.title,
+        rcnamespace: opts.namespaces?.join('|'), rctitle: opts.title, rcuser: opts.user,
         rcprop: `title|ids|timestamp|user|comment|tags|loginfo|sizes|redirect${opts.patrolled ? '|patrolled' : ''}`,
         rctype: 'edit|new|log', rclimit: Math.min(want - out.length, 500), ...cont,
       });

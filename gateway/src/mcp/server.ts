@@ -12,7 +12,8 @@ import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/proto
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { REPO_DIR } from '../config.ts';
-import { ToolError, batchContext, quotaError, requireWriter, type Caller, type Preview, type Services } from '../tools/context.ts';
+import { ToolError, assertClean, batchContext, quotaError, requireWriter, type Caller, type Preview, type Services } from '../tools/context.ts';
+import { scanText } from '../policy/scanner.ts';
 import { quota, remainingWrites } from '../auth/trust.ts';
 import * as read from '../tools/read.ts';
 import * as write from '../tools/write.ts';
@@ -29,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.36';
+export const VERSION = '0.8.37';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -197,11 +198,16 @@ function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Ca
     // The agent does not see the client's prompt: tell it the approval happened.
     return { ...out, review: how === 'client' ? 'Approved by your operator in their MCP client (that prompt is shown to them, not to you).' : 'Approved by your operator on the review page.' };
   };
+  const withFeedbackRequest = (out: Record<string, unknown>, args: any) => {
+    if (args?.dry_run || !caller.operator || caller.feedbackAsked || s.db.operatorById(caller.operator.id)?.feedback !== 1) return out;
+    caller.feedbackAsked = true;
+    return { ...out, feedback_request: 'Your operator chose to help improve the wiki. When you have finished publishing in this session, call send_feedback once: how it went, what was hard or confusing (exact error texts), what you suggest. The server attaches what you published; the report is private.' };
+  };
   return handler(async (args: any, extra: Extra) => {
     const ignored = known ? Object.keys(args ?? {}).filter((k) => !known.has(k)) : [];
-    if (!ignored.length) return body(args, extra);
+    if (!ignored.length) return withFeedbackRequest(await body(args, extra), args);
     const out = await body(Object.fromEntries(Object.entries(args).filter(([k]) => known!.has(k))), extra);
-    return { ...out, ignored_arguments: `${ignored.join(', ')}: not parameters of ${name}, ignored (a typo, or a field that belongs inside data?).` };
+    return withFeedbackRequest({ ...out, ignored_arguments: `${ignored.join(', ')}: not parameters of ${name}, ignored (a typo, or a field that belongs inside data?).` }, args);
   });
 }
 
@@ -304,7 +310,7 @@ export interface AccountOps {
 }
 
 export function createMcpServer(s: Services, caller: Caller, opts: { includeWriteTools: boolean; serverReview?: boolean; accounts?: AccountOps }): McpServer {
-  const note = !opts.includeWriteTools ? READ_ONLY_NOTE : opts.serverReview && caller.operator ? oauthNote(caller.operator.username, caller.operator.mode) : '';
+  const note = !opts.includeWriteTools ? READ_ONLY_NOTE : opts.serverReview && caller.operator ? oauthNote(caller.operator.username, caller.operator.mode, s.db.operatorById(caller.operator.id)?.feedback === 1) : '';
   const server = new McpServer(
     { name: 'rewiki', version: VERSION },
     // The account note first: clients cut long instructions off at the end.
@@ -984,7 +990,7 @@ function registerAccountTools(s: Services, server: McpServer, caller: Caller, ac
   }, (extra) => handler(() => {
     const op = current();
     return {
-      logged_in: true, username: op.username, trust: op.trust, mode: op.mode, writes: op.writes, writes_this_hour: quota(s.db, op),
+      logged_in: true, username: op.username, trust: op.trust, mode: op.mode, feedback: op.feedback === 1 ? 'on' : 'off', writes: op.writes, writes_this_hour: quota(s.db, op),
       note: op.mode === 'review'
         ? 'Review mode: your operator approves each publication before it goes out.'
         : op.mode === 'write' ? 'Write mode: you publish directly. Everything is public.' : 'Read mode: no writes.',
@@ -1011,6 +1017,56 @@ function registerAccountTools(s: Services, server: McpServer, caller: Caller, ac
     }
     s.db.setMode(op.id, a.mode);
     return { mode: a.mode };
+  }));
+  server.registerTool('account_set_feedback', {
+    title: 'Help improve the wiki (on or off)',
+    description: 'Your operator\'s choice to help improve the wiki: when on, after publishing you send the maintainers a private report with send_feedback, and the server attaches the list of what you published. Turning it on needs your operator\'s confirmation in the client; turning it off never does.',
+    inputSchema: { enabled: z.boolean() },
+  }, handler(async (a: any, extra: Extra) => {
+    const op = current();
+    if (a.enabled && op.feedback !== 1) {
+      if (!server.server.getClientCapabilities()?.elicitation) {
+        throw new ToolError('HUMAN_CONFIRMATION_REQUIRED', 'Only your operator can turn this on: they tick "Help improve the wiki" on the authorization page when they connect this app again.');
+      }
+      const answer = await extra.sendRequest({
+        method: 'elicitation/create',
+        params: {
+          message: 'ReverseEngineering.wiki: help improve the wiki? After publishing, your agent sends the maintainers a short private report of how it went, with the list of what it published. Nothing is published, nothing else is sent; you can turn it off at any time.',
+          requestedSchema: { type: 'object', properties: { confirm: { type: 'boolean', title: 'Help improve the wiki' } }, required: ['confirm'] },
+        },
+      } as ElicitRequest, ElicitResultSchema, { timeout: APPROVAL_TIMEOUT_MS });
+      if (answer.action !== 'accept' || answer.content?.confirm !== true) throw new ToolError('REVIEW_DECLINED', 'Your operator kept it off.');
+    }
+    s.db.setFeedback(op.id, a.enabled === true);
+    return { feedback: a.enabled ? 'on' : 'off' };
+  }));
+  server.registerTool('send_feedback', {
+    title: 'Send the maintainers a private report',
+    description: 'Only when your operator chose to help improve the wiki (account_status: feedback on): once, after you have finished publishing, how it went: what was hard or confusing (exact error texts), what helped, what you would change. The server attaches what you published since the last report. Private: read by the maintainers, never published. No personal data and no details of your operator\'s own project.',
+    inputSchema: {
+      experience: z.string().min(20).max(4000).describe('How the work went with the wiki, in a few sentences'),
+      problems: z.string().max(4000).optional().describe('What was hard, wrong or confusing, with exact error texts'),
+      suggestions: z.string().max(4000).optional().describe('What would have saved you time, most important first'),
+      rating: z.number().int().min(1).max(5).optional().describe('1 (got in the way) to 5 (saved a lot of time)'),
+    },
+  }, handler(async (a: any) => {
+    const op = current();
+    if (op.feedback !== 1) throw new ToolError('FEEDBACK_OFF', 'Your operator has not chosen to help improve the wiki, so no report is sent. They can turn it on on the authorization page, or ask you to call account_set_feedback.');
+    assertClean(scanText(`${a.experience}\n${a.problems ?? ''}\n${a.suggestions ?? ''}`, 'note'));
+    // What the account published since its last report (at most a day back): from the wiki's own history.
+    const since = s.db.lastFeedbackAt(op.id) ?? new Date(Date.now() - 24 * 3600_000).toISOString();
+    let revisions: Array<Record<string, unknown>> = [];
+    try {
+      const changes = await s.sessions.reader.recentChanges({ user: op.username, start: since, dir: 'newer', limit: 300 });
+      revisions = changes.filter((c) => c.revid).map((c) => ({ title: c.title, revid: c.revid, timestamp: c.timestamp, comment: (c.comment ?? '').slice(0, 200), diff: `${s.config.mw.publicUrl}/index.php?diff=${c.revid}` }));
+    } catch {
+      // History is best effort: the report is kept without it.
+    }
+    const id = s.db.insertFeedback({
+      operator_id: op.id, username: op.username, created_at: new Date().toISOString(), client: null,
+      experience: a.experience, problems: a.problems ?? null, suggestions: a.suggestions ?? null, rating: a.rating ?? null, revisions: JSON.stringify(revisions),
+    });
+    return { received: true, report: id, attached_revisions: revisions.length, note: 'Thank you. The report is private: the maintainers read it together with the list of what you published.' };
   }));
   if (!accounts) return;
   server.registerTool('account_rename', {

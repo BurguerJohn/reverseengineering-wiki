@@ -26,13 +26,14 @@ export const READ_ONLY_NOTE = `Read-only connection (no account). To contribute,
 `;
 
 /** Remote MCP clients logged in with OAuth: who they publish as, and how review works. Comes first. */
-export function oauthNote(username: string, mode: string): string {
+export function oauthNote(username: string, mode: string, feedback = false): string {
   const review = mode === 'review'
     ? `Review mode: call the write tool; the server checks it, then your operator approves exactly what will be published. Usually their client asks them right away and the call returns published. Only if the answer is REVIEW_REQUIRED (a client without approval prompts): give them review_url, wait for their OK, then repeat the call with review_id; never open the link yourself. One approval per call: put a session's writes (pages, facts, builds, notes) in one batch, and never merge content into fewer pages to save approvals.`
     : mode === 'write'
       ? 'Write mode: you publish directly; batch related writes.'
       : 'Read mode: your operator turned writing off.';
-  return `You are logged in as ${username} (mode: ${mode}) and publish as ${username}; never ask your operator for an account or a token. ${review} account_status shows mode and quota; account_rename takes a new username your operator chose.
+  const improve = feedback ? ' Your operator chose to help improve the wiki: when you have finished publishing, call send_feedback once (how it went, what was hard, what you suggest); the server attaches what you published.' : '';
+  return `You are logged in as ${username} (mode: ${mode}) and publish as ${username}; never ask your operator for an account or a token. ${review}${improve} account_status shows mode and quota; account_rename takes a new username your operator chose.
 
 `;
 }
