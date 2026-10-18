@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.64';
+export const VERSION = '0.8.65';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -828,7 +828,18 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     }
     if (a.replace && Object.keys(a.replace).length) {
       const ops = Array.isArray(args.operations) ? [...(args.operations as Array<{ tool: string; arguments: Record<string, unknown> }>)] : null;
-      if (tool !== 'batch' || !ops) return fail(new ToolError('BAD_REQUEST', 'replace works on batch checks only.'));
+      // A single tool's check: {"1": {fields to change}} (confirm_new and a justification, a corrected field).
+      if (tool !== 'batch' || !ops) {
+        const keys = Object.keys(a.replace);
+        const v = (a.replace as Record<string, Record<string, unknown> | null>)['1'];
+        if (keys.length !== 1 || !v || typeof v !== 'object') return fail(new ToolError('BAD_REQUEST', `On a single tool's check, replace takes {"1": {fields to change}}.`));
+        const fields = (v.arguments && typeof v.arguments === 'object' && Object.keys(v).length === 1 ? v.arguments : v) as Record<string, unknown>;
+        const shape = (writeTools.get(tool)?.schema as z.ZodObject<any> | undefined)?.shape as Record<string, unknown> | undefined;
+        args = Object.fromEntries(Object.entries({ ...args, ...fields }).filter(([k, x]) => x !== null && (!shape || k in shape)));
+      }
+    }
+    if (a.replace && Object.keys(a.replace).length && tool === 'batch' && Array.isArray(args.operations)) {
+      const ops = [...(args.operations as Array<{ tool: string; arguments: Record<string, unknown> }>)];
       const dropped = new Set<number>();
       for (let [k, v] of Object.entries(a.replace as Record<string, Record<string, unknown> | null>)) {
         const n = Number(k);

@@ -634,10 +634,13 @@ function rebaseHeadings(wikitext: string, from: number, top: number): string {
 }
 
 function similarName(a: string, b: string): boolean {
-  const norm = (x: string) => x.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-  const x = norm(a);
-  const y = norm(b);
-  return x === y || (x.length > 4 && y.includes(x)) || (y.length > 4 && x.includes(y));
+  // Whole words: "ar archive" is not "ASAR archive (Electron)", though its letters occur inside it.
+  const words = (x: string) => x.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const x = words(a);
+  const y = words(b);
+  const within = (short: string[], long: string[]) => short.join('').length > 4
+    && long.some((_, i) => short.every((w, j) => long[i + j] === w));
+  return x.join('') === y.join('') || within(x, y) || within(y, x);
 }
 
 export async function createPage(s: Services, caller: Caller, args: {
@@ -1110,6 +1113,13 @@ export async function linkRepo(s: Services, caller: Caller, args: {
   ].filter(Boolean).join('; ');
   const TESTED: Record<string, string> = { read: 'source read, not run', built: 'built', run: 'built and run', tested_against_build: 'checked against a real build' };
   const testedOn = args.tested_how ? `${TESTED[args.tested_how] ?? args.tested_how}: ${args.tested_on}` : args.tested_on;
+  // Linking the same repository again without license keeps a license a contributor declared earlier,
+  // instead of falling back to "none" (a batch's second link_repo overwrote a corrected entry).
+  if (!args.license && (['none', 'unknown', 'NOASSERTION'].includes(info.license) || info.license.startsWith('unrecognized'))) {
+    const earlier = pages.flatMap(({ page }) => parseRepos(findSection(parseSections(page.content), 'Code & repositories')?.body ?? ''))
+      .find((x) => x.url === info.url && /declared by the contributor/.test(String(x.license ?? '')));
+    if (earlier) info.license = String(earlier.license);
+  }
   const entry = renderRepo({ url: info.url, commit: info.commit, license: info.license, description: args.description, tested_on: testedOn, checked });
   // Where it is already listed, and what is in it: planning the next step without another round trip.
   const alreadyOn = s.index.pagesMentioning(info.url).filter((p) => !pages.some((x) => x.target === p) && !p.startsWith('Code:'));

@@ -455,3 +455,9 @@ Areas: eight more consoles (Master System/Game Gear, PC Engine, Atari Lynx, Atar
 - The license-file fallback recorded Breakpad as MIT and ares as Zlib: both LICENSE files bundle several licenses and the first known text won. A file that matches more than one known license now gives no hint (the contributor declares it); BSD-3 still absorbs its BSD-2 subset. Checked on Breakpad (none), MinHook (BSD-2), ENet (MIT).
 - create_page's infobox description now lists cpu (one agent did not know the field existed).
 - Considered and dropped: a Breakpad .sym reader for import_symbols (it reads from git repositories; .sym files come from symbol servers).
+
+### Round 26 (0.8.64 → 0.8.65)
+Areas: game saves (Technique:Reverse engineering game save files, Unreal GVAS, Ruby Marshal, NRBF, Godot variant encoding; 9 facts; ares relinked as ISC); COM and WinRT (Technique:Reading COM and WinRT code, COM type library MSFT/SLTG, WinMD, Platform:Windows Runtime; 14 facts including IUnknown/IDispatch/IInspectable/IActivationFactory vtables by IID); Linux/macOS packages (ar, Debian, RPM, AppImage, UDIF DMG, XAR, Technique:Identifying Linux and macOS package containers; 9 facts). Reports 77-79, all 4/5.
+- A second link_repo without license (inside a batch) replaced a license the agent had just declared with "none": re-linking now keeps a contributor-declared license when the host detects none.
+- "ar archive" was suspected a duplicate of "ASAR archive (Electron)" because its letters occur inside it: similar names now compare whole words.
+- publish_checked replace worked on batch checks only, so confirm_new could not be added to a single create_page check: a single tool's check takes {"1": {fields to change}}.
