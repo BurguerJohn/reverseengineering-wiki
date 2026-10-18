@@ -383,7 +383,7 @@ export const symbolInputSchema = z.object({
   /** Set by the server for va entries on builds without an image base: the address is absolute. */
   absolute: z.boolean().optional(),
   overlay: z.string().max(40).optional().describe('Overlay or segment the address belongs to, when several share it'),
-  name: z.string().min(1).max(200).regex(/^[A-Za-z_~?@$][\w:~<>,.*&@$?\- ]*$/, 'a symbol name: C/C++ identifier, scopes (Foo::Bar), templates or decorated names'),
+  name: z.string().min(1).max(200).regex(/^[A-Za-z_~?@$][\w:~<>,.*&@$?\\\- ]*$/, 'a symbol name: C/C++ identifier, scopes (Foo::Bar), templates or decorated names'),
   kind: z.enum(SYMBOL_KINDS),
   type: z.string().max(300).optional().describe('C prototype or type, e.g. "int __fastcall(Weapon *this, int id)"'),
   signature: bytePattern.optional(),

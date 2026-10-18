@@ -419,3 +419,10 @@ Areas: regional builds with symbols (Pikmin 2 GPVP01 now fits after the compact 
 - Three reports found create_page/edit_section arguments only by error inside a batch, whose operations take free-form arguments: the batch schema now lists every write tool's arguments (? for optional), generated from the tool schemas.
 - publish_checked replace written as {"3": {"arguments": {...}}} merged "arguments" as a field and dropped it silently, so a license fix did nothing: that shape now means "these fields".
 - Left for round 20: Twilight Princess Wii and Prime Wii/Trilogy versions; Pikmin 2 debug builds.
+
+### Round 20 (0.8.58 → 0.8.59)
+Areas: Wii versions with symbols (Twilight Princess RZDE01_02, RZDP01, RZDJ01; Metroid Prime R3ME01_00, R3MP01_00, R3IJ01_00, ~32k and ~27k names each); ML model files (GGUF, safetensors, ONNX, ONNX Runtime, TFLite, PyTorch archive, Core ML, Technique:Identifying machine-learning models in applications; 13 facts); Windows artifacts (REGF hives, LNK, EVTX, Prefetch, Jump Lists; 15 facts from libyal). Reports 59-61, all 4/5.
+- import_symbols skipped ~220 names per Twilight Princess file containing a backslash (CodeWarrior static initializers "__sinit_\m_Do_main_cpp"): symbol names may contain "\" (exports pass names as JSON and with SN_NOCHECK).
+- quiet was only on batch and publish_checked: every write tool's dry run takes it now (a symbol import preview was huge).
+- My briefs said one write per 2000 symbols; the importer packs 5000 per write.
+- Chores for round 21: ZIP, FlatBuffers and Pickle general pages (three ML formats needed them); the EVTX header fact (chunk count 2 vs 4 bytes at 0x2A against libevtx); the unescaped onnxruntime_providers_* on Library:ONNX Runtime; Pikmin 2 debug builds; Twilight Princess REL symbols.

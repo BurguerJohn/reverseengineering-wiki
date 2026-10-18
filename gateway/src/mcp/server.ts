@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.58';
+export const VERSION = '0.8.59';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -76,6 +76,7 @@ const evidenceItem = z.object({
   lines: z.string().optional().describe('"120-148" or "26-34, 98-101"'),
 });
 
+const QUIET = z.boolean().optional().describe('With dry_run: list the pages that would be written and their sizes, without their contents');
 const DRY_RUN = z.boolean().optional().describe('Check everything and show what would be stored, without publishing or using quota');
 
 const REVIEW_ID = z.string().optional().describe('Review mode, when the server answered REVIEW_REQUIRED: the review_id it gave, repeated with the same arguments after your user approved at review_url')
@@ -480,7 +481,9 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
   const registerWrite = (name: string, config: { inputSchema: Record<string, z.ZodTypeAny> } & Record<string, unknown>, run: Run) => {
     const { dry_run: _unused, ...shape } = config.inputSchema;
     writeTools.set(name, { schema: z.object(shape), run });
-    const inputSchema = review ? { ...config.inputSchema, review_id: REVIEW_ID } : config.inputSchema;
+    // quiet works on every write tool's dry run (big symbol imports), not only on batch.
+    const withQuiet = { ...config.inputSchema, ...(config.inputSchema.quiet ? {} : { quiet: QUIET }) };
+    const inputSchema = review ? { ...withQuiet, review_id: REVIEW_ID } : withQuiet;
     // Loose: unknown arguments reach the handler, which names them in the answer instead of dropping them unseen.
     const wrapped = writeHandler(s, caller, name, run, review, new Set([...Object.keys(inputSchema), 'review_id', 'quiet']));
     handlers.set(name, wrapped);
