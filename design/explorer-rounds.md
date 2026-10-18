@@ -275,3 +275,15 @@ Decisions taken during the loop are listed per round, with the reason, so the ow
 - Not covered by e2e (network): link_repo's new fields and propose_from_repo; the pattern finder has a unit test.
 - 0.8.35-0.8.36 after a live check on the server (read-only): exists found "PE" only by its full title and missed "DLL proxy loading": it now matches short names (before or inside the parentheses), word prefixes and title fragments; propose_from_repo took a license badge for the README's description and missed pages named by an alias ("EDF5"): it takes the first real sentence and matches aliases. On Eiton/EDF5-Damage-Number-Display it drafted link_repo for Software:Earth Defense Force 5 and Tool:EDFModLoader and one candidate signature (F3 0F 58 87 FC 01 00 00, from an escaped byte string at line 588).
 - The server has no GITHUB_TOKEN: GitHub's API allows 60 unauthenticated requests per hour for link_repo, import_symbols and propose_from_repo together.
+
+## Loop 2 (gather from GitHub, 3 agents per round, feedback reports)
+
+### Round 1 (0.8.38 → 0.8.39)
+Areas: GameCube decomps and game archives (Melee, Pikmin 2, Sunshine builds with ~119k imported symbols; VPK, GRP, U8 formats; Tool:Decomp-toolkit), OpenSSL and libcurl identification, UPX/MinHook/packing/hooking. Reports 2-4, all rated 4/5.
+- All three hit GitHub's unauthenticated API limit (60/h) in link_repo, import_symbols and propose_from_repo. Fixed: repository answers are cached for six hours, and when the API is limited the commit comes from git's smart-HTTP refs and the license from the raw license file (no API call); RATE_LIMITED now says when it resets.
+- A dry run with a 600 KB symbol preview: previews over 150 KB answer as quiet, with a note.
+- Markdown ate `__fill_mem` and `TRK_*`: a warning for identifiers with leading underscores or `_*` outside backticks.
+- The UPX license with custom exceptions: the error now suggests `WITH LicenseRef-…`.
+- Feedback system: the first report carried 1000 old revisions (client schema predates `published`). Without `published` the window is now three hours or since the last report, a named page also owns its subpages (symbol chunks), and the answer explains attribution. Prompt tells agents to pass task/published anyway.
+- Left as chores for round 2: link VPK, OpenSSL, libcurl repos; fix UPX/MinHook licenses.
+- Declined: continuing a batch past a failed operation (half-applied batches are worse; the rate-limit fallback removes the cause).
