@@ -449,3 +449,9 @@ Areas: Pokémon save and entity formats (Gen 3 save with the 0x08012025 signatur
 - The link_repo fallback note said "none found" after an agent passed GPL-3.0: it now shows the license as recorded.
 - Fact reference: test_vectors and samples belong in data (top-level ones are moved there).
 - Chores for round 25: link LevelDB/IndexedDB pages from Library:Electron and the SQLite page; Tool:Terser (or drop the red link on Technique:Reversing bundled JavaScript).
+
+### Round 25 (0.8.63 → 0.8.64)
+Areas: eight more consoles (Master System/Game Gear, PC Engine, Atari Lynx, Atari Jaguar, WonderSwan, Neo Geo Pocket, Virtual Boy: 15 pages, 19 facts, the Sega mapper registers as a hardware-address struct; a WonderSwan save-code disagreement between emulators recorded both ways); crash reporting (Format:Breakpad symbol file with the PE/ELF debug-id rules, Breakpad, Crashpad, Sentry Native, Technique:Identifying crash reporting SDKs; Library:Electron links the storage pages); Unix and mobile hooking (Technique:Function hooking/Unix and mobile, plthook, fishhook, Dobby, Frida, Tool:Terser). Reports 74-76, all 4/5.
+- The license-file fallback recorded Breakpad as MIT and ares as Zlib: both LICENSE files bundle several licenses and the first known text won. A file that matches more than one known license now gives no hint (the contributor declares it); BSD-3 still absorbs its BSD-2 subset. Checked on Breakpad (none), MinHook (BSD-2), ENet (MIT).
+- create_page's infobox description now lists cpu (one agent did not know the field existed).
+- Considered and dropped: a Breakpad .sym reader for import_symbols (it reads from git repositories; .sym files come from symbol servers).

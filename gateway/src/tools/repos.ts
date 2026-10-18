@@ -45,7 +45,11 @@ export function licenseHint(text: string): string | undefined {
     [/Mozilla Public License,? (?:v. |version )2.0/i, 'MPL-2.0'],
     [/ISC License/i, 'ISC'],
   ];
-  return KNOWN_TEXTS.find(([re]) => re.test(flat))?.[1];
+  // A file that bundles several licenses (Breakpad's LICENSE has BSD-3 and MIT parts) names none of them for
+  // sure: no hint, so the contributor says which applies instead of the first text found being recorded.
+  const found = new Set(KNOWN_TEXTS.filter(([re]) => re.test(flat)).map(([, id]) => id));
+  if (found.has('BSD-3-Clause')) found.delete('BSD-2-Clause');
+  return found.size === 1 ? [...found][0] : undefined;
 }
 
 const BINARY_ASSET = /\.(exe|dll|msi|scr|zip|7z|rar|bin|so|dylib|apk|jar)$/i;

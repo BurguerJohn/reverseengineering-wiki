@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.63';
+export const VERSION = '0.8.64';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -594,7 +594,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       type: z.enum(SUBJECT_TYPES),
       title: z.string().describe('Official full name, e.g. "Earth Defense Force 5"; or "<subject>/<topic>" for a topic subpage'),
       summary: z.string().describe('1–3 sentences'),
-      infobox: z.record(z.string(), z.string()).optional().describe('developer, publisher, vendor, engine, uses ([[Library:X]] links), formats ([[Format:X]] links: the file formats it reads or writes), platforms, versions, magic, extensions, endianness, license, website'),
+      infobox: z.record(z.string(), z.string()).optional().describe('developer, publisher, vendor, engine, uses ([[Library:X]] links), formats ([[Format:X]] links: the file formats it reads or writes), platforms, versions, release, cpu (Platform pages: processors and clocks), magic, extensions, endianness, license, website'),
       body: z.string().describe('Markdown with ## sections'),
       aliases: z.array(z.string()).optional(),
       confirm_new: z.boolean().optional(),
