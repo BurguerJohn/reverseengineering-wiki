@@ -543,3 +543,7 @@ Areas: Sony executables (Platform:PlayStation 4, Format:SCE ELF extensions (Play
 - Four reports asked for the open claims of a page: read lists a subject page's "Unverified:" sentences by section, and the "*" listing takes unverified (pages that have them).
 - The emphasis warning quotes the words around the identifier; the amend "occurs 0 times" error says an earlier change lives under the check_id it returned.
 - Agents cited one commit and read the default branch: briefs say to read raw files at the cited commit.
+
+### Round 40 (0.8.82 → 0.8.83)
+Areas: GoldSrc and Source data (Format:BSP (GoldSrc), Format:WAD3 (GoldSrc), Format:MDL (GoldSrc), Format:HL2DEMO (Source demo); Source BSP lump and game-lump structs, static prop versions 4-6, the LZMA lump header; VTF and Source MDL extended; 13 facts, from the public SDKs only); Unverified prose of open formats (20 settled on 13 Format pages, 1 corrected: PCX runs start at 0xC0, not 0xC1; 200 of 387 Format pages still have open claims); compiled mobile apps (Hermes bytecode version per React Native release and the exact header layouts; Dart AOT snapshot symbols renamed on the main branch; Format:Dart kernel; .NET for Android assembly store version word and XAZS; 10 facts). Reports 119-121.
+- Three reports found the publish_checked re-check (a second call to publish a fix) costly: a changed check is checked and, when it passes, published in the same call; when it fails nothing is published; dry_run true only checks.

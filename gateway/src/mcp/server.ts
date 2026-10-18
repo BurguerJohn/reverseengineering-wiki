@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.82';
+export const VERSION = '0.8.83';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -793,7 +793,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('publish_checked', {
     title: 'Publish what a dry run checked',
-    description: 'Publish exactly what a dry run (of any write tool or batch) checked, by its check_id, without resending (two hours, same account). Safe to retry after a lost answer: a used check_id returns what it published. replace changes fields of batch operations; amend fixes small texts. Without changes it publishes at once. With replace, amend or append it checks the changed version first and returns a new check_id to publish (dry_run false publishes the changes at once).',
+    description: 'Publish exactly what a dry run (of any write tool or batch) checked, by its check_id, without resending (two hours, same account). Safe to retry after a lost answer: a used check_id returns what it published. replace changes fields of batch operations; amend fixes small texts. It publishes at once. With replace, amend or append it checks the changed version first and publishes it only if the check passes (nothing is published otherwise); dry_run true only checks and returns a new check_id.',
     inputSchema: { check_id: z.string(), dry_run: DRY_RUN,
       replace: z.record(z.string(), z.union([z.record(z.string(), z.unknown()), z.null()])).optional().describe('Batches only: {"3": {fields to change}} keeps the tool and the other fields (a field set to null is removed), {"3": {tool, arguments}} swaps the whole operation, {"3": null} drops it'),
       quiet: z.boolean().optional().describe('With dry_run: list the pages without their contents'),
@@ -886,19 +886,21 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       }
       if (ops) args = { ...args, operations: ops };
     }
-    // Changed operations are checked again before they are published (agents kept publishing a fix they meant to
-    // check): replace, amend or append without dry_run make a dry run with a new check_id; dry_run false publishes now.
     const changed = !!((a.replace && Object.keys(a.replace).length) || (a.amend && Object.keys(a.amend).length) || (Array.isArray(a.append) && a.append.length));
-    const dry = a.dry_run ?? changed;
-    // An implicit re-check is quiet unless asked: the agent has seen the full preview once.
-    const quiet = a.quiet ?? (a.dry_run === undefined && changed);
-    const result = await handlers.get(tool)!({ ...args, ...(dry ? { dry_run: true, ...(quiet ? { quiet: true } : {}) } : {}), ...(a.review_id ? { review_id: a.review_id } : {}) }, extra);
-    // Only a real publish marks the checks as used (an implicit re-check is not one).
+    // Changed operations are checked before anything is published: a change that fails publishes nothing (an agent once
+    // published a fix it meant to check), one that passes is published in the same call (a second call cost agents a
+    // round trip each time). dry_run true only checks; dry_run false skips the check.
+    if (changed && a.dry_run === undefined) {
+      const check = await handlers.get(tool)!({ ...args, dry_run: true, quiet: true }, extra);
+      if (check.isError) {
+        return check.structuredContent ? fail(new ToolError(String(check.structuredContent.error ?? 'BAD_REQUEST'), `Nothing was published: the changed version fails its check. ${String(check.structuredContent.message ?? '')}`, check.structuredContent)) : check;
+      }
+    }
+    const dry = !!a.dry_run;
+    const result = await handlers.get(tool)!({ ...args, ...(dry ? { dry_run: true, ...(a.quiet ? { quiet: true } : {}) } : {}), ...(a.review_id ? { review_id: a.review_id } : {}) }, extra);
+    // Only a real publish marks the checks as used.
     for (const id of a.merge ?? []) if (!result.isError && !dry) { const other = CHECKED.get(String(id)); if (other) other.published = result; }
     if (!result.isError && !dry) checked.published = result;
-    if (!result.isError && dry && a.dry_run === undefined && result.structuredContent) {
-      return ok({ ...result.structuredContent, not_published: 'Nothing was published: with replace, amend or append the changed version is checked first. Publish it with publish_checked and the check_id of this answer (or pass dry_run false to publish changes at once).' });
-    }
     return result;
   }) as any);
 
