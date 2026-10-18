@@ -411,3 +411,5 @@ Areas: symbol coverage of existing decompilations (Metroid Prime +1,075 names af
 - Fact reference: a complete fact example at the top (claim, scope.applies_to and evidence detail were found by error three times).
 - Deploys now go through a script that stops when the type check, unit or e2e tests fail (round 17 deployed past a failing unit test whose status a grep had hidden).
 - Chore for round 19: Pikmin 2 GPVP01 symbol import, now that the page fits.
+
+- Owner raised the limit: PatientStepper99 promoted to trusted (1000 writes/h). Rounds no longer wait for the quota; the per-agent budget stays ~35 (quality, not quota).
