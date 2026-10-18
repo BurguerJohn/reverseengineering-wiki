@@ -15,6 +15,8 @@ export const SYMBOL_FILE_FORMATS = ['auto', 'linker', 'nm', 'pairs'] as const;
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_IMPORT = 50_000;
 const NAME = String.raw`[A-Za-z_.$?@][\w.$@?:<>~]*`;
+// CodeWarrior-mangled template names keep their commas ("vector<pair<Ui,Ui>,alloc>"): in "name = address" lines the "=" ends the name.
+const LINKER_NAME = String.raw`[A-Za-z_.$?@][\w.$@?:<>~,*&]*`;
 
 export interface ParsedSymbol { va: string; name: string; kind: 'function' | 'global' | 'label'; size?: number; type?: string }
 
@@ -33,7 +35,7 @@ function parseLine(line: string, format: SymbolFileFormat): ParsedSymbol | null 
   if (!text || /^(?:#|\/\/|;)/.test(text)) return null;
   if (format === 'linker') {
     // "func_80012345 = 0x80012345; // type:func size:0x40" (splat), "name = .text:0x802BEE24; // type:function size:0xE4" (decomp-toolkit)
-    const m = new RegExp(String.raw`^(${NAME})\s*=\s*(?:\.?[\w.]+:)?(0x[0-9A-Fa-f]+|\d+)\s*;?\s*(?://(.*))?$`).exec(text);
+    const m = new RegExp(String.raw`^(${LINKER_NAME})\s*=\s*(?:\.?[\w.]+:)?(0x[0-9A-Fa-f]+|\d+)\s*;?\s*(?://(.*))?$`).exec(text);
     if (!m) return null;
     const attrs = Object.fromEntries([...(m[3] ?? '').matchAll(/(\w+):(\S+)/g)].map((a) => [a[1].toLowerCase(), a[2]]));
     const t = (attrs.type ?? '').toLowerCase();

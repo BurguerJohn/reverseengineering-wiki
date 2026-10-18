@@ -398,3 +398,8 @@ Areas: arcade boards from MAME drivers (Tool:MAME, Platform:Neo Geo, Capcom CPS-
 - A struct whose fields have no offsets was accepted silently: the layout check names fields without an offset.
 - Known license texts now also cover the wxWindows Library Licence, MPL-2.0 and ISC. LGPL/GPL texts stay hints only (the text does not say "only" or "or later").
 - Prompt: WebFetch summarizes with a small model, so exact values come from the raw file; Git Bash sparse checkouts need MSYS_NO_PATHCONV=1 and --no-cone.
+
+### Round 17 (0.8.55 → 0.8.56)
+Areas: four more decomp-toolkit projects (Metroid Prime, Animal Crossing, Mario Party 4, Battle for Bikini Bottom: builds and ~57k symbols, Known projects rows); game and Microsoft compressors (Oodle for identification, LZX, Xpress, LZNT1, LZHAM, Nintendo LZ10/LZ11, Kosinski, Nemesis, Enigma; 13 facts and a hub table); the GDB Remote Serial Protocol with registers/target description, LLDB extensions and emulator stubs, ELF core dumps, the Windows kernel crash dump header (8 facts). Reports 50-52, all 4/5.
+- import_symbols left 1,660 Metroid Prime lines unread: CodeWarrior-mangled template names contain commas ("vector<pair<Ui,Ui>,alloc>"). In "name = address" lines the name now runs to the "="; the whole Prime file reads (0 unread). Unit test added. Chore for round 18: re-run the Prime and Bikini Bottom imports (imports only add).
+- Chores for round 18 too: the LLDB and mGBA repo links that a stopped batch left unpublished.
