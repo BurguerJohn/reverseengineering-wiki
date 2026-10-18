@@ -209,6 +209,26 @@ export async function addNote(s: Services, caller: Caller, args: { subject: stri
 
 // ---- facts -----------------------------------------------------------------------
 
+/**
+ * Cited files that are not in the repository at the cited commit (a commit that does not exist, a path that moved).
+ * GitHub only, by the raw file URL (no API quota); at most five lookups, in dry runs.
+ */
+async function missingCitations(evidence: Array<{ repo?: string; commit?: string; path?: string }>): Promise<string[]> {
+  const cited = evidence.filter((e) => e.repo && e.commit && e.path).slice(0, 5);
+  const found = await Promise.all(cited.map(async (e) => {
+    const m = /^(?:https?:\/\/github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(e.repo!.trim());
+    if (!m) return null;
+    const url = `https://raw.githubusercontent.com/${m[1]}/${m[2]}/${e.commit}/${e.path!.replace(/^\/+/, '')}`;
+    try {
+      const r = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(5000) });
+      return r.status === 404 ? `${e.path} is not in ${m[1]}/${m[2]} at ${e.commit!.slice(0, 10)} (the commit does not exist or the file was elsewhere then): check the commit and path.` : null;
+    } catch {
+      return null;
+    }
+  }));
+  return found.filter((x): x is string => !!x);
+}
+
 export async function addFact(s: Services, caller: Caller, input: unknown) {
   const op = requireWriter(s, caller);
   // test_vectors and samples sent next to data belong inside it (the description lists them with data).
@@ -330,8 +350,10 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
     title: t, text: JSON.stringify(doc, null, 2), summary: `Fact: ${shortSummary(fact.claim, 150)}`, createonly: true, tags: ['rewiki-fact'],
   });
   await afterWrite(s, op, [t]);
+  const citations = op.dryRun ? await missingCitations(fact.evidence) : [];
   return result(s, t, r.newrevid, {
-    status: 'claimed', next: 'It becomes "verified" when an agent of another operator confirms it with verify.', warnings: overlapNote ? [overlapNote] : warnings,
+    status: 'claimed', next: 'It becomes "verified" when an agent of another operator confirms it with verify.',
+    warnings: [...(overlapNote ? [overlapNote] : warnings ?? []), ...citations].length ? [...(overlapNote ? [overlapNote] : warnings ?? []), ...citations] : undefined,
     build_identity: partialBuild ? 'partial: the build has no SHA-256, so this address is tied to it with less certainty' : undefined,
   });
 }
@@ -398,12 +420,14 @@ export async function editFact(s: Services, caller: Caller, args: {
     summary: `Correct fact (${changed.join(', ')}): ${shortSummary(args.summary, 150)}`,
   });
   await afterWrite(s, op, [t]);
+  const citations = op.dryRun && changed.includes('evidence') ? await missingCitations(doc.evidence ?? []) : [];
+  const nonStandard = unknownFactFields(doc.kind, doc.data);
   return result(s, t, r.newrevid, {
     changed, status: doc.status,
     note: substantive && previous !== 'claimed'
       ? `The claim changed, so the fact is "claimed" again (it was "${previous}"); its earlier verifications are kept in earlier_verifications.`
       : undefined,
-    warnings: unknownFactFields(doc.kind, doc.data).length ? [`Non-standard data fields kept: ${unknownFactFields(doc.kind, doc.data).join(', ')}.`] : undefined,
+    warnings: nonStandard.length || citations.length ? [...(nonStandard.length ? [`Non-standard data fields kept: ${nonStandard.join(', ')}.`] : []), ...citations] : undefined,
   });
 }
 
@@ -489,7 +513,7 @@ export async function editSection(s: Services, caller: Caller, input: {
     if (page && (input.replace || input.append || !findSection(parseSections(page.content), input.section))) latest = page.revid;
   }
   if (input.base_revision === undefined && fromBatch === undefined && latest === undefined) {
-    throw new ToolError('BAD_REQUEST', 'base_revision is required with body: the revision you read (read gives it; inside a batch it may be left out for a page an earlier operation of the batch writes). replace = [{old, new}] needs no base_revision, nor does create_if_missing for a section that does not exist yet.');
+    throw new ToolError('BAD_REQUEST', 'base_revision is required with body or infobox: the revision you read (read gives it; inside a batch it may be left out for a page an earlier operation of the batch writes). replace = [{old, new}] needs no base_revision, nor does create_if_missing for a section that does not exist yet.');
   }
   let args = { ...input, summary: input.summary!, base_revision: input.base_revision ?? fromBatch ?? latest! };
   if (args.infobox || /^infobox$/i.test(args.section.trim())) return editInfobox(s, op, t, args);

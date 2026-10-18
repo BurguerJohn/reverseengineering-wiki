@@ -525,3 +525,9 @@ Areas: disk and tape images finished (Technique:Identifying disk and tape images
 - The implicit re-check of publish_checked repeated the whole preview: it is quiet unless asked.
 - Fact listings show confidence, verifications and last_verified, so a sweep skips checked facts without reading each.
 - edit_section with a whole body reports removed_paragraphs: paragraphs of the old text the new body leaves out (an agent dropped one by accident).
+
+### Round 37 (0.8.79 → 0.8.80)
+Areas: Python packagers (PyInstaller cookie variants, bootloader cookie search, _MEI temp dir, TOC entry codes; Nuitka constants blob and __compiled__; cx_Freeze library.zip and frozen names; Format:PyOxidizer packed resources; Format:Python zipapp; Tool:Cx Freeze; Nuitka's license corrected to AGPL-3.0 with a runtime exception; 19 facts); fact sweep of never-checked facts A-K (19: 16 confirmed, 12 raised, 3 partial, 2 corrected: Assets.car layout enum missing four values, Breakpad evidence citing a commit that does not exist); firmware containers (Format:Android sparse image, Format:Android OTA payload (payload.bin), Format:Android LP metadata (super.img), Format:Rockchip RKFW update image, Technique:Unpacking firmware update containers; 7 facts). Reports 110-112.
+- Markdown turned "__main__" inside a [[Fact:…]] link into bold and broke the link: wiki links are set aside before Markdown is parsed.
+- A fact cited a commit that does not exist: add_fact and edit_fact dry runs look up each cited GitHub file at its commit (raw URL, five at most) and warn when it is missing.
+- The "*" listing takes unchecked (facts nobody has verified); struct facts take endianness; the base_revision error names infobox edits too.

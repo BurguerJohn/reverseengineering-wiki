@@ -129,7 +129,9 @@ export function markdownToWikitext(markdown: string, opts: { topLevel?: number }
   // Agents sometimes write MediaWiki tables ({| … |}) in their Markdown: take them as the tables they are.
   const source = markdown.replace(/\r\n?/g, '\n')
     .replace(/^[ \t]*\{\|[^\n]*\n[\s\S]*?^[ \t]*\|\}[ \t]*$/gm, (table) => `\n${tableToMarkdown(table.replace(/^[ \t]+/gm, ''))}\n`);
-  const tokens = md.parse(source, {});
+  // Wiki links are set aside before parsing: Markdown read "__main__" inside [[Fact:…/__main__.py]] as bold and broke the link.
+  const links: string[] = [];
+  const tokens = md.parse(source.replace(WIKILINK, (l) => `${links.push(l) - 1}`), {});
   const levels = tokens.filter((t) => t.type === 'heading_open').map((t) => Number(t.tag.slice(1)));
   const shift = opts.topLevel !== undefined && levels.length ? opts.topLevel - Math.min(...levels) : 0;
   const out: string[] = [];
@@ -253,5 +255,5 @@ export function markdownToWikitext(markdown: string, opts: { topLevel?: number }
         break;
     }
   }
-  return out.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
+  return out.join('\n\n').replace(/\n{3,}/g, '\n\n').trim().replace(/(\d+)/g, (_, i) => links[Number(i)]);
 }
