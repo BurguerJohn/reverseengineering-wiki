@@ -55,7 +55,8 @@ create table if not exists facts (
   applies_to text not null,
   observed_in text not null,
   data text not null,
-  confidence text not null default ''
+  confidence text not null default '',
+  repo_evidence integer not null default 0
 );
 create index if not exists facts_subject on facts(subject);
 create table if not exists builds (
@@ -207,7 +208,7 @@ export class SearchIndex {
     }
     // Facts without the confidence column (search filters on it): rebuilt on the next pass.
     const factCols = (this.db.prepare('pragma table_info(facts)').all() as Array<{ name: string }>).map((c) => c.name);
-    if (factCols.length && !factCols.includes('confidence')) {
+    if (factCols.length && (!factCols.includes('confidence') || !factCols.includes('repo_evidence'))) {
       this.db.exec('drop table facts');
       this.db.exec("create table if not exists state (key text primary key, value text not null); delete from state where key = 'rc_cursor';");
     }
@@ -384,10 +385,13 @@ export class SearchIndex {
       return;
     }
     this.insertPage(p, 'fact', doc.claim ?? '', doc.status ?? 'claimed', doc.subject ?? null, null, p.content);
-    this.db.prepare(`insert into facts (title, subject, kind, status, level, applies_to, observed_in, data, confidence)
-      values (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    // A fact whose evidence names a repository can be checked by anyone who reads that repository.
+    const sourced = Array.isArray((doc as { evidence?: unknown[] }).evidence)
+      && ((doc as { evidence: Array<{ repo?: unknown }> }).evidence).some((e) => typeof e?.repo === 'string' && e.repo.trim() !== '');
+    this.db.prepare(`insert into facts (title, subject, kind, status, level, applies_to, observed_in, data, confidence, repo_evidence)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(p.title, doc.subject ?? '', doc.kind ?? '', doc.status ?? 'claimed', doc.scope?.level ?? '',
-        doc.scope?.applies_to ?? '', JSON.stringify(doc.scope?.observed_in ?? []), JSON.stringify(doc.data ?? {}), String((doc as { confidence?: string }).confidence ?? ''));
+        doc.scope?.applies_to ?? '', JSON.stringify(doc.scope?.observed_in ?? []), JSON.stringify(doc.data ?? {}), String((doc as { confidence?: string }).confidence ?? ''), sourced ? 1 : 0);
     const body = [doc.claim, `Scope: ${doc.scope?.level} — ${doc.scope?.applies_to}`, JSON.stringify(doc.data, null, 1),
       ...(doc.evidence ?? []).map((e) => `${e.type}: ${e.detail}`)].join('\n');
     this.doc(p.title, '', body, 'fact');
@@ -782,12 +786,13 @@ export class SearchIndex {
   }
 
   /** Every page of some types, by title (search with query "*"). */
-  listPages(types: string[], offset: number, limit: number, subject?: string, filters: { status?: string; confidence?: string } = {}): { hits: Array<{ title: string; type: string; summary: string; status: string | null; revision: number }>; total: number } {
+  listPages(types: string[], offset: number, limit: number, subject?: string, filters: { status?: string; confidence?: string; checkable?: boolean } = {}): { hits: Array<{ title: string; type: string; summary: string; status: string | null; revision: number }>; total: number } {
     const placeholders = types.map(() => '?').join(', ');
     // With a subject: its own pages (facts, notes, code, builds of it). status and confidence narrow the listing too
     // (the "*" listing ignored them, so "facts at low confidence" listed every fact).
     const where = `redirect_to is null and type in (${placeholders})${subject ? ' and (subject = ? or title = ?)' : ''}`
-      + `${filters.status ? ' and status = ?' : ''}${filters.confidence ? ' and title in (select title from facts where confidence = ?)' : ''}`;
+      + `${filters.status ? ' and status = ?' : ''}${filters.confidence ? ' and title in (select title from facts where confidence = ?)' : ''}`
+      + `${filters.checkable ? ' and title in (select title from facts where repo_evidence = 1)' : ''}`;
     const params = [...types, ...(subject ? [subject, subject] : []), ...(filters.status ? [filters.status] : []), ...(filters.confidence ? [filters.confidence] : [])];
     const total = (this.db.prepare(`select count(*) as n from pages where ${where}`).get(...params) as { n: number }).n;
     const hits = this.db.prepare(`select title, type, summary, status, revision from pages where ${where} order by title limit ? offset ?`)

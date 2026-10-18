@@ -182,6 +182,8 @@ export async function importSymbols(s: Services, caller: Caller, args: {
   return {
     build: args.build, repository: { url: info.url, commit: info.commit, path, license },
     license_note: unlicensed && !args.license ? 'The repository states no license: only names, addresses, sizes and data types were imported, never code or comments; the build page records the source.' : undefined,
+    // The totals across all writes: added, updated and conflicts (a different name already at that address, kept).
+    totals: results.reduce<Record<string, number>>((t, r) => ({ added: t.added + Number(r.added ?? 0), updated: t.updated + Number(r.updated ?? 0), conflicts: t.conflicts + Number(r.conflicts ?? 0) }), { added: 0, updated: 0, conflicts: 0 }),
     format: parsed.format, read: parsed.symbols.length, unread_lines: parsed.unread && parsed.format !== 'csv' ? parsed.unread : undefined, unnamed_rows: parsed.format === 'csv' && parsed.unread ? `${parsed.unread} rows without a name (not yet named in the project), skipped` : undefined, unread_examples: parsed.unread ? parsed.unread_examples : undefined,
     same_address_dropped: parsed.same_address ? `${parsed.same_address} names at an address that already had one (the first is kept; on overlay platforms such as N64, PS1 and PS2 several overlays reuse one address range, so overlay symbols collide)` : undefined, skipped_names: skippedNames || undefined, writes: results.length, results,
     merge_rule: 'Nothing is removed. A symbol already on the map with the same name stays and only gains missing details ("updated"); a different name at the same address replaces it only with a higher confidence (or force), otherwise it is listed as a conflict and the existing name stays.',

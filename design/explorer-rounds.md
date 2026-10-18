@@ -490,3 +490,8 @@ Areas: reccmp-based Win32 decompilations (Tool:Reccmp; LEGO Island 1.1 with ISLE
 - Symbol maps keyed only by address: the modules of a multi-file build (ISLE.EXE and LEGO1.DLL share small RVAs) and N64/PS1 overlays collided. The key is now overlay plus address; splat's rom:0x… attribute names the overlay when names share an address (Paper Mario now reads 26,293 of 26,295 names, 0 dropped, was 19,350). Exports keep one label per address.
 - Round 30's verification agent could not list facts by confidence: fixed in 0.8.72 (the "*" listing applies status and confidence).
 - Halfway point of the extended loop: rounds 31-60 continue with one verification agent per round.
+
+### Round 31 (0.8.73 → 0.8.74)
+Areas: overlay symbols recovered by re-import (Paper Mario US +9,639, JP +1,079, PAL +1,156, iQue +1,165; the other splat projects had nothing lost); fact sweep of the 10 low and 7 medium facts (13 confirmed, 5 partial, 0 corrected; confidence raised on 12); Apple app data (BOM, Assets.car, NIBArchive, NSKeyedArchiver, Core Data (from general knowledge, marked Unverified), Tool:Asset Catalog Tinkerer; 9 facts). Reports 92-94, all 4/5.
+- import_symbols reports totals over all its writes (added, updated, conflicts), so a re-import says what it kept.
+- The sweep could not tell checkable facts from game-binary facts with no public source: the "*" listing takes checkable (facts whose evidence names a repository; the facts table is rebuilt once with that column).
