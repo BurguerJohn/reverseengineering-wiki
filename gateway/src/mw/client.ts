@@ -116,7 +116,17 @@ export class MwClient {
       headers['Content-Type'] = 'application/x-www-form-urlencoded';
       response = await fetch(this.apiUrl, { method: 'POST', headers, body });
     } else {
-      response = await fetch(`${this.apiUrl}?${body}`, { headers });
+      // A kept-alive connection the web server closed between requests fails with "other side closed": a read
+      // is safe to repeat (writes are POSTs and never retried here, they may have been applied).
+      for (let attempt = 0; ; attempt++) {
+        try {
+          response = await fetch(`${this.apiUrl}?${body}`, { headers });
+          break;
+        } catch (error) {
+          if (attempt >= 2 || !(error instanceof TypeError)) throw error;
+          await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+        }
+      }
     }
     for (const cookie of response.headers.getSetCookie()) {
       const [pair] = cookie.split(';');

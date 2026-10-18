@@ -403,10 +403,49 @@ export interface SymbolEntry extends SymbolInput {
 }
 
 export interface SymbolsDoc {
-  schema: 'rewiki.symbols/1';
+  schema: 'rewiki.symbols/1' | 'rewiki.symbols/2';
   build: string;
   range: { start: string; end: string };
+  /** rewiki.symbols/2: values most entries share (by, at, confidence, source, absolute, kind), left out of those entries. */
+  defaults?: Partial<SymbolEntry>;
   symbols: SymbolEntry[];
+}
+
+const DEFAULTABLE = ['by', 'at', 'confidence', 'source', 'absolute', 'kind'] as const;
+
+/** A symbol page as JSON: rewiki.symbols/2 keeps shared values once in defaults, so dense ranges fit a page. */
+export function parseSymbolsDoc(text: string): SymbolsDoc {
+  const doc = JSON.parse(text) as SymbolsDoc;
+  if (doc.defaults && Array.isArray(doc.symbols)) {
+    const d = doc.defaults;
+    doc.symbols = doc.symbols.map((x) => ({ ...d, ...x }) as SymbolEntry);
+  }
+  delete doc.defaults;
+  doc.schema = 'rewiki.symbols/1';
+  return doc;
+}
+
+/** The page text: one symbol per line, shared values in defaults (rewiki.symbols/2) when that saves space. */
+export function serializeSymbolsDoc(doc: SymbolsDoc): string {
+  const defaults: Record<string, unknown> = {};
+  for (const key of DEFAULTABLE) {
+    const counts = new Map<string, number>();
+    for (const x of doc.symbols) {
+      const v = (x as unknown as Record<string, unknown>)[key];
+      if (v !== undefined) counts.set(JSON.stringify(v), (counts.get(JSON.stringify(v)) ?? 0) + 1);
+    }
+    const [best, n] = [...counts].sort((a, b) => b[1] - a[1])[0] ?? [];
+    // absolute and kind change meaning when missing: only defaulted when every entry has the value.
+    const needed = key === 'absolute' || key === 'kind' ? doc.symbols.length : doc.symbols.length / 2;
+    if (best !== undefined && n! >= needed && doc.symbols.length > 1) defaults[key] = JSON.parse(best);
+  }
+  const keys = Object.keys(defaults);
+  const symbols = keys.length
+    ? doc.symbols.map((x) => Object.fromEntries(Object.entries(x).filter(([k, v]) => !(k in defaults) || JSON.stringify(v) !== JSON.stringify(defaults[k]))))
+    : doc.symbols;
+  const head = JSON.stringify({ schema: keys.length ? 'rewiki.symbols/2' : 'rewiki.symbols/1', build: doc.build, range: doc.range, ...(keys.length ? { defaults } : {}) });
+  const lines = symbols.map((x) => `  ${JSON.stringify(x)}`);
+  return `${head.slice(0, -1)},\n"symbols": [\n${lines.join(',\n')}\n]}\n`;
 }
 
 export interface SymbolConflict {

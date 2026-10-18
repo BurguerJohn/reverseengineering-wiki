@@ -44,3 +44,17 @@ test('nm output and address/name pairs', () => {
   assert.deepEqual(pairs.symbols.map((x) => `${x.va} ${x.name}`), ['0x80010000 Main_Init', '0x80010100 Main_Loop', '0x80010200 Game::Tick']);
   assert.equal(parseSymbolFile('nothing here\nat all').symbols.length, 0);
 });
+
+test('symbol pages keep shared values once (rewiki.symbols/2) and read back whole', async () => {
+  const { serializeSymbolsDoc, parseSymbolsDoc } = await import('../src/wiki/pages.ts');
+  const entry = (rva: string, name: string) => ({ rva, name, kind: 'function', absolute: true, confidence: 'high', source: 'decompilation', by: 'A', at: '2026-10-18T00:00:00Z' });
+  const doc = { schema: 'rewiki.symbols/1' as const, build: 'Build:X/Y', range: { start: '0x80000000', end: '0x8003FFFF' },
+    symbols: [entry('0x80000000', 'a'), entry('0x80000010', 'b'), { ...entry('0x80000020', 'c'), by: 'B', kind: 'global' }] };
+  const text = serializeSymbolsDoc(doc as any);
+  assert.match(text, /"schema":"rewiki.symbols\/2"/);
+  assert.ok(!/"absolute"/.test(text.split('"symbols"')[1].split('\n')[1]), 'shared absolute left out of entries');
+  assert.ok(!/"kind"/.test(text.split('"defaults"')[1].split('"symbols"')[0]), 'kind differs: not defaulted');
+  const back = parseSymbolsDoc(text);
+  assert.deepEqual(back.symbols, doc.symbols);
+  assert.ok(text.length < JSON.stringify(doc).length);
+});

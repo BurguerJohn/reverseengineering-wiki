@@ -22,7 +22,7 @@ import {
   symbolInputSchema, mergeSymbols, emptySymbolsDoc, topicPage, wordCount,
   LEADING_SECTIONS, TRAILING_SECTIONS, TOPIC_SPLIT_WORDS, MAX_SYMBOLS_PER_CALL, CODE_PAGE_LIMIT,
   type FactDoc, type BuildDoc, type CodeDoc, type SymbolsDoc, type SymbolInput, type SymbolConflict,
-  structLayoutProblems,
+  structLayoutProblems, parseSymbolsDoc, serializeSymbolsDoc,
 } from '../wiki/pages.ts';
 import { repoRootFiles, resolveRepo, SPDX_EXPRESSION } from './repos.ts';
 
@@ -847,9 +847,7 @@ const SYMBOL_PAGE_LIMIT = 1_900_000;
 
 /** One symbol per line, so history diffs show exactly which names changed. */
 function serializeSymbols(doc: SymbolsDoc): string {
-  const head = JSON.stringify({ schema: doc.schema, build: doc.build, range: doc.range });
-  const lines = doc.symbols.map((x) => `  ${JSON.stringify(x)}`);
-  return `${head.slice(0, -1)},\n"symbols": [\n${lines.join(',\n')}\n]}\n`;
+  return serializeSymbolsDoc(doc);
 }
 
 /** Records on the build page where an imported symbol file came from (one entry per repository and path). */
@@ -929,7 +927,7 @@ export async function addSymbols(s: Services, caller: Caller, args: { build: str
       const chunkStart = Math.floor(parseInt(batch[0].rva, 16) / SYMBOL_CHUNK) * SYMBOL_CHUNK;
       let doc: SymbolsDoc = emptySymbolsDoc(build, chunkStart, SYMBOL_CHUNK);
       if (page) {
-        try { doc = JSON.parse(page.content); } catch { throw new ToolError('SCHEMA_INVALID', `${t} is not valid JSON; flag it.`); }
+        try { doc = parseSymbolsDoc(page.content); } catch { throw new ToolError('SCHEMA_INVALID', `${t} is not valid JSON; flag it.`); }
       }
       const r = mergeSymbols(doc, batch, op.username, at, args.force);
       if (!r.added && !r.updated) {

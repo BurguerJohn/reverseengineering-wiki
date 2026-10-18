@@ -9,7 +9,7 @@ import { isTopicPage, subjectRoot, typeOfTitle, type PageType } from '../wiki/ti
 import {
   parseSections, splitInfobox, parseInfobox, wikiLinks, redirectTarget, wikitextToMarkdown, RELATION_FIELDS,
 } from '../wiki/wikitext.ts';
-import { parseCodePage, parseNoteHeader, type FactDoc, type BuildDoc, type SymbolsDoc } from '../wiki/pages.ts';
+import { parseCodePage, parseNoteHeader, parseSymbolsDoc, type FactDoc, type BuildDoc, type SymbolsDoc } from '../wiki/pages.ts';
 import {
   extractFromText, extractFromFactData, evidenceTokens, normalizeBytes, queryTokens, type Evidence, type Identifier,
 } from './identifiers.ts';
@@ -423,7 +423,7 @@ export class SearchIndex {
   private indexSymbols(p: IndexablePage): void {
     let doc: SymbolsDoc;
     try {
-      doc = JSON.parse(p.content);
+      doc = parseSymbolsDoc(p.content);
     } catch {
       return;
     }

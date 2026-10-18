@@ -164,7 +164,8 @@ Source: ${config.mw.publicUrl}. Newest edition: ${config.publicUrl}/dumps/latest
 - Articles, notes and project pages: Markdown, with front matter (title, url, revision,
   updated, license, contributors).
 - \`Fact/\` and \`Build/\`: the JSON documents (schemas rewiki.fact/1 and rewiki.build/1). Symbol
-  maps sit under their build: \`Build/<software>/<build>/symbols/<range start>.json\` (rewiki.symbols/1).
+  maps sit under their build: \`Build/<software>/<build>/symbols/<range start>.json\` (rewiki.symbols/1, or
+  rewiki.symbols/2: the same with a \`defaults\` object whose fields apply to every entry that leaves them out).
 - Topic subpages are folders next to their subject: \`Software/<game>/Weapons.md\`.
 - \`Code/\`: one folder per code page with \`README.md\` (metadata) and the code files.
 - \`manifest.json\`: every page with its path, URL, revision, date, license and contributors.

@@ -2,6 +2,21 @@
 
 How to write facts, symbol maps and the data the export tools turn into Ghidra/IDA scripts and C headers. The tool descriptions keep only what a call needs; this page has the details. A dry run (`dry_run: true`) checks a write and says what is missing, unknown or suspicious, so when in doubt, dry-run first.
 
+## A complete fact
+
+Every field below is required except `key` (inside a batch, the same object goes in `arguments`):
+
+```json
+{"kind": "magic", "subject": "Format:Pcapng", "key": "Section Header Block magic",
+ "claim": "A pcapng file starts with the Section Header Block type 0x0A0D0D0A, followed by the byte-order magic 0x1A2B3C4D.",
+ "scope": {"level": "format", "applies_to": "all pcapng files"},
+ "data": {"bytes": "0A 0D 0D 0A", "offset": "0x0", "meaning": "pcapng Section Header Block"},
+ "evidence": [{"type": "source", "detail": "SHB definition in the pcapng draft", "repo": "https://github.com/ietf-opsawg-wg/draft-ietf-opsawg-pcap", "commit": "<sha>", "path": "draft-ietf-opsawg-pcapng.md"}],
+ "confidence": "high"}
+```
+
+`claim` is one or two sentences a reader can check; `scope.applies_to` says which versions, builds or files it holds for; each evidence entry has a `type` and a `detail` (what it shows), and `lines` only when you read the exact lines.
+
 ## Fields by kind
 
 `data` holds the kind's fields. Fields outside these get a warning (they are kept, but exports ignore them).

@@ -9,7 +9,7 @@ import {
   normalizeTitle, validateTitle, typeOfTitle, isTopicPage, subjectRoot, CONTENT_NAMESPACE_IDS, NAMESPACES, SUBJECT_TYPES, TitleError, type SubjectType,
 } from '../wiki/titles.ts';
 import { parseSections, findSection, parseInfobox, splitInfobox, wikitextToMarkdown, sectionBlock, headingKey } from '../wiki/wikitext.ts';
-import { parseCodePage, suggestedSections, wordCount, TOPIC_SPLIT_WORDS, type FactDoc } from '../wiki/pages.ts';
+import { parseCodePage, parseSymbolsDoc, suggestedSections, wordCount, TOPIC_SPLIT_WORDS, type FactDoc } from '../wiki/pages.ts';
 import type { SymbolRow } from '../index/index.ts';
 import { DUMP_KINDS, listDumps } from '../dumps.ts';
 import { looksLikeInstructions } from '../policy/scanner.ts';
@@ -366,6 +366,8 @@ export async function read(s: Services, args: { title: string; section?: string;
     let doc: unknown;
     try {
       doc = JSON.parse(page.content);
+      // Symbol pages keep shared values in defaults: readers get every entry whole.
+      if ((doc as { schema?: string })?.schema === 'rewiki.symbols/2') doc = parseSymbolsDoc(page.content);
     } catch {
       doc = null;
     }
