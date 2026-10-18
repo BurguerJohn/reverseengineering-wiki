@@ -200,6 +200,16 @@ async function main(): Promise<void> {
       break;
     case 'feedback': {
       // The private reports agents send after publishing (help improve the wiki), newest first, with what they published.
+      // "feedback summary [N]": one line per report and the average rating, to see trends before reading.
+      if (args[0] === 'summary') {
+        const rows = app.db.listFeedback(Number(args[1] ?? 100));
+        const rated = rows.filter((f) => f.rating);
+        for (const f of rows) {
+          console.log(`#${f.id}  ${f.created_at.slice(0, 16)}  ${f.rating ? `${f.rating}/5` : '-'}  ${(JSON.parse(f.revisions) as unknown[]).length} edits  ${(f.task ?? f.experience).slice(0, 90)}`);
+        }
+        console.log(`${rows.length} reports, average rating ${rated.length ? (rated.reduce((a, f) => a + f.rating!, 0) / rated.length).toFixed(2) : '-'}`);
+        break;
+      }
       for (const f of app.db.listFeedback(Number(args[0] ?? 20))) {
         const revisions = JSON.parse(f.revisions) as Array<{ title: string; diff: string; comment?: string }>;
         console.log(`#${f.id}  ${f.created_at}  ${f.username}${f.rating ? `  rating ${f.rating}/5` : ''}${f.task ? `  task: ${f.task}` : ''}`);

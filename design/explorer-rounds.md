@@ -353,3 +353,10 @@ Areas: Bethesda BSA/BA2, ESP/ESM/ESL, NIF; Source 2 compiled resources, binary K
 - "(_c)" was stored and shown as "( c)": create_page keeps underscores in display_title too.
 - exists("Rust") missed Tool:Rustc: a name with a one- or two-letter suffix or a lib prefix (curl → libcurl) now counts as a similar title.
 - Prompt: on Windows, deep repositories (dart-lang/sdk, pyinstaller) fail checkout with "Filename too long"; agents are told to clone with core.longpaths and a sparse checkout.
+
+### Round 10 (0.8.48 → 0.8.49)
+Areas: GameMaker data files, Ren'Py RPA/RPYC, SWF and ABC, RPG Maker RGSSAD (9 pages, 15 facts); Squirrel, AngelScript, QuickJS, V8 snapshot and code cache, Mono, CPython (11 pages, 11 facts); Linux kernel: bzImage, kallsyms, BTF, .ko modules, cpio newc, Platform:Linux kernel (6 pages, 20 facts). Reports 29-31, all 4/5.
+- One agent cited "approximate" line ranges (single raw files, line numbers guessed): the prompt now says to give the path without lines when the exact lines are not known. Evidence that looks precise but is not is worse than a path.
+- "Alias redirects cost quota" came back (12 units for five pages): checked again, one charge per tool call; the batch's operations are what the dry run prices. Declined.
+- Required fields (create_page body, link_repo subjects/description/tested_on, add_fact scope and evidence detail) were named as friction: kept, they are what makes a page or fact usable.
+- New: `cli.ts feedback summary [N]` prints one line per report and the average rating.
