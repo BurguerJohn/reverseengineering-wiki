@@ -667,7 +667,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
   // Needs an account (it makes dozens of requests to GitHub), though it writes nothing.
   server.registerTool('propose_from_repo', {
     title: 'Draft a batch from a repository',
-    description: 'For "put this GitHub repository on the wiki": reads it at a pinned commit (README and up to 40 source files) and returns a draft batch to review: link_repo prefilled, the wiki pages its README names,, the byte patterns (AOB signatures) in its code as candidate signature facts, and the constant tables in its headers (enums, #define runs) as candidate enum facts, with their source lines. Writes nothing.',
+    description: 'For "put this GitHub repository on the wiki": reads it at a pinned commit (README and up to 40 source files) and returns a draft batch to review: link_repo prefilled, the wiki pages its README names, the byte patterns (AOB signatures) in its code as candidate signature facts, and the constant tables in its headers (enums, #define runs) as candidate enum facts, with their source lines. Writes nothing.',
     inputSchema: {
       url: z.string().describe('https://github.com/owner/repo'),
       commit: z.string().optional().describe('Default: the head of the default branch'),
