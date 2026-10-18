@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.40';
+export const VERSION = '0.8.41';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -178,7 +178,7 @@ function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Ca
         : full;
       if (huge) (checked as Record<string, unknown>).quiet_note = 'The preview was over 150 KB, so only the pages and their sizes are listed (as with quiet). read a page after publishing, or dry-run one operation alone to see its text.';
       if (!caller.operator) return checked;
-      return { ...checked, check_id: rememberCheck(name, rest, caller.operator.id), publish_with: `publish_checked with this check_id publishes exactly what was checked, without resending it (valid 30 minutes).${name === 'batch' ? ' To change some operations first (after a warning), pass replace = {"<operation number>": {corrected arguments}} with dry_run true.' : ''}` };
+      return { ...checked, check_id: rememberCheck(name, rest, caller.operator.id), publish_with: `publish_checked with this check_id publishes exactly what was checked, without resending it (valid two hours).${name === 'batch' ? ' To change some operations first (after a warning), pass replace = {"<operation number>": {corrected arguments}} with dry_run true.' : ''}` };
     }
     if (!reviewed) {
       try {
@@ -218,7 +218,7 @@ function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Ca
  * In memory: one process, and a check is only good for a short while anyway.
  */
 const CHECKED = new Map<string, { tool: string; args: Record<string, unknown>; operatorId: number; at: number; published?: Result }>();
-const CHECK_TTL_MS = 30 * 60_000;
+const CHECK_TTL_MS = 120 * 60_000;
 
 function rememberCheck(tool: string, args: Record<string, unknown>, operatorId: number): string {
   const now = Date.now();
@@ -771,7 +771,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('publish_checked', {
     title: 'Publish what a dry run checked',
-    description: 'Publish exactly what a dry run (of any write tool or batch) checked, by its check_id, without resending (30 minutes, same account). Safe to retry after a lost answer: a used check_id returns what it published. replace swaps whole operations of a batch; amend fixes small texts; with dry_run true it checks again.',
+    description: 'Publish exactly what a dry run (of any write tool or batch) checked, by its check_id, without resending (two hours, same account). Safe to retry after a lost answer: a used check_id returns what it published. replace swaps whole operations of a batch; amend fixes small texts; with dry_run true it checks again.',
     inputSchema: { check_id: z.string(), dry_run: DRY_RUN,
       replace: z.record(z.string(), z.union([z.record(z.string(), z.unknown()), z.null()])).optional().describe('Batches only: {"3": {corrected arguments}} keeps the tool, {"3": {tool, arguments}} swaps it, {"3": null} drops the operation'),
       quiet: z.boolean().optional().describe('With dry_run: list the pages without their contents'),
@@ -784,7 +784,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
   }, (async (a: any, extra: Extra) => {
     const checked = CHECKED.get(String(a.check_id));
     if (!checked || checked.operatorId !== caller.operator?.id || Date.now() - checked.at > CHECK_TTL_MS) {
-      return fail(new ToolError('CHECK_EXPIRED', 'Unknown or expired check_id (they last 30 minutes, for the account that ran the dry run). Run the dry run again.'));
+      return fail(new ToolError('CHECK_EXPIRED', 'Unknown or expired check_id (they last two hours, for the account that ran the dry run). Run the dry run again.'));
     }
     // Retried after a lost answer: what it published, never a second publication.
     if (checked.published && !a.dry_run) {

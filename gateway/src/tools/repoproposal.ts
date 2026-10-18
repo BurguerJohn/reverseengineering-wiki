@@ -177,7 +177,7 @@ export async function proposeFromRepo(s: Services, args: { url: string; commit?:
     })),
   ];
   return {
-    repository: { url: info.url, commit: info.commit, license: info.license, archived: info.archived || undefined, last_activity: info.lastCommit ?? undefined },
+    repository: { url: info.url, commit: info.commit, license: info.license, license_hint: info.licenseHint, archived: info.archived || undefined, last_activity: info.lastCommit ?? undefined },
     files_scanned: scanned.length, files_in_repository: tree.tree.filter((f) => f.type === 'blob').length, tree_truncated: tree.truncated || undefined,
     pages_mentioned: mentioned.length ? mentioned : undefined,
     candidate_signatures: unique.length ? unique : undefined,

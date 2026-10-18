@@ -451,10 +451,14 @@ export async function editSection(s: Services, caller: Caller, input: {
   // Inside a batch, a page an earlier operation wrote needs no base_revision: the batch knows the one it started from.
   const fromBatch = batchContext.getStore()?.before?.get(t);
   // replace checks itself (each old text must still be there), so it may go without base_revision: the latest revision.
-  const latest = input.base_revision === undefined && fromBatch === undefined && input.replace && !input.infobox
-    ? (await currentPage(s, t))?.revid : undefined;
+  let latest: number | undefined;
+  if (input.base_revision === undefined && fromBatch === undefined && !input.infobox) {
+    const page = input.replace || input.create_if_missing ? await currentPage(s, t) : null;
+    // A section that does not exist yet cannot conflict with anyone's edit of it.
+    if (page && (input.replace || !findSection(parseSections(page.content), input.section))) latest = page.revid;
+  }
   if (input.base_revision === undefined && fromBatch === undefined && latest === undefined) {
-    throw new ToolError('BAD_REQUEST', 'base_revision is required with body: the revision you read (read gives it; inside a batch it may be left out for a page an earlier operation of the batch writes). replace = [{old, new}] needs no base_revision.');
+    throw new ToolError('BAD_REQUEST', 'base_revision is required with body: the revision you read (read gives it; inside a batch it may be left out for a page an earlier operation of the batch writes). replace = [{old, new}] needs no base_revision, nor does create_if_missing for a section that does not exist yet.');
   }
   let args = { ...input, base_revision: input.base_revision ?? fromBatch ?? latest! };
   if (args.infobox || /^infobox$/i.test(args.section.trim())) return editInfobox(s, op, t, args);
@@ -633,6 +637,10 @@ export async function createPage(s: Services, caller: Caller, args: {
   }
   if (isTopicPage(t)) return createTopic(s, op, t, args);
   const infobox = Object.fromEntries(Object.entries(args.infobox ?? {}).map(([k, v]) => [k, String(v)]));
+  // "macOS", "libcurl": MediaWiki stores the first letter capitalized; the infobox shows the name as written.
+  const asWritten = args.title.trim().replace(/^[A-Za-z]+:/, '').replace(/_/g, ' ');
+  const storedName = t.slice(t.indexOf(':') + 1);
+  if (asWritten && asWritten !== storedName && asWritten.slice(1) === storedName.slice(1)) infobox.display_title ??= asWritten;
   assertClean([
     ...scanText(args.body, 'article'),
     ...scanText(`${args.summary}\n${args.justification ?? ''}\n${(args.aliases ?? []).join('\n')}`, 'summary'),
@@ -688,7 +696,7 @@ export async function createPage(s: Services, caller: Caller, args: {
   const requested = args.title.trim().replace(/^[A-Za-z]+:/, '');
   const stored = t.slice(t.indexOf(':') + 1);
   const capitalized = requested && requested[0] !== stored[0] && requested.slice(1) === stored.slice(1)
-    ? `MediaWiki capitalizes the first letter of titles: the page is "${t}" (links in either case still work).` : undefined;
+    ? `MediaWiki capitalizes the first letter of titles: the page is "${t}", shown as "${requested}" (infobox display_title); links in either case work.` : undefined;
   const underscored = (args.aliases ?? []).some((a) => a.includes('_')) || args.title.includes('_')
     ? 'MediaWiki shows "_" in titles as a space ("IMAGE_DOS_HEADER" is "IMAGE DOS HEADER"); links and searches with either work.' : undefined;
   const pageWarnings = renderWarnings(args.body);
@@ -700,7 +708,7 @@ export async function createPage(s: Services, caller: Caller, args: {
 async function createTopic(s: Services, op: Writer, t: string, args: { summary: string; infobox?: Record<string, string>; body: string; aliases?: string[] }) {
   const root = subjectRoot(t);
   if ((t.match(/\//g) ?? []).length > 1) throw new ToolError('BAD_TITLE', `Topic subpages are one level deep: use "${root}/<topic>".`);
-  if (args.infobox && Object.keys(args.infobox).length) throw new ToolError('BAD_REQUEST', `Topic subpages have no infobox; it lives on ${root}.`);
+  if (args.infobox && Object.keys(args.infobox).length) throw new ToolError('BAD_TITLE', `"/" makes "${t}" a topic subpage of ${root}, and topic subpages have no infobox. If the slash is part of the name ("utoc/ucas"), write it with "-" or "and" instead.`);
   if (args.aliases?.length) throw new ToolError('BAD_REQUEST', 'Topic subpages have no aliases.');
   if (args.summary.trim().length < 20) throw new ToolError('BAD_REQUEST', 'summary must be 1–3 sentences (at least 20 characters).');
   assertClean([...scanText(args.body, 'article'), ...scanText(args.summary, 'summary')]);
@@ -711,7 +719,9 @@ async function createTopic(s: Services, op: Writer, t: string, args: { summary: 
   if (siblings.length) {
     throw new ToolError('DUPLICATE_SUSPECTED', 'A similar topic page exists. Improve it with edit_section.', { candidates: siblings.map((x) => ({ title: x.title, url: link(s, x.title) })) });
   }
-  const text = topicPage(root, escapeText(args.summary.trim()), markdownToWikitext(args.body, { topLevel: 2 }));
+  // The page gets its "Topic page of" line from topicPage: drop one the agent wrote itself.
+  const body = args.body.replace(/^\s*[*_]*Topic page of[^\n]*\n+/i, '');
+  const text = topicPage(root, escapeText(args.summary.trim()), markdownToWikitext(body, { topLevel: 2 }));
   const r = await mwEdit(s, op, { title: t, text, createonly: true, tags: ['rewiki-topic'], summary: `New topic page of [[${root}]]` });
 
   // List it in the parent's Topics section so readers of the wiki find it too. In a batch,
@@ -1103,7 +1113,7 @@ export async function linkRepo(s: Services, caller: Caller, args: {
     files,
     repository: info, warnings: [info.license.startsWith('unrecognized') ? `GitHub did not recognize the license file ${info.license.slice(14, -1)}.${info.licenseHint ? ` It names "${info.licenseHint}".` : ''} Read it and run link_repo again with license (its SPDX id or expression): the entry is replaced.${info.licenseHint ? ' (In a dry run: pass license in the real call and no second call is needed.)' : ''}` : null,
       info.license === 'none' ? 'GitHub detected no license. If the repository has a license file or license headers, run link_repo again with license (its SPDX id, e.g. "Zlib"): the entry is replaced. Without a license, agents cannot legally reuse it.' : null,
-      info.binaryReleaseAssets ? 'Release contains binaries; they are flagged, not linked.' : null,
+      info.binaryReleaseAssets ? 'The latest release has binary downloads: the wiki links the source repository only, never the release files.' : null,
       info.limited ? 'GitHub\'s API limit was reached, so the commit came from git and the license from the repository\'s license file; the archive state and last activity are unknown. Pass license if the one shown is wrong.' : null,
       info.archived ? `The repository is archived (read-only${info.lastCommit ? `, last activity ${info.lastCommit.slice(0, 10)}` : ''}): its successor, if any, may be worth linking too.` : null].filter(Boolean),
   });

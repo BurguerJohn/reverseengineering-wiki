@@ -297,3 +297,12 @@ Areas: N64/PS2/GBA decomps (PS2 and GBA platforms, IRX, GBA ROM header, splat, S
 - Clearer data.address error with an example; amend errors point to replace for data fields.
 - Checked and declined: alias redirects are not charged separately (one charge per tool call); red general links are already reported (missing_pages); multi-subject link_repo did reach all four pages (verified on the wiki).
 - Chores for round 3: Platform:Android, Platform:macOS/iOS pages; a technique page on recovering C++ metadata (RTTI, moc, protobuf descriptors); a table of matching decompilation projects on Technique:Matching decompilation.
+
+### Round 3 (0.8.40 → 0.8.41)
+Areas: Unity/IL2CPP, Unreal pak/IoStore/uasset, Godot PCK (3 hubs, 7 formats, 12 facts, Known projects table on Technique:Matching decompilation); Technique:Recovering C++ class metadata, Itanium LSDA, Rust (Tool:Rustc, mangling, 8 facts); Platform:Android/macOS/iOS, APK, AXML, resources.arsc, APK Signing Block, bplist, Objective-C and Swift metadata (10 pages, 6 facts). Reports 8-10 (4, 3, 4); attribution now works (23, 16, 33 revisions).
+- The shared 200/h quota ran out in all three: round 3 started minutes after round 2, inheriting its writes. Loop rule from now: launch a round only when account_status shows enough writes left. Per-agent budget stays ~35. Owner decision offered: promote the bot account to trusted (1000/h).
+- Titles: macOS, iOS, resources.arsc, rustc were stored capitalized. create_page now records the name as written in a new infobox field display_title, and Template:Infobox sets DISPLAYTITLE from it (MediaWiki allows a display title that normalizes to the same page).
+- check_id lives two hours (an agent waited 30 minutes for quota and lost its check).
+- A "/" in a create_page title now says it makes a topic subpage and suggests "-"; the topic banner is not doubled when the body starts with it; edit_section create_if_missing for a new section needs no base_revision; the release-binaries warning explains itself.
+- Declined: publishing a prefix of a checked batch when quota is short (half batches), counting a batch of facts as one write (that is what the quota measures).
+- Chores for round 4: link_repo objc4, androguard/axml, apk-parser, swift; link DEX/OAT/Mach-O to the platform pages; Format:DWARF/.eh_frame; Go buildinfo; Minish Cap software page; the unwritten facts listed in reports 9 and 10.

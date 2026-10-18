@@ -1,4 +1,4 @@
-<includeonly>{| class="wikitable rewiki-infobox" style="float:right; clear:right; margin:0 0 1em 1em; width:24em; font-size:90%;"
+<includeonly>{{#if:{{{display_title|}}}|{{DISPLAYTITLE:{{NAMESPACE}}:{{{display_title}}}}}}}{| class="wikitable rewiki-infobox" style="float:right; clear:right; margin:0 0 1em 1em; width:24em; font-size:90%;"
 |+ {{{type|}}}{{#if:{{{developer|}}}|<nowiki/>
 {{!}}-
 ! style="text-align:left; width:35%;" {{!}} Developer
@@ -51,4 +51,4 @@
 |-
 ! style="text-align:left; width:35%;" | On this wiki
 | [[Special:PrefixIndex/Fact:{{PAGENAME}}/|Facts]] · [[Special:PrefixIndex/Code:{{PAGENAME}}/|Code]] · [[Special:PrefixIndex/Notes:{{PAGENAME}}/|Notes]] · [[Special:PrefixIndex/{{FULLPAGENAME}}/|Topics]]
-|}</includeonly><noinclude>Infobox for subject pages. The gateway writes it; fields are machine-readable. Parameters: type, developer, publisher, vendor, engine, uses, platforms, languages, versions, release, magic, extensions, endianness, used_by, license, website, aliases.</noinclude>
+|}</includeonly><noinclude>Infobox for subject pages. The gateway writes it; fields are machine-readable. Parameters: type, developer, publisher, vendor, engine, uses, platforms, languages, versions, release, magic, extensions, endianness, used_by, license, website, aliases, display_title (the name as written when MediaWiki capitalized its first letter, e.g. macOS).</noinclude>
