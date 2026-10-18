@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.60';
+export const VERSION = '0.8.61';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -150,7 +150,8 @@ function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Ca
   // Refused before anything was written: keep the arguments, so only the broken part is fixed and resent.
   const keepForFix = (error: unknown, rest: Record<string, unknown>) => {
     if (!(error instanceof ToolError) || !caller.operator) return;
-    if (!['BATCH_INVALID', 'SCHEMA_INVALID', 'POLICY_BLOCKED', 'PRIVACY_BLOCKED', 'REPLACE_FAILED'].includes(error.code)) return;
+    // Also refusals of one operation (a missing justification, a duplicate, a missing page): fix it, keep the rest.
+    if (!['BATCH_INVALID', 'SCHEMA_INVALID', 'POLICY_BLOCKED', 'PRIVACY_BLOCKED', 'REPLACE_FAILED', 'BAD_REQUEST', 'DUPLICATE_SUSPECTED', 'NOT_FOUND', 'BAD_TITLE'].includes(error.code)) return;
     if (Array.isArray(error.details.completed) && error.details.completed.length) return; // part of a batch was published
     Object.assign(error.details, {
       check_id: rememberCheck(name, rest, caller.operator.id),
@@ -914,7 +915,9 @@ function madeBy(tool: string, args: Record<string, unknown>): string[] {
 function batchArgumentList(tools: Map<string, { schema: z.ZodTypeAny }>): string {
   return [...tools].map(([name, { schema }]) => {
     const shape = ((schema as z.ZodObject<any>).shape ?? {}) as Record<string, z.ZodTypeAny>;
-    const args = Object.entries(shape).filter(([k]) => k !== 'review_id').map(([k, v]) => (v.isOptional() ? `${k}?` : k));
+    // Types other than text are named (append?:boolean), so an agent does not pass "true" as a string.
+    const typeOf = (v: z.ZodTypeAny) => { const t = ((v as any).def?.innerType ?? v).def?.type as string | undefined; return t && t !== 'string' ? `:${t}` : ''; };
+    const args = Object.entries(shape).filter(([k]) => k !== 'review_id').map(([k, v]) => `${k}${v.isOptional() ? '?' : ''}${typeOf(v)}`);
     return `${name}(${args.join(', ')})`;
   }).join('; ');
 }
