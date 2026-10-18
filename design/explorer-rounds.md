@@ -531,3 +531,9 @@ Areas: Python packagers (PyInstaller cookie variants, bootloader cookie search, 
 - Markdown turned "__main__" inside a [[Fact:…]] link into bold and broke the link: wiki links are set aside before Markdown is parsed.
 - A fact cited a commit that does not exist: add_fact and edit_fact dry runs look up each cited GitHub file at its commit (raw URL, five at most) and warn when it is missing.
 - The "*" listing takes unchecked (facts nobody has verified); struct facts take endianness; the base_revision error names infobox edits too.
+
+### Round 38 (0.8.80 → 0.8.81)
+Areas: Unity data (SerializedFile versions 2-22 with Unity releases, header and version-22 widening, object entries, type trees, .resS streaming; UnityFS flags (0x200: padding per AssetStudio, encryption per UnityPy), block info, UnityWeb/UnityRaw, the WebGL data container; 13 facts); never-checked facts L-Z (14: 12 confirmed, 11 raised to high, 2 partial, 0 corrected); capture and wire formats (Format:Thrift compact protocol, Format:SSLKEYLOGFILE with the RFC 9850 labels, Format:Linux cooked capture (SLL and SLL2); pcapng Decryption Secrets Block, more link types, first-byte tells on Technique:Reversing network protocols; the Linux "any" device defaults to SLL settled; 6 facts). Reports 113-115.
+- Raising a confidence took an edit_fact, which made the fact "claimed" again: verify with confirmed takes confidence (medium or high) and keeps the status.
+- A sweep could not start at a letter: the "*" listing takes title_from.
+- A replace whose text sits in another section names that section.

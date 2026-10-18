@@ -54,7 +54,7 @@ function truncate(text: string, maxTokens: number): { text: string; truncated: b
 
 // ---- search / identify / lookup ------------------------------------------------
 
-export function search(s: Services, args: { query: string; types?: string[]; subject?: string; build?: string; status?: string; confidence?: string; checkable?: boolean | string; unchecked?: boolean | string; limit?: number; cursor?: string; match?: 'all' | 'any' }) {
+export function search(s: Services, args: { query: string; types?: string[]; subject?: string; build?: string; status?: string; confidence?: string; checkable?: boolean | string; unchecked?: boolean | string; title_from?: string; limit?: number; cursor?: string; match?: 'all' | 'any' }) {
   const offset = args.cursor?.startsWith('after:') ? 0 : offsetOf(args.cursor);
   const limit = args.limit ?? 10;
   if (args.query.trim() === '*') {
@@ -63,7 +63,10 @@ export function search(s: Services, args: { query: string; types?: string[]; sub
     // Subjects by default; with a subject, everything of it (facts, notes, code, builds).
     const types = args.types?.length ? args.types : subject ? ['fact', 'notes', 'code', 'build', 'symbols', 'software', 'library', 'format', 'platform', 'technique', 'tool'] : ['software', 'library', 'format', 'platform', 'technique', 'tool'];
     // The cursor names the last title listed ("after:..."); a number is still read as an offset.
-    const after = args.cursor?.startsWith('after:') ? Buffer.from(args.cursor.slice(6), 'base64url').toString('utf8') : undefined;
+    // title_from starts at a title: "after" the string just below it (its last character one lower).
+    const from = args.title_from?.trim() ? args.title_from.trim() : undefined;
+    const after = args.cursor?.startsWith('after:') ? Buffer.from(args.cursor.slice(6), 'base64url').toString('utf8')
+      : from ? from.slice(0, -1) + String.fromCodePoint(Math.max(0, from.codePointAt(from.length - 1)! - 1)) + '\uFFFF' : undefined;
     const listed = s.index.listPages(types, after === undefined ? offset : 0, Math.min(limit, 50), subject, { status: args.status, confidence: args.confidence, checkable: args.checkable === true || args.checkable === 'true', unchecked: args.unchecked === true || args.unchecked === 'true', after });
     const last = listed.hits.at(-1)?.title;
     const full = listed.hits.length === Math.min(limit, 50);

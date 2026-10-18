@@ -433,7 +433,7 @@ export async function editFact(s: Services, caller: Caller, args: {
 
 // ---- verify ----------------------------------------------------------------------
 
-export async function verify(s: Services, caller: Caller, args: { target: string; result: string; method: string; build?: string; notes?: string }) {
+export async function verify(s: Services, caller: Caller, args: { target: string; result: string; method: string; build?: string; notes?: string; confidence?: 'medium' | 'high' }) {
   const op = requireWriter(s, caller);
   const t = title(s, args.target, ['fact', 'code']);
   assertClean([...scanText(args.method, 'summary'), ...scanText(args.notes ?? '', 'summary')]);
@@ -451,17 +451,23 @@ export async function verify(s: Services, caller: Caller, args: { target: string
     const independent = !sameOperator(s, doc.created_by, op) && !(doc.verifications ?? []).some((v) => sameOperator(s, v.operator, op) && v.result === res);
     doc.verifications = [...(doc.verifications ?? []), { operator: op.username, date, result: res, method: args.method, ...(build ? { build } : {}), ...(args.notes ? { notes: args.notes } : {}) }];
     const before = doc.status;
+    // A confirmation against the source may raise the confidence with it (an edit_fact for that made the fact "claimed" again).
+    const rank = { low: 0, medium: 1, high: 2 } as Record<string, number>;
+    const raised = args.confidence && res === 'confirmed' && (rank[args.confidence] ?? 0) > (rank[String(doc.confidence)] ?? 0) ? `${doc.confidence} → ${args.confidence}` : undefined;
+    if (args.confidence && res !== 'confirmed') throw new ToolError('BAD_REQUEST', 'confidence can only be raised with result confirmed.');
+    if (raised) doc.confidence = args.confidence!;
     if (res === 'confirmed' && independent && doc.status === 'claimed') doc.status = 'verified';
     if (res === 'refuted' && (doc.status === 'claimed' || doc.status === 'verified')) doc.status = 'disputed';
     const r = await mwEdit(s, op, {
       title: t, text: JSON.stringify(doc, null, 2), baserevid: page.revid, nocreate: true, tags: ['rewiki-verify'],
-      summary: `Verification: ${res} — ${shortSummary(args.method, 120)}${before !== doc.status ? ` (status ${before} → ${doc.status})` : ''}`,
+      summary: `Verification: ${res} — ${shortSummary(args.method, 120)}${before !== doc.status ? ` (status ${before} → ${doc.status})` : ''}${raised ? ` (confidence ${raised})` : ''}`,
     });
     if (!op.dryRun) s.db.logAction(op.id, 'verify', t, r.newrevid ?? null, res);
     await afterWrite(s, op, [t]);
     return result(s, t, r.newrevid, {
       status: doc.status,
       counted_as_independent: res === 'confirmed' ? independent : undefined,
+      confidence: raised ? doc.confidence : undefined,
       note: !independent && res === 'confirmed' ? 'Recorded, but confirmations by the fact\'s own operator do not change its status.' : undefined,
     });
   }
@@ -538,7 +544,8 @@ export async function editSection(s: Services, caller: Caller, input: {
     for (const [i, r] of args.replace.entries()) {
       const count = r.old ? markdown.split(r.old).length - 1 : 0;
       if (count !== 1) {
-        problems.push(`replace[${i}].old ${count ? `occurs ${count} times: include more surrounding text` : 'was not found in the section (compare with read, which shows the Markdown)'}`);
+        const elsewhere = !count && r.old ? sections.filter((x) => x !== target && x.level > 0 && wikitextToMarkdown(x.body).includes(r.old)).map((x) => x.heading) : [];
+        problems.push(`replace[${i}].old ${count ? `occurs ${count} times: include more surrounding text` : elsewhere.length ? `is not in "${args.section}" but in section "${elsewhere[0]}"` : 'was not found in the section (compare with read, which shows the Markdown)'}`);
         continue;
       }
       markdown = markdown.replace(r.old, () => r.new);

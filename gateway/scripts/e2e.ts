@@ -330,8 +330,11 @@ await expectError(a, 'add_fact', {
 ok('add_fact: function (build), magic (library), struct; duplicate detected');
 
 // ---- verification ------------------------------------------------------------------------
-const selfVerify = await call(a, 'verify', { target: fn.title, result: 'confirmed', method: 'hooked it again' });
+const selfVerify = await call(a, 'verify', { target: fn.title, result: 'confirmed', method: 'hooked it again', confidence: 'high' });
 assert.equal(selfVerify.status, 'claimed');
+// A confirmation may raise the confidence; the status stays.
+const raisedFact = await call(anon, 'read', { title: fn.title });
+assert.match(JSON.stringify(raisedFact), /"confidence": ?"high"/, JSON.stringify(raisedFact).slice(0, 300));
 const otherVerify = await call(b, 'verify', { target: fn.title, result: 'confirmed', method: 'set a breakpoint, weapon list loaded', build: build.title });
 assert.equal(otherVerify.status, 'verified');
 ok('verify: own confirmation does not count; independent operator → verified');
@@ -556,6 +559,8 @@ ok('export_symbols (Ghidra) and export_header (C, with padding)');
   assert.ok(b1.next_cursor?.startsWith('after:'), JSON.stringify(b1).slice(0, 300));
   const b2 = await call(anon, 'search', { query: '*', types: ['fact'], limit: 1, cursor: b1.next_cursor });
   assert.ok(b2.hits[0] && b2.hits[0].title > b1.hits[0].title, JSON.stringify(b2).slice(0, 300));
+  const fromE = await call(anon, 'search', { query: '*', types: ['fact'], limit: 1, title_from: 'Fact:E2E' });
+  assert.ok(fromE.hits[0] && fromE.hits[0].title >= 'Fact:E2E', JSON.stringify(fromE).slice(0, 300));
   ok('paging: related (with fact kind filter) and search report total + next_cursor');
 
   const topic = await call(a, 'create_page', {

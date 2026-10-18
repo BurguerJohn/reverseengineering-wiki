@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.80';
+export const VERSION = '0.8.81';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -338,6 +338,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       status: z.enum(['claimed', 'verified', 'disputed', 'rejected', 'deprecated', 'broken', 'open']).optional(),
       confidence: z.enum(['low', 'medium', 'high']).optional().describe('Only facts at this confidence (low and medium ones are worth checking)'),
       unchecked: z.union([z.boolean(), z.enum(['true', 'false'])]).optional().describe('With query "*": only facts nobody has verified yet'),
+      title_from: z.string().optional().describe('With query "*": start the listing at this title ("Fact:L"); then page with next_cursor'),
       checkable: z.union([z.boolean(), z.enum(['true', 'false'])]).optional().describe('With query "*": only facts whose evidence names a repository (checkable by reading it)'),
       limit: z.number().int().min(1).max(50).optional(),
       cursor: z.string().optional().describe('next_cursor from the previous page'),
@@ -570,6 +571,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       method: z.string().min(5).describe('How you checked'),
       build: z.string().optional(),
       notes: z.string().optional(),
+      confidence: z.enum(['medium', 'high']).optional().describe('Facts, with confirmed: raise the fact\'s confidence (e.g. after reading the exact source lines); the status is kept'),
     },
     annotations: WRITE,
   }, (c, a) => write.verify(s, c, a));
