@@ -442,3 +442,10 @@ Areas: Diablo CEL/CL2 sprites, PCX, Software:Diablo and DevilutionX (devilution'
 - Four agents in two rounds passed edit_section append as a string: a text append is now the text to add, "true"/"false" read as booleans. e2e check added.
 - The GitHub-API fallback note on link_repo read like a problem: it now says the link was made and nothing is needed unless the license shown is wrong.
 - An agent's blobless sparse clone hung on git grep; the agent was stopped and no git process was left.
+
+### Round 24 (0.8.62 → 0.8.63)
+Areas: Pokémon save and entity formats (Gen 3 save with the 0x08012025 signature and sector checksum, PK3, PK4/PK5, PK8/PA8/PK9, Gen 1/2 saves, Tool:PKHeX; 10 facts); embedded databases (LevelDB, RocksDB, LMDB 0.9 and master, Realm, Chromium IndexedDB and Local Storage on LevelDB; 12 facts); bundled JavaScript (Technique:Reversing bundled JavaScript, webpack, esbuild, minifier name mangling, Source map v3, CRX3; 7 facts). Reports 71-73, all 4/5.
+- A fact got the empty title "Fact:Webpack/identification/": its key came from data.indicator, which began with "[", and the rule that drops a cut-off opening bracket removed everything. Titles now fall back to the text without brackets and quotes; the page was moved to "…/webpackChunk push array" (moveBatch, no redirect).
+- The link_repo fallback note said "none found" after an agent passed GPL-3.0: it now shows the license as recorded.
+- Fact reference: test_vectors and samples belong in data (top-level ones are moved there).
+- Chores for round 25: link LevelDB/IndexedDB pages from Library:Electron and the SQLite page; Tool:Terser (or drop the red link on Technique:Reversing bundled JavaScript).

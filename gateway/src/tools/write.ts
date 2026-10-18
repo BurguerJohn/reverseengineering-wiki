@@ -1143,7 +1143,7 @@ export async function linkRepo(s: Services, caller: Caller, args: {
     repository: info, warnings: [info.license.startsWith('unrecognized') ? `GitHub did not recognize the license file ${info.license.slice(14, -1)}.${info.licenseHint ? ` It names "${info.licenseHint}".` : ''} Read it and run link_repo again with license (its SPDX id or expression): the entry is replaced.${info.licenseHint ? ' (In a dry run: pass license in the real call and no second call is needed.)' : ''}` : null,
       info.license === 'none' ? 'GitHub detected no license. If the repository has a license file or license headers, run link_repo again with license (its SPDX id, e.g. "Zlib"): the entry is replaced. Without a license, agents cannot legally reuse it.' : null,
       info.binaryReleaseAssets ? 'The latest release has binary downloads: the wiki links the source repository only, never the release files.' : null,
-      info.limited ? `Linked; GitHub's API was busy, so the commit came from git and the license from ${/read from/.test(info.license) ? 'the license file' : 'nowhere (none found)'}. Nothing to do unless the license shown is wrong (then pass license).` : null,
+      info.limited ? `Linked; GitHub's API was busy, so the commit came from git and the license is recorded as "${info.license}". Nothing to do unless that is wrong (then pass license).` : null,
       info.archived ? `The repository is archived (read-only${info.lastCommit ? `, last activity ${info.lastCommit.slice(0, 10)}` : ''}): its successor, if any, may be worth linking too.` : null].filter(Boolean),
   });
 }

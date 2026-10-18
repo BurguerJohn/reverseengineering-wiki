@@ -23,7 +23,7 @@ Every field below is required except `key` (inside a batch, the same object goes
 
 {{FACT_DATA_TABLE}}
 
-Every kind also takes `test_vectors` and `samples` (below). Every fact needs `evidence` (one file per entry: `{type: "source", repo, commit, path, lines}` for code you read; `runtime_test`, `byte_pattern`, `comparison`… for what you checked) and a `confidence`. Give it a short `key` (the page title) when the claim is a sentence.
+Every kind also takes `data.test_vectors` and `data.samples` (below; given at the top level they are moved into data). Every fact needs `evidence` (one file per entry: `{type: "source", repo, commit, path, lines}` for code you read; `runtime_test`, `byte_pattern`, `comparison`… for what you checked) and a `confidence`. Give it a short `key` (the page title) when the claim is a sentence.
 
 ## Scope and subjects
 

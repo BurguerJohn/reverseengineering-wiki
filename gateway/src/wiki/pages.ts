@@ -317,7 +317,12 @@ export function shortLabel(text: string, max = 60): string {
     const closed = open === close ? 0 : s.split(close).length - 1;
     if (open === close ? opened % 2 === 1 : opened > closed) s = s.slice(0, s.lastIndexOf(open)).trim();
   }
-  return s.replace(/[\s,;:.\-–—(]+$/, '').replace(/\s+(?:a|an|the|of|to|in|on|at|for|with|and|or|by|from|as|is)$/i, '').trim();
+  const label = s.replace(/[\s,;:.\-–—(]+$/, '').replace(/\s+(?:a|an|the|of|to|in|on|at|for|with|and|or|by|from|as|is)$/i, '').trim();
+  // A claim that starts with a quoted name ("`__webpack_require__` is ...") lost everything to the bracket rule:
+  // the words without quotes and backticks, rather than an empty title.
+  if (label.length >= 3) return label;
+  const plain = text.replace(/[`"'[\]()]/g, '').replace(/\s+/g, ' ').trim();
+  return plain.length > max ? plain.slice(0, Math.max(plain.slice(0, max + 1).lastIndexOf(' '), 12)).trim() : plain;
 }
 
 /** Fact page title: Fact:<subject base>/<kind>/<key>[ @ <build>] */
