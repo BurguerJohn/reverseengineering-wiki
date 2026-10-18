@@ -551,6 +551,11 @@ ok('export_symbols (Ghidra) and export_header (C, with padding)');
   assert.ok(s1.total > 1 && s1.next_cursor, JSON.stringify(s1));
   const s2 = await call(anon, 'search', { query: `E2E ${run}`, limit: 1, cursor: s1.next_cursor });
   assert.notDeepEqual(s2.hits[0], s1.hits[0]);
+  // The browse listing pages after the last title, so a shrinking list does not skip pages.
+  const b1 = await call(anon, 'search', { query: '*', types: ['fact'], limit: 1 });
+  assert.ok(b1.next_cursor?.startsWith('after:'), JSON.stringify(b1).slice(0, 300));
+  const b2 = await call(anon, 'search', { query: '*', types: ['fact'], limit: 1, cursor: b1.next_cursor });
+  assert.ok(b2.hits[0] && b2.hits[0].title > b1.hits[0].title, JSON.stringify(b2).slice(0, 300));
   ok('paging: related (with fact kind filter) and search report total + next_cursor');
 
   const topic = await call(a, 'create_page', {

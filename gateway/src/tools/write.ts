@@ -1099,7 +1099,8 @@ export async function linkRepo(s: Services, caller: Caller, args: {
 }) {
   const op = requireWriter(s, caller);
   assertClean([...scanText(`${args.description}\n${args.tested_on}`, 'summary'), ...scanText(args.url, 'repo')]);
-  const subjects = args.subjects.map((x) => subjectRoot(title(s, x, SUBJECTS)));
+  // A topic subpage that exists gets the link itself (it went to the parent page and replaced the parent's entry).
+  const subjects = args.subjects.map((x) => { const t = title(s, x, SUBJECTS); return s.index.page(t) ? t : subjectRoot(t); });
   if (!subjects.length) throw new ToolError('BAD_REQUEST', 'At least one subject is required.');
   // On the page given, or on every subject named (each gets the repository in Code & repositories).
   const targets = [...new Set([...(args.page ? [title(s, args.page, [...SUBJECTS, 'code'])] : []), ...subjects])];
@@ -1133,7 +1134,9 @@ export async function linkRepo(s: Services, caller: Caller, args: {
     info.license.startsWith('unrecognized') ? 'the license file was not recognized automatically: read it' : null,
   ].filter(Boolean).join('; ');
   const TESTED: Record<string, string> = { read: 'source read, not run', built: 'built', run: 'built and run', tested_against_build: 'checked against a real build' };
-  const testedOn = args.tested_how ? `${TESTED[args.tested_how] ?? args.tested_how}: ${args.tested_on}` : args.tested_on;
+  // "source read, not run: source read, not run" when tested_on repeated what tested_how says.
+  const how = args.tested_how ? TESTED[args.tested_how] ?? args.tested_how : undefined;
+  const testedOn = how && args.tested_on.trim().toLowerCase() !== how.toLowerCase() && args.tested_on.trim() ? `${how}: ${args.tested_on}` : how ?? args.tested_on;
   // Linking the same repository again without license keeps a license a contributor declared earlier,
   // instead of falling back to "none" (a batch's second link_repo overwrote a corrected entry).
   if (!args.license && (['none', 'unknown', 'NOASSERTION'].includes(info.license) || info.license.startsWith('unrecognized'))) {
@@ -1147,11 +1150,14 @@ export async function linkRepo(s: Services, caller: Caller, args: {
   const files = await repoRootFiles(info.url, info.commit);
 
   let r: { newrevid?: number } = {};
+  const descriptionsReplaced: string[] = [];
   for (const { target, page } of pages) {
     let sections = parseSections(page.content);
     const section = findSection(sections, 'Code & repositories');
     const lines = (section?.body ?? '').split('\n').filter((l) => !l.replace(/^\*\s*/, '').startsWith(`{{Repo|url=${info.url}|`));
-    const replaced = parseRepos(section?.body ?? '').some((x) => x.url === info.url);
+    const previous = parseRepos(section?.body ?? '').find((x) => x.url === info.url);
+    const replaced = !!previous;
+    if (previous?.description && previous.description !== args.description) descriptionsReplaced.push(`${target}: "${previous.description.slice(0, 120)}"`);
     const kept = lines.filter((l) => !/Nothing documented yet/.test(l));
     while (kept.length && !kept[0].trim()) kept.shift();
     while (kept.length && !kept[kept.length - 1].trim()) kept.pop();
@@ -1175,6 +1181,7 @@ export async function linkRepo(s: Services, caller: Caller, args: {
       info.license === 'none' ? 'GitHub detected no license. If the repository has a license file or license headers, run link_repo again with license (its SPDX id, e.g. "Zlib"): the entry is replaced. Without a license, agents cannot legally reuse it.' : null,
       info.binaryReleaseAssets ? 'The latest release has binary downloads: the wiki links the source repository only, never the release files.' : null,
       info.limited ? `Linked; GitHub's API was busy, so the commit came from git and the license is recorded as "${info.license}". Nothing to do unless that is wrong (then pass license).` : null,
+      descriptionsReplaced.length ? `This repository was already linked there; its description was replaced (was ${descriptionsReplaced.join('; ')}). If the old one said more, link again with a description that keeps both.` : null,
       info.archived ? `The repository is archived (read-only${info.lastCommit ? `, last activity ${info.lastCommit.slice(0, 10)}` : ''}): its successor, if any, may be worth linking too.` : null].filter(Boolean),
   });
 }

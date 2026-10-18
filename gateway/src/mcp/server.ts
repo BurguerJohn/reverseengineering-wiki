@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.76';
+export const VERSION = '0.8.77';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -534,7 +534,12 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       topic: z.string().optional().describe('A topic subpage of the subject to list the fact on (the same as subject "<subject>/<topic>"); the fact is stored on the subject'),
     },
     annotations: WRITE,
-  }, (c, { topic, ...a }) => write.addFact(s, c, topic?.trim() && !String(a.subject).includes('/') ? { ...a, subject: `${a.subject}/${topic.trim()}` } : a));
+  }, (c, { topic, ...a }) => {
+    // The topic as its name ("Minifilter drivers") or as the whole subpage title ("Platform:Windows/Minifilter drivers").
+    const sub = String(a.subject).trim();
+    const name = topic?.trim().startsWith(`${sub}/`) ? topic.trim().slice(sub.length + 1) : topic?.trim();
+    return write.addFact(s, c, name && !sub.includes('/') ? { ...a, subject: `${sub}/${name}` } : a);
+  });
 
   registerWrite('edit_fact', {
     title: 'Correct a fact',

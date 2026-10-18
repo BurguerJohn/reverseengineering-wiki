@@ -55,15 +55,19 @@ function truncate(text: string, maxTokens: number): { text: string; truncated: b
 // ---- search / identify / lookup ------------------------------------------------
 
 export function search(s: Services, args: { query: string; types?: string[]; subject?: string; build?: string; status?: string; confidence?: string; checkable?: boolean | string; limit?: number; cursor?: string; match?: 'all' | 'any' }) {
-  const offset = offsetOf(args.cursor);
+  const offset = args.cursor?.startsWith('after:') ? 0 : offsetOf(args.cursor);
   const limit = args.limit ?? 10;
   if (args.query.trim() === '*') {
     // Browse: every page of the given types (subjects by default), by title.
     const subject = args.subject ? s.index.resolveRedirect(normalizeTitle(args.subject)) : undefined;
     // Subjects by default; with a subject, everything of it (facts, notes, code, builds).
     const types = args.types?.length ? args.types : subject ? ['fact', 'notes', 'code', 'build', 'symbols', 'software', 'library', 'format', 'platform', 'technique', 'tool'] : ['software', 'library', 'format', 'platform', 'technique', 'tool'];
-    const listed = s.index.listPages(types, offset, Math.min(limit, 50), subject, { status: args.status, confidence: args.confidence, checkable: args.checkable === true || args.checkable === 'true' });
-    return { query: '*', types, total: listed.total, hits: listed.hits, next_cursor: offset + listed.hits.length < listed.total ? String(offset + listed.hits.length) : undefined };
+    // The cursor names the last title listed ("after:..."); a number is still read as an offset.
+    const after = args.cursor?.startsWith('after:') ? Buffer.from(args.cursor.slice(6), 'base64url').toString('utf8') : undefined;
+    const listed = s.index.listPages(types, after === undefined ? offset : 0, Math.min(limit, 50), subject, { status: args.status, confidence: args.confidence, checkable: args.checkable === true || args.checkable === 'true', after });
+    const last = listed.hits.at(-1)?.title;
+    const full = listed.hits.length === Math.min(limit, 50);
+    return { query: '*', types, total: listed.total, hits: listed.hits, next_cursor: last && full ? `after:${Buffer.from(last, 'utf8').toString('base64url')}` : undefined };
   }
   const { hits, total } = s.index.search({
     ...args,
@@ -433,6 +437,7 @@ export async function read(s: Services, args: { title: string; section?: string;
   const infobox = parseInfobox(page.content);
   let body: string;
   let sectionName: string | undefined;
+  let subsectionsNote: string | undefined;
   if (args.section !== undefined && args.section !== '') {
     // "3DSX" for "3DSX homebrew": a heading that starts with what was asked, when only one does.
     const starts = sections.filter((x) => x.level > 0 && headingKey(x.heading).startsWith(headingKey(args.section!)));
@@ -440,6 +445,12 @@ export async function read(s: Services, args: { title: string; section?: string;
     if (!sec) throw new ToolError('NOT_FOUND', `No section "${args.section}".`, { outline });
     sectionName = sec.level === 0 ? 'Summary' : sec.heading;
     body = sec.level === 0 ? wikitextToMarkdown(splitInfobox(sec.text).rest) : wikitextToMarkdown(sec.body);
+    // A section that is only a heading over subsections reads as them (it read as empty, and agents edited blind).
+    const [from, to] = sectionBlock(sections, sec.index);
+    if (sec.level > 0 && !body.trim() && to > from + 1) {
+      body = wikitextToMarkdown(sections.slice(from + 1, to).map((x) => x.text).join('\n'));
+      subsectionsNote = `"${sec.heading}" has no text of its own: these are its subsections (${sections.slice(from + 1, to).map((x) => x.heading).join(', ')}); edit each by its own heading.`;
+    }
   } else {
     body = wikitextToMarkdown(page.content.replace(splitInfobox(sections[0]?.text ?? '').infobox ?? '', ''));
   }
@@ -459,6 +470,7 @@ export async function read(s: Services, args: { title: string; section?: string;
   return {
     ...base,
     section: sectionName,
+    subsections_note: subsectionsNote,
     parent: isTopicPage(title) ? root : undefined,
     topics: topics.length ? topics.map((t) => ({ title: t.title, summary: t.summary.slice(0, 200) })) : undefined,
     infobox,

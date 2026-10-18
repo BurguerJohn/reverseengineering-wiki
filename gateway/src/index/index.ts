@@ -793,7 +793,7 @@ export class SearchIndex {
   }
 
   /** Every page of some types, by title (search with query "*"). */
-  listPages(types: string[], offset: number, limit: number, subject?: string, filters: { status?: string; confidence?: string; checkable?: boolean } = {}): { hits: Array<{ title: string; type: string; summary: string; status: string | null; revision: number }>; total: number } {
+  listPages(types: string[], offset: number, limit: number, subject?: string, filters: { status?: string; confidence?: string; checkable?: boolean; after?: string } = {}): { hits: Array<{ title: string; type: string; summary: string; status: string | null; revision: number }>; total: number } {
     const placeholders = types.map(() => '?').join(', ');
     // With a subject: its own pages (facts, notes, code, builds of it). status and confidence narrow the listing too
     // (the "*" listing ignored them, so "facts at low confidence" listed every fact).
@@ -802,8 +802,10 @@ export class SearchIndex {
       + `${filters.checkable ? ' and title in (select title from facts where repo_evidence = 1)' : ''}`;
     const params = [...types, ...(subject ? [subject, subject] : []), ...(filters.status ? [filters.status] : []), ...(filters.confidence ? [filters.confidence] : [])];
     const total = (this.db.prepare(`select count(*) as n from pages where ${where}`).get(...params) as { n: number }).n;
-    const hits = this.db.prepare(`select title, type, summary, status, revision from pages where ${where} order by title limit ? offset ?`)
-      .all(...params, limit, offset) as any[];
+    // After a title, not an offset: a sweep that raises facts out of a confidence filter shrinks the list as it pages.
+    const hits = (filters.after !== undefined
+      ? this.db.prepare(`select title, type, summary, status, revision from pages where ${where} and title > ? order by title limit ?`).all(...params, filters.after, limit)
+      : this.db.prepare(`select title, type, summary, status, revision from pages where ${where} order by title limit ? offset ?`).all(...params, limit, offset)) as any[];
     return { hits: hits.map((h) => ({ ...h, summary: String(h.summary ?? '').slice(0, 200) })), total };
   }
 
