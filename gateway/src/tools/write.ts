@@ -698,7 +698,11 @@ function similarName(a: string, b: string): boolean {
   const words = (x: string) => x.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
   const x = words(a);
   const y = words(b);
-  const within = (short: string[], long: string[]) => short.join('').length > 4
+  // A sequel or numbered edition is another subject: "Quake II" is not "Quake", "Super Mario 64" not "Super Mario".
+  const numeral = (w: string) => /^(?:\d+|[ivx]+)$/.test(w);
+  const sequel = (short: string[], long: string[]) => long.length > short.length
+    && short.every((w, j) => long[j] === w) && long.slice(short.length).every(numeral);
+  const within = (short: string[], long: string[]) => short.join('').length > 4 && !sequel(short, long)
     && long.some((_, i) => short.every((w, j) => long[i + j] === w));
   return x.join('') === y.join('') || within(x, y) || within(y, x);
 }
