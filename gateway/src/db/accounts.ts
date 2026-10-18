@@ -37,6 +37,8 @@ export interface FeedbackRow {
   rating: number | null;
   /** JSON: [{title, revid, timestamp, comment, diff}] of what the account published before the report. */
   revisions: string;
+  /** What the agent worked on, in its words (several agents can share one account). */
+  task?: string | null;
 }
 
 export interface TokenRow {
@@ -300,6 +302,8 @@ export class AccountsDb {
     if (!tokenColumns.includes('oauth_client_id')) this.db.exec('alter table tokens add column oauth_client_id text');
     const operatorColumns = (this.db.prepare('pragma table_info(operators)').all() as Array<{ name: string }>).map((c) => c.name);
     if (!operatorColumns.includes('feedback')) this.db.exec('alter table operators add column feedback integer not null default 0');
+    const feedbackColumns = (this.db.prepare('pragma table_info(feedback)').all() as Array<{ name: string }>).map((c) => c.name);
+    if (!feedbackColumns.includes('task')) this.db.exec('alter table feedback add column task text');
   }
 
   // ---- operators -----------------------------------------------------------
@@ -377,8 +381,8 @@ export class AccountsDb {
   }
 
   insertFeedback(f: Omit<FeedbackRow, 'id'>): number {
-    const r = this.db.prepare(`insert into feedback (operator_id, username, created_at, client, experience, problems, suggestions, rating, revisions)
-      values (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(f.operator_id, f.username, f.created_at, f.client, f.experience, f.problems, f.suggestions, f.rating, f.revisions);
+    const r = this.db.prepare(`insert into feedback (operator_id, username, created_at, client, experience, problems, suggestions, rating, revisions, task)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(f.operator_id, f.username, f.created_at, f.client, f.experience, f.problems, f.suggestions, f.rating, f.revisions, f.task ?? null);
     return Number(r.lastInsertRowid);
   }
 

@@ -298,6 +298,9 @@ const notAgain = parse(await client.callTool({ name: 'add_note', arguments: { su
 assert.equal(notAgain.feedback_request, undefined, 'asked once per session');
 const report = parse(await client.callTool({ name: 'send_feedback', arguments: { experience: 'The notes published fine; the review prompt was clear.', suggestions: 'Nothing for this test.', rating: 5 } }));
 assert.ok(report.received && report.attached_revisions >= 2, JSON.stringify(report));
+// Several agents on one account: a report that names its pages carries only those pages' revisions.
+const own = parse(await client.callTool({ name: 'send_feedback', arguments: { experience: 'Only my own page belongs in this report.', task: 'one note', published: [askedOnce.title, 'Format:Never Edited Here'] } }));
+assert.ok(own.received && own.attached_revisions === 1 && /1 named pages/.test(own.not_found ?? ''), JSON.stringify(own));
 const promptsBeforeOff = prompts.length;
 assert.equal(parse(await client.callTool({ name: 'account_set_feedback', arguments: { enabled: false } })).feedback, 'off');
 assert.equal(prompts.length, promptsBeforeOff, 'turning it off needs no confirmation');

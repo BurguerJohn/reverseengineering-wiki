@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.37';
+export const VERSION = '0.8.38';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -1048,25 +1048,38 @@ function registerAccountTools(s: Services, server: McpServer, caller: Caller, ac
       problems: z.string().max(4000).optional().describe('What was hard, wrong or confusing, with exact error texts'),
       suggestions: z.string().max(4000).optional().describe('What would have saved you time, most important first'),
       rating: z.number().int().min(1).max(5).optional().describe('1 (got in the way) to 5 (saved a lot of time)'),
+      task: z.string().max(200).optional().describe('What you worked on, in a few words (several agents may share one account)'),
+      published: z.array(z.string()).max(300).optional().describe('Titles of the pages you published or edited: the server attaches their revisions from the wiki\'s history (only edits this account really made)'),
     },
   }, handler(async (a: any) => {
     const op = current();
     if (op.feedback !== 1) throw new ToolError('FEEDBACK_OFF', 'Your operator has not chosen to help improve the wiki, so no report is sent. They can turn it on on the authorization page, or ask you to call account_set_feedback.');
     assertClean(scanText(`${a.experience}\n${a.problems ?? ''}\n${a.suggestions ?? ''}`, 'note'));
-    // What the account published since its last report (at most a day back): from the wiki's own history.
-    const since = s.db.lastFeedbackAt(op.id) ?? new Date(Date.now() - 24 * 3600_000).toISOString();
+    // What was published, from the wiki's own history: the pages the agent names (its own work, when several agents
+    // share the account), else everything since the account's last report; at most two days back.
+    const named = new Set<string>((a.published ?? []).map((t: string) => { try { return normalizeTitle(t); } catch { return t.trim(); } }));
+    const since = named.size ? new Date(Date.now() - 48 * 3600_000).toISOString() : s.db.lastFeedbackAt(op.id) ?? new Date(Date.now() - 24 * 3600_000).toISOString();
     let revisions: Array<Record<string, unknown>> = [];
+    let unmatched: string[] = [];
     try {
-      const changes = await s.sessions.reader.recentChanges({ user: op.username, start: since, dir: 'newer', limit: 300 });
-      revisions = changes.filter((c) => c.revid).map((c) => ({ title: c.title, revid: c.revid, timestamp: c.timestamp, comment: (c.comment ?? '').slice(0, 200), diff: `${s.config.mw.publicUrl}/index.php?diff=${c.revid}` }));
+      const changes = await s.sessions.reader.recentChanges({ user: op.username, start: since, dir: 'newer', limit: 1000 });
+      const mine = named.size ? changes.filter((c) => named.has(c.title)) : changes;
+      revisions = mine.filter((c) => c.revid).map((c) => ({ title: c.title, revid: c.revid, timestamp: c.timestamp, comment: (c.comment ?? '').slice(0, 200), diff: `${s.config.mw.publicUrl}/index.php?diff=${c.revid}` }));
+      const seen = new Set(mine.map((c) => c.title));
+      unmatched = [...named].filter((t) => !seen.has(t));
     } catch {
       // History is best effort: the report is kept without it.
     }
     const id = s.db.insertFeedback({
       operator_id: op.id, username: op.username, created_at: new Date().toISOString(), client: null,
       experience: a.experience, problems: a.problems ?? null, suggestions: a.suggestions ?? null, rating: a.rating ?? null, revisions: JSON.stringify(revisions),
+      task: a.task ?? null,
     });
-    return { received: true, report: id, attached_revisions: revisions.length, note: 'Thank you. The report is private: the maintainers read it together with the list of what you published.' };
+    return {
+      received: true, report: id, attached_revisions: revisions.length,
+      not_found: unmatched.length ? `${unmatched.length} named pages have no edit by this account in the last two days: ${unmatched.slice(0, 5).join(', ')}` : undefined,
+      note: 'Thank you. The report is private: the maintainers read it together with the list of what you published.',
+    };
   }));
   if (!accounts) return;
   server.registerTool('account_rename', {

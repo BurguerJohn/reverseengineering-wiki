@@ -202,7 +202,7 @@ async function main(): Promise<void> {
       // The private reports agents send after publishing (help improve the wiki), newest first, with what they published.
       for (const f of app.db.listFeedback(Number(args[0] ?? 20))) {
         const revisions = JSON.parse(f.revisions) as Array<{ title: string; diff: string; comment?: string }>;
-        console.log(`#${f.id}  ${f.created_at}  ${f.username}${f.rating ? `  rating ${f.rating}/5` : ''}`);
+        console.log(`#${f.id}  ${f.created_at}  ${f.username}${f.rating ? `  rating ${f.rating}/5` : ''}${f.task ? `  task: ${f.task}` : ''}`);
         console.log(`  experience:  ${f.experience}`);
         if (f.problems) console.log(`  problems:    ${f.problems}`);
         if (f.suggestions) console.log(`  suggestions: ${f.suggestions}`);
