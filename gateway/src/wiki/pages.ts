@@ -99,7 +99,7 @@ export function structLayoutProblems(data: Record<string, unknown>): string[] {
     .filter((f) => f.offset !== null && f.size !== null && f.size > 0) as Array<{ name: string; offset: number; size: number; conditional: boolean }>;
   const out: string[] = [];
   const unplaced = fields.filter((f) => !flexible(f) && layoutNum(f.offset) === null).map((f) => String(f.name ?? '?'));
-  if (unplaced.length) out.push(`${unplaced.slice(0, 3).join(', ')}${unplaced.length > 3 ? ` and ${unplaced.length - 3} more` : ''} ${unplaced.length > 1 ? 'have' : 'has'} no offset (fields are {offset, size, type, name}; exports place fields by offset)`);
+  if (unplaced.length) out.push(`${unplaced.slice(0, 3).join(', ')}${unplaced.length > 3 ? ` and ${unplaced.length - 3} more` : ''} ${unplaced.length > 1 ? 'have' : 'has'} no offset (fields are {offset, size, type, name}; exports place fields by offset). A field present only in some versions takes condition ("version >= 7") with the offset it has there; fields after a variable-length one go in their own struct fact, offsets from its start ("FPakInfo tail"), linked from this one's notes`);
   const offsets = new Map<number, number>();
   for (const f of placed) offsets.set(f.offset, (offsets.get(f.offset) ?? 0) + 1);
   const plain = placed.filter((f) => !f.conditional && offsets.get(f.offset) === 1).sort((a, b) => a.offset - b.offset);
@@ -254,7 +254,7 @@ export function checkFactData(kind: FactKind, data: Record<string, unknown>): st
       break;
     case 'struct': {
       need('name'); need('fields');
-      if (data.fields !== undefined && !Array.isArray(data.fields)) problems.push('data.fields must be an array of {offset, size, type, name}');
+      if (data.fields !== undefined && !Array.isArray(data.fields)) problems.push('data.fields must be an array, one object per field: [{"offset": "0x0", "size": 4, "type": "uint32_t", "name": "magic"}, {"offset": "0x4", "size": 2, "type": "uint16_t", "name": "version"}]');
       const ranged = data.size_min !== undefined || data.size_max !== undefined;
       if (data.size === 'variable') {
         // Variable-length records (a count field followed by entries): fine, say how long in notes.

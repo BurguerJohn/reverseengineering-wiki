@@ -48,7 +48,7 @@ Every kind also takes `data.test_vectors` and `data.samples` (below; given at th
 ## Structs, typedefs and enums
 
 - Struct fields: `{offset, size, type, name, notes?, bits?, condition?}`. Types as C spells them (`uint32_t`, `unsigned short`, `const char *`, `Foo *`); `uint8`, `u32`, `int16_le`, `uint32_be`, `f32` are read as stdint types with the byte order noted.
-- `bits: [{bit: "0" or "4-5", name, notes?}]` for flags; `condition: "flags & 0x08"` for a field present only when a flag is set.
+- `bits: [{bit: "0" or "4-5", name, notes?}]` for flags; `condition: "flags & 0x08"` for a field present only when a flag is set, or `condition: "version >= 7"` for one present only in some versions (each version's offset as its own field with its condition). Fields that follow a variable-length field have no fixed offset: describe them as a second struct fact whose offsets count from where that part starts, and link it in notes.
 - Exact size unknown: `size_min` and/or `size_max`. Entries after a header or a trailing name: the last field typed `T[]` or `T[count_field]` (a C flexible array member; `size` is then the fixed part, or `"variable"` without `size_min`/`size_max`). A field after a variable part can have an offset like `"4+length"`: it is written as a comment.
 - Library types (`FT_Long`, `DWORD`, `j_common_ptr`): one `typedef` fact each (`{name, type}`), so headers use them instead of bytes.
 - Layouts that differ by ABI: `data.abi` (`"win64"`, `"lp64"`, `"ilp32"`) on struct and typedef facts, one fact per ABI; `export_header` takes `abi`. Other variants of one layout (a 32- or 64-bit target of a file format, ANSI or Unicode): `data.variant`, and `export_header` takes `variant`.

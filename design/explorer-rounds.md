@@ -512,3 +512,9 @@ Areas: Windows drivers (Platform:Windows/Minifilter drivers, Format:Windows driv
 - add_fact topic given as the whole subpage title ("Platform:Windows/Minifilter drivers") became Platform:Windows/Platform:Windows/…: the subject prefix is stripped.
 - Reading a section that is only a heading over subsections returned empty: it reads as its subsections, with a note to edit each by its heading.
 - link_repo on an existing topic page links it there (it went to the parent); replacing an entry's different description is reported; "source read, not run: source read, not run" no longer repeats.
+
+### Round 35 (0.8.77 → 0.8.78)
+Areas: Unreal containers (pak version enum, footer sizes per version, v10 index and secondary indexes, FNV64 path hash, encoded entries; IoStore chunk ids, types, flags, block packing, container header; Zen package summary; UE4/UE5 object versions; 16 facts from repak and CUE4Parse); fact sweep (12 confirmed and raised, 2 partial, 1 evidence repaired: kPrefixSuffix cited a path absent at its commit); home-computer disk and tape images (8 Platform pages and 13 Format pages: D64/D71/D81, G64, ADF, ST/MSA, ATR, 2IMG, WOZ, TAP/TZX, Z80, CPC DSK, MSX DSK, HFE, SCP; 11 facts). Reports 104-106.
+- publish_checked with replace and no dry_run made a dry run (since 0.8.75) but marked the original check as published with that dry answer, so a retry of it returned the dry run: only a real publish marks a check now, and the re-check says not_published.
+- The batch description lists its run order (edit_fact runs before verify whatever the order given).
+- The "no offset" warning and the fact reference point to condition ("version >= 7") and to a second struct fact for fields after a variable-length one; the fields-must-be-an-array error shows an example.

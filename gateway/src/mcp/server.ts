@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.77';
+export const VERSION = '0.8.78';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -770,7 +770,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   server.registerTool('batch', {
     title: 'Several writes at once',
-    description: 'Up to 50 writes in one call (a page with its build, facts and code), run in dependency order so later operations can use what earlier ones create. dry_run checks all of them and reports every failure at once (one approval in review mode); a real run stops at the first error and says what was published. Refused whole when over the hourly quota. Keep a call under ~20 KB.',
+    description: 'Up to 50 writes in one call (a page with its build, facts and code), run in dependency order so later operations can use what earlier ones create (create_page; register_build, add_code; add_fact, add_note, add_symbols, link_repo, ask; edit_section, edit_fact; verify, patrol, flag; revert; your order within each step). dry_run checks all of them and reports every failure at once (one approval in review mode); a real run stops at the first error and says what was published. Refused whole when over the hourly quota. Keep a call under ~20 KB.',
     inputSchema: {
       dry_run: DRY_RUN,
       quiet: z.boolean().optional().describe('With dry_run: list the pages that would be written without their contents (smaller answers for large batches)'),
@@ -887,8 +887,12 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     const changed = !!((a.replace && Object.keys(a.replace).length) || (a.amend && Object.keys(a.amend).length) || (Array.isArray(a.append) && a.append.length));
     const dry = a.dry_run ?? changed;
     const result = await handlers.get(tool)!({ ...args, ...(dry ? { dry_run: true, ...(a.quiet ? { quiet: true } : {}) } : {}), ...(a.review_id ? { review_id: a.review_id } : {}) }, extra);
-    for (const id of a.merge ?? []) if (!result.isError && !a.dry_run) { const other = CHECKED.get(String(id)); if (other) other.published = result; }
-    if (!result.isError && !a.dry_run) checked.published = result;
+    // Only a real publish marks the checks as used (an implicit re-check is not one).
+    for (const id of a.merge ?? []) if (!result.isError && !dry) { const other = CHECKED.get(String(id)); if (other) other.published = result; }
+    if (!result.isError && !dry) checked.published = result;
+    if (!result.isError && dry && a.dry_run === undefined && result.structuredContent) {
+      return ok({ ...result.structuredContent, not_published: 'Nothing was published: with replace, amend or append the changed version is checked first. Publish it with publish_checked and the check_id of this answer (or pass dry_run false to publish changes at once).' });
+    }
     return result;
   }) as any);
 
