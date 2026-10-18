@@ -413,3 +413,9 @@ Areas: symbol coverage of existing decompilations (Metroid Prime +1,075 names af
 - Chore for round 19: Pikmin 2 GPVP01 symbol import, now that the page fits.
 
 - Owner raised the limit: PatientStepper99 promoted to trusted (1000 writes/h). Rounds no longer wait for the quota; the per-agent budget stays ~35 (quality, not quota).
+
+### Round 19 (0.8.57 → 0.8.58), first round on the trusted quota
+Areas: regional builds with symbols (Pikmin 2 GPVP01 now fits after the compact symbol pages, GPVJ01; Sunshine GMSJ01_01, GMSP01_NX; Twilight Princess GZ2P01, GZ2J01; Prime GM8EAB_00, GM8J01_DD); gettext MO, Qt QM (its magic now confirmed in qtranslator.cpp), ICU data files, RT_MESSAGETABLE, WOFF 1.0 (8 facts); Compound File Binary, MSI, CAB, MSIX and MSU (leads), Squirrel.Windows packages (10 facts). Reports 56-58, all 4/5. The quota never limited (825 of 1000 left).
+- Three reports found create_page/edit_section arguments only by error inside a batch, whose operations take free-form arguments: the batch schema now lists every write tool's arguments (? for optional), generated from the tool schemas.
+- publish_checked replace written as {"3": {"arguments": {...}}} merged "arguments" as a field and dropped it silently, so a license fix did nothing: that shape now means "these fields".
+- Left for round 20: Twilight Princess Wii and Prime Wii/Trilogy versions; Pikmin 2 debug builds.

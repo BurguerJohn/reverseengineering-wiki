@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.57';
+export const VERSION = '0.8.58';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -763,7 +763,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       ...(review ? { review_id: REVIEW_ID } : {}),
       operations: z.array(z.object({
         tool: z.enum([...writeTools.keys()] as [string, ...string[]]),
-        arguments: z.record(z.string(), z.unknown()).describe('The same arguments as that tool, without dry_run'),
+        arguments: z.record(z.string(), z.unknown()).describe(`The same arguments as that tool, without dry_run. By tool (? = optional): ${batchArgumentList(writeTools)}`),
       })).min(1).max(MAX_BATCH),
     },
     annotations: WRITE,
@@ -823,11 +823,13 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       const ops = Array.isArray(args.operations) ? [...(args.operations as Array<{ tool: string; arguments: Record<string, unknown> }>)] : null;
       if (tool !== 'batch' || !ops) return fail(new ToolError('BAD_REQUEST', 'replace works on batch checks only.'));
       const dropped = new Set<number>();
-      for (const [k, v] of Object.entries(a.replace as Record<string, Record<string, unknown> | null>)) {
+      for (let [k, v] of Object.entries(a.replace as Record<string, Record<string, unknown> | null>)) {
         const n = Number(k);
         if (!Number.isInteger(n) || n < 1 || n > ops.length) return fail(new ToolError('BAD_REQUEST', `replace: operation ${k} does not exist (1-${ops.length}).`));
         // null drops the operation; {tool, arguments} swaps the tool; anything else is the new arguments of the same tool.
         if (v === null) { dropped.add(n - 1); continue; }
+        // {arguments: {...}} without a tool: those are the fields to change (agents write it like a batch operation).
+        if (v.tool === undefined && v.arguments && typeof v.arguments === 'object' && Object.keys(v).length === 1) v = v.arguments as Record<string, unknown>;
         const swap = typeof v.tool === 'string' && v.arguments && typeof v.arguments === 'object' && Object.keys(v).length === 2;
         if (swap && !handlers.has(String(v.tool))) return fail(new ToolError('BAD_REQUEST', `replace: "${v.tool}" is not a write tool.`));
         // Same tool: the given fields replace those of the checked operation (null removes one); the rest is kept.
@@ -903,6 +905,15 @@ function madeBy(tool: string, args: Record<string, unknown>): string[] {
 }
 
 /** Order inside a batch: what others depend on first. */
+/** "add_note(subject, body, key?)": each write tool's arguments, so a batch shows what its operations take. */
+function batchArgumentList(tools: Map<string, { schema: z.ZodTypeAny }>): string {
+  return [...tools].map(([name, { schema }]) => {
+    const shape = ((schema as z.ZodObject<any>).shape ?? {}) as Record<string, z.ZodTypeAny>;
+    const args = Object.entries(shape).filter(([k]) => k !== 'review_id').map(([k, v]) => (v.isOptional() ? `${k}?` : k));
+    return `${name}(${args.join(', ')})`;
+  }).join('; ');
+}
+
 const BATCH_ORDER: Record<string, number> = {
   create_page: 0, register_build: 2, add_code: 2, add_fact: 3, add_note: 3, add_symbols: 3, link_repo: 3, ask: 3,
   edit_section: 4, split_section: 4, edit_fact: 4, verify: 5, patrol: 5, flag: 5, revert: 6,
