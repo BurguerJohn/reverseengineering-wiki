@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.59';
+export const VERSION = '0.8.60';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -160,7 +160,9 @@ function writeHandler(s: Services, caller: Caller, name: string, fn: (caller: Ca
     });
   };
   const body = async (args: any, extra: Extra): Promise<Record<string, unknown>> => {
-    const { dry_run: dryRun, review_id: reviewId, quiet, ...rest } = args ?? {};
+    const { dry_run: dryRun, review_id: reviewId, quiet: asked, ...rest } = args ?? {};
+    // Symbol maps are thousands of lines: their dry runs list pages and sizes unless quiet: false is asked.
+    const quiet = asked ?? (name === 'import_symbols' || name === 'add_symbols');
     const mode = caller.operator ? s.db.operatorById(caller.operator.id)?.mode : undefined;
     const reviewed = !!review && mode === 'review';
     if (dryRun) {

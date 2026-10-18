@@ -426,3 +426,8 @@ Areas: Wii versions with symbols (Twilight Princess RZDE01_02, RZDP01, RZDJ01; M
 - quiet was only on batch and publish_checked: every write tool's dry run takes it now (a symbol import preview was huge).
 - My briefs said one write per 2000 symbols; the importer packs 5000 per write.
 - Chores for round 21: ZIP, FlatBuffers and Pickle general pages (three ML formats needed them); the EVTX header fact (chunk count 2 vs 4 bytes at 0x2A against libevtx); the unescaped onnxruntime_providers_* on Library:ONNX Runtime; Pikmin 2 debug builds; Twilight Princess REL symbols.
+
+### Round 21 (0.8.59 → 0.8.60)
+Areas: general formats other pages needed (ZIP, FlatBuffers, Python pickle, MessagePack, CBOR, BSON; 8 facts; See also on seven dependent pages); a fix-up round checked against sources (EVTX chunk count is 4 bytes at 42; ONNX Runtime escaping; Metroid Prime's CC0 license; Pikmin 2 D17/D18 are demos, not debug builds, imported with ~47k symbols each; two pcapng Unverified marks resolved by the IETF draft); microcontroller firmware (Platform:ARM Cortex-M with SCB/NVIC/SysTick hardware addresses, CMSIS-SVD, SVD-Loader, UF2, ESP32 image, Intel HEX, S-record, FreeRTOS, Zephyr, MCUboot; 20 facts). Reports 62-64, all 4/5.
+- A second ECONNRESET between agent and gateway: Node's HTTP keep-alive (5 s) was shorter than Apache's proxy reuse, so Apache sometimes sent a request on a connection Node had just closed. keepAliveTimeout 75 s, headersTimeout 76 s (above Apache's 65 s).
+- Symbol dry runs (import_symbols, add_symbols) are quiet by default (pages and sizes); quiet: false shows the text. Two agents had their context flooded.

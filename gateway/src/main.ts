@@ -89,6 +89,10 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     setTimeout(() => process.exit(0), 1_000).unref();
   });
 }
+// Apache reuses its proxy connections to the gateway: Node's default 5 s keep-alive closed them under Apache's
+// feet, and the next request through such a connection failed with ECONNRESET at the client.
+server.keepAliveTimeout = 75_000;
+server.headersTimeout = 76_000;
 server.listen(app.config.port, app.config.host, () => {
   log(`ReverseEngineering.wiki gateway listening on ${app.config.publicUrl} (MCP: ${app.config.publicUrl}/mcp)`);
 });
