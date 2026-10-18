@@ -35,6 +35,13 @@ test('decomp-toolkit symbols.txt', () => {
   assert.equal(r.symbols.length, 4);
 });
 
+test('function lists as CSV with a header (Switch decompilations)', () => {
+  const r = parseSymbolFile('Address,Quality,Size,Name\n0x0000007100000024,U,000316,_init\n0x0000007100000194,U,000008,\n0x0000007100000200,O,000012,ksys::foo\n');
+  assert.equal(r.format, 'csv');
+  assert.deepEqual(r.symbols, [{ va: '0x7100000024', name: '_init', kind: 'function', size: 316 }, { va: '0x7100000200', name: 'ksys::foo', kind: 'function', size: 12 }]);
+  assert.equal(r.unread, 1);
+});
+
 test('nm output and address/name pairs', () => {
   const nm = parseSymbolFile('0000000000401136 0000000000000020 T main\n0000000000404028 B g_count\n                 U puts\n');
   assert.equal(nm.format, 'nm');

@@ -9,8 +9,36 @@ import { addSymbols, recordSymbolImport } from './write.ts';
 import { ToolError, quotaError, requireWriter, type Caller, type Services } from './context.ts';
 import { remainingWrites } from '../auth/trust.ts';
 
-export type SymbolFileFormat = 'linker' | 'nm' | 'pairs';
-export const SYMBOL_FILE_FORMATS = ['auto', 'linker', 'nm', 'pairs'] as const;
+export type SymbolFileFormat = 'linker' | 'nm' | 'pairs' | 'csv';
+export const SYMBOL_FILE_FORMATS = ['auto', 'linker', 'nm', 'pairs', 'csv'] as const;
+
+/**
+ * Function lists as CSV with a header row, as the Switch decompilations keep them
+ * ("Address,Quality,Size,Name" in zeldaret/botw data/uking_functions.csv). Rows without a name are skipped.
+ */
+function parseCsvSymbols(lines: string[]): ParsedSymbol[] | null {
+  const headerAt = lines.findIndex((l) => l.trim() !== '');
+  if (headerAt < 0) return null;
+  const header = lines[headerAt].split(',').map((h) => h.trim().toLowerCase());
+  const col = (...names: string[]) => header.findIndex((h) => names.includes(h));
+  const addr = col('address', 'addr', 'offset', 'va', 'rva');
+  const name = col('name', 'symbol', 'function');
+  if (addr < 0 || name < 0) return null;
+  const size = col('size', 'length');
+  const out: ParsedSymbol[] = [];
+  for (const line of lines.slice(headerAt + 1)) {
+    const cells = line.split(',');
+    const n = (cells[name] ?? '').trim();
+    const a = (cells[addr] ?? '').trim();
+    if (!n || !/^(?:0x)?[0-9A-Fa-f]+$/.test(a)) continue;
+    const value = parseInt(a.replace(/^0x/i, ''), 16);
+    if (!Number.isFinite(value)) continue;
+    // Sizes in these lists are decimal, zero-padded ("000316").
+    const sz = size >= 0 ? Number((cells[size] ?? '').trim()) : NaN;
+    out.push({ va: hex(value), name: n, kind: 'function', ...(Number.isFinite(sz) && sz > 0 ? { size: sz } : {}) });
+  }
+  return out;
+}
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_IMPORT = 50_000;
@@ -64,6 +92,13 @@ function parseLine(line: string, format: SymbolFileFormat): ParsedSymbol | null 
 /** Parses a symbol file; format "auto" takes the format that reads the most lines. */
 export function parseSymbolFile(text: string, format: (typeof SYMBOL_FILE_FORMATS)[number] = 'auto'): { format: SymbolFileFormat; symbols: ParsedSymbol[]; lines: number; unread: number; unread_examples: string[]; same_address: number } {
   const lines = text.split(/\r?\n/);
+  const csv = format === 'auto' || format === 'csv' ? parseCsvSymbols(lines) : null;
+  if (csv && (format === 'csv' || csv.length > 0)) {
+    const seenCsv = new Set<string>();
+    const kept = csv.filter((x) => (seenCsv.has(x.va) ? false : (seenCsv.add(x.va), true)));
+    const rows = lines.filter((l) => l.trim()).length - 1;
+    return { format: 'csv', symbols: kept, lines: rows, unread: rows - csv.length, unread_examples: [], same_address: csv.length - kept.length };
+  }
   const formats: SymbolFileFormat[] = format === 'auto' ? ['linker', 'nm', 'pairs'] : [format];
   let best: { format: SymbolFileFormat; symbols: ParsedSymbol[] } = { format: formats[0], symbols: [] };
   for (const f of formats) {

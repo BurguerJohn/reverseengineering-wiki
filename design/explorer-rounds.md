@@ -461,3 +461,4 @@ Areas: game saves (Technique:Reverse engineering game save files, Unreal GVAS, R
 - A second link_repo without license (inside a batch) replaced a license the agent had just declared with "none": re-linking now keeps a contributor-declared license when the host detects none.
 - "ar archive" was suspected a duplicate of "ASAR archive (Electron)" because its letters occur inside it: similar names now compare whole words.
 - publish_checked replace worked on batch checks only, so confirm_new could not be added to a single create_page check: a single tool's check takes {"1": {fields to change}}.
+- Before round 27 (0.8.66): import_symbols reads CSV function lists with a header (Address,Quality,Size,Name as the Switch decompilations keep them; rows without a name skipped, decimal sizes). zeldaret/botw's uking_functions.csv parses to 72,319 named functions of 113,491 rows.
