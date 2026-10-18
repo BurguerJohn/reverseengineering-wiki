@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.52';
+export const VERSION = '0.8.53';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -516,7 +516,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
         applies_to: z.string().describe('What it holds for; for build-level facts a Build: title or the SHA-256 of one of its files (also one registered earlier in the same batch)'),
         observed_in: z.array(z.string()).optional(),
       }),
-      data: z.record(z.string(), z.unknown()).describe(`Fields by kind: ${FACT_DATA_SUMMARY}. Addresses, struct fields, enum values, signature offsets, test_vectors and samples: read REWiki:Fact reference (rewiki://guide/facts). A dry run names missing and unknown fields.`),
+      data: z.record(z.string(), z.unknown()).describe(`Fields by kind: ${FACT_DATA_SUMMARY}. Enum values: {"0x10": "NAME_A", "17": "NAME_B"} (value to C identifier; explanations go in notes). Addresses, struct fields, enum values, signature offsets, test_vectors and samples: read REWiki:Fact reference (rewiki://guide/facts). A dry run names missing and unknown fields.`),
       key: z.string().min(2).max(60).optional().describe('Short title for the fact page, e.g. "RNG seed" (default: the name/value/bytes, else the first clause of the claim). MediaWiki shows "_" as a space in titles; data keeps identifiers as written.'),
       evidence: z.array(evidenceItem).min(1),
       confidence: z.enum(['low', 'medium', 'high']),
@@ -562,7 +562,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
 
   registerWrite('edit_section', {
     title: 'Edit one section',
-    description: 'Change one section (Markdown): the whole body, or replace [{old, new}] to fix a sentence. Pass the revision you read as base_revision; other sections changed since then are merged, only the same section conflicts. Removing >30% needs a reason; missing sections are created; the answer shows the diff. Mark unproven claims "Unverified:" with how to test them.',
+    description: 'Change one section (Markdown). Four ways: body (the whole new section; needs base_revision, the revision you read), replace [{old, new}] (fix a sentence; no base_revision), body with append true (add after what is there; no base_revision), new_heading (rename). Other sections changed since base_revision are merged, only the same section conflicts. Removing >30% needs a reason; missing sections are created; the answer shows the diff. Mark unproven claims "Unverified:" with how to test them.',
     inputSchema: { dry_run: DRY_RUN,
       title: z.string(),
       section: z.string().describe('Heading, "Summary" for the lead, or "Infobox" with infobox'),

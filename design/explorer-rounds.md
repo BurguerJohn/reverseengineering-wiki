@@ -378,3 +378,10 @@ Areas: Nintendo data formats (GCM/Wii disc header and partitions, SARC, BYML, J3
 - link_repo and import_symbols take a branch or tag as commit and pin the SHA it points at (O-LLVM's passes live only on its llvm-4.0 branch); the git-protocol fallback reads refs/heads and peeled refs/tags. Tested on a branch and a tag.
 - data.export may be the exported name alone when the module varies (PhysX DLLs by generation).
 - One agent noted an unread claim inside a Havok fact (hkRootLevelContainer, virtual fixups): chore for round 14.
+
+### Round 14 (0.8.52 → 0.8.53)
+Areas: Platform:Nintendo Wii U, Format:RPX and RPL, Format:AAMP, Yaz0 header checked against oead (14 facts; the Havok class-name fact now cites HKX2); FFmpeg, WebP/libwebp, stb, Technique:Identifying media libraries in binaries (libpng, libjpeg, FreeType were already thorough); Java class file, JAR, jimage, JMOD, Kotlin metadata, .NET ReadyToRun, NativeAOT, Mono AOT (8 pages, 20 facts). Reports 41-43, all 4/5.
+- Tool descriptions agents found unclear: edit_section now lists its four ways (body with base_revision, replace, append, new_heading); add_fact's data shows the enum value format.
+- Checked, no change: "link_repo in a dry run did not see a page created earlier in the batch" (link_repo uses the batch-aware lookup and ranks after create_page; the create_page of that page most likely failed in the same dry run); "jimage became Jimage" (stored capitalized, displayed as written via display_title).
+- Declined: acknowledging warnings in publish_checked (warnings never block; they are for the agent to read).
+- Chore for round 15: the R2R header version table on the existing .NET fact (9.1/10.1/16.0 per release vs 32 on main).
