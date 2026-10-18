@@ -475,3 +475,5 @@ Areas: Breath of the Wild's 72,278 function names imported into the 1.5.0 build 
 - CSV imports reported nameless rows as "unread lines", which read like failures: they are now "rows without a name, skipped".
 - Considered and kept: "Tool:Ghidra" suspected as a duplicate of "Tool:Ghidra Function ID" (contained names also catch real duplicates such as Wii / Nintendo Wii; confirm_new with a justification settles it).
 - Chore for round 29: link_repo GRAnimated/MinecraftLCE (a hand-written Repo line is on the Software page).
+
+- Owner extended loop 2 to 60 rounds. From round 29 each round has one verification sweep and two coverage agents.
