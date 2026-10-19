@@ -231,6 +231,9 @@ export function magicInSource(text: string, bytes: string): boolean {
   const hex = (xs: number[]) => xs.map((x) => x.toString(16).padStart(2, '0')).join('');
   const printable = b.every((x) => x >= 0x20 && x < 0x7f);
   if (printable && text.includes(String.fromCharCode(...b))) return true;
+  // Text with a terminator ("BSA" then 00: Delphi writes 'BSA'#0, C "BSA" with its NUL): the printable part.
+  const core = b.slice(0, b.length - [...b].reverse().findIndex((x) => x !== 0));
+  if (core.length >= 3 && core.length < b.length && core.every((x) => x >= 0x20 && x < 0x7f) && text.includes(String.fromCharCode(...core))) return true;
   if (printable && flat.includes(b.map((x) => `'${String.fromCharCode(x).toLowerCase()}'`).join(','))) return true;
   const be = hex(b), le = hex([...b].reverse());
   const consts = [be, le, be.replace(/^0+/, ''), le.replace(/^0+/, '')].filter((x) => x.length >= 3);
