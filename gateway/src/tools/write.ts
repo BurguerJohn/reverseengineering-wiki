@@ -371,8 +371,10 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
     }
   }
   if (fact.kind === 'magic' && bytesOf(fact.data.bytes)) {
+    // A 2-byte magic of another format ("MC") that prefixes this one ("MComprHD") is already flagged weak there: not an overlap.
+    const strong = (pg: string) => { try { const b = String(JSON.parse(s.index.page(pg)?.json ?? '{}').data?.bytes ?? ''); return b.trim().split(/\s+/).length >= 3; } catch { return true; } };
     for (const c of s.index.identify({ magic: [bytesOf(fact.data.bytes)!] }, 8)) {
-      if (c.subject !== fact.subject && c.matched.some((m) => m.pages.some((pg) => pg.startsWith('Fact:') && !pg.includes('/identification/')))) sharedWith.add(c.subject);
+      if (c.subject !== fact.subject && c.matched.some((m) => m.pages.some((pg) => pg.startsWith('Fact:') && pg.includes('/magic/') && strong(pg)))) sharedWith.add(c.subject);
     }
   }
   if (sharedWith.size) {
@@ -408,7 +410,8 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
     title: t, text: JSON.stringify(doc, null, 2), summary: `Fact: ${shortSummary(fact.claim, 150)}`, createonly: true, tags: ['rewiki-fact'],
   });
   await afterWrite(s, op, [t]);
-  const citations = op.dryRun ? await missingCitations(fact.evidence, fact.kind === 'magic' ? String((fact.data as any)?.bytes ?? '') || undefined : undefined) : [];
+  // A masked magic (bitfield) is not written as one constant in source: only the file and commit are checked.
+  const citations = op.dryRun ? await missingCitations(fact.evidence, fact.kind === 'magic' && !(fact.data as any)?.mask ? String((fact.data as any)?.bytes ?? '') || undefined : undefined) : [];
   const counted = byteCountNote(fact.kind, fact.claim, fact.data as Record<string, unknown>);
   if (counted) citations.push(counted);
   // New behavior facts were wrong a third of the time, almost always an option, version or second code path left out.
@@ -507,7 +510,7 @@ export async function editFact(s: Services, caller: Caller, args: {
     summary: `Correct fact (${changed.join(', ')}): ${shortSummary(args.summary, 150)}`,
   });
   await afterWrite(s, op, [t]);
-  const citations = op.dryRun && (changed.includes('evidence') || (doc.kind === 'magic' && changed.includes('data'))) ? await missingCitations(doc.evidence ?? [], doc.kind === 'magic' ? String((doc.data as any)?.bytes ?? '') || undefined : undefined) : [];
+  const citations = op.dryRun && (changed.includes('evidence') || (doc.kind === 'magic' && changed.includes('data'))) ? await missingCitations(doc.evidence ?? [], doc.kind === 'magic' && !(doc.data as any)?.mask ? String((doc.data as any)?.bytes ?? '') || undefined : undefined) : [];
   const counted = (changed.includes('claim') || changed.includes('data')) ? byteCountNote(doc.kind, doc.claim, doc.data as Record<string, unknown>) : undefined;
   if (counted) citations.push(counted);
   // Re-checks found a fifth to a half of corrected behavior and identification facts still missing a branch.

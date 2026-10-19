@@ -4,7 +4,7 @@
  * bytes, symbols, RTTI names, hashes. Those are indexed as normalized tokens.
  */
 
-export type IdKind = 'hex' | 'bytes' | 'sha256' | 'sha1' | 'md5' | 'crc32' | 'symbol' | 'string' | 'rtti' | 'file';
+export type IdKind = 'hex' | 'bytes' | 'masked' | 'sha256' | 'sha1' | 'md5' | 'crc32' | 'symbol' | 'string' | 'rtti' | 'file';
 
 /** File names worth matching exactly: executables, libraries, archives, ROMs, data files. */
 const FILE_EXT = 'exe|dll|sys|com|drv|ocx|cpl|scr|efi|so|dylib|elf|bin|dat|pak|pck|cpk|awb|acb|arc|bnk|wem|big|wad|iso|cso|xex|xbe|nro|nso|nsp|xci|rom|nes|sfc|smc|z64|n64|v64|gb|gbc|gba|nds|3ds|cia|psarc|sgo|rmpa|mdb|cas|ini|cfg|sav|ttf';
@@ -133,6 +133,8 @@ export function extractFromFactData(data: Record<string, unknown>): Identifier[]
     // "00 00 0D 0A" with mask "00 00 FF FF": only the bytes under FF are fixed (versioned magics).
     if (bytes && mask && mask.length === bytes.length) {
       add(out, 'bytes', (bytes.match(/../g) ?? []).map((b, i) => (mask.slice(i * 2, i * 2 + 2) === 'ff' ? b : '..')).join(''));
+      // Masks with partial bytes (a 6-bit type in a bitfield header): bytes and mask kept for a bitwise compare.
+      if ((mask.match(/../g) ?? []).some((m) => m !== 'ff' && m !== '00')) add(out, 'masked', `${bytes}/${mask}`);
     } else add(out, 'bytes', bytes);
   }
   // A magic's alternatives identify the same format.

@@ -163,6 +163,17 @@ function bytesContain(outer: string, inner: string, minFixed = 0): boolean {
 }
 
 /** One byte string starts the other; ".." matches any byte. Both need 2+ fixed bytes in common. */
+/** "0c06/3f7f" against input bytes: every masked bit equal (input at least as long as the mask). */
+function maskedMatch(entry: string, input: string): boolean {
+  const [bytes, mask] = entry.split('/');
+  if (!bytes || !mask || input.length < mask.length || /\./.test(input.slice(0, mask.length))) return false;
+  for (let i = 0; i < mask.length; i += 2) {
+    const m = parseInt(mask.slice(i, i + 2), 16);
+    if ((parseInt(bytes.slice(i, i + 2), 16) & m) !== (parseInt(input.slice(i, i + 2), 16) & m)) return false;
+  }
+  return true;
+}
+
 function bytesPrefix(a: string, b: string): boolean {
   const x = a.match(/../g) ?? [];
   const y = b.match(/../g) ?? [];
@@ -629,7 +640,11 @@ export class SearchIndex {
         // Magics with wildcard bytes (a mask, or ?? in the fact): compared byte by byte.
         const wild = this.db.prepare(`select i.title, i.token, p.subject from identifiers i join pages p on p.title = i.title
           where i.kind = 'bytes' and instr(i.token, '..') > 0 limit 20000`).all() as Array<{ title: string; token: string; subject: string | null }>;
-        rows = [...rows, ...wild.filter((r) => bytesPrefix(r.token, t.token))];
+        // A '..' only says a byte is not wholly fixed; partial masks decide it bit by bit.
+        const masked = this.db.prepare(`select i.title, i.token, p.subject from identifiers i join pages p on p.title = i.title
+          where i.kind = 'masked' limit 20000`).all() as Array<{ title: string; token: string; subject: string | null }>;
+        const partial = new Set(masked.map((r) => r.title));
+        rows = [...rows, ...wild.filter((r) => !partial.has(r.title) && bytesPrefix(r.token, t.token)), ...masked.filter((r) => maskedMatch(r.token, t.token))];
         // 6+ bytes also match inside a longer published sequence (a trailer after its length field: IEND's
         // type and CRC inside "00 00 00 00 49 45 4E 44 AE 42 60 82").
         if (t.token.length >= 12) {
