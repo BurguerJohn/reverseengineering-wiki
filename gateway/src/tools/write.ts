@@ -414,6 +414,11 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   const citations = op.dryRun ? await missingCitations(fact.evidence, fact.kind === 'magic' && !(fact.data as any)?.mask ? String((fact.data as any)?.bytes ?? '') || undefined : undefined) : [];
   const counted = byteCountNote(fact.kind, fact.claim, fact.data as Record<string, unknown>);
   if (counted) citations.push(counted);
+  // Struct sweeps found byte order missing on facts whose readers were big-endian (four libdragon formats at once).
+  const fieldList = fact.kind === 'struct' && Array.isArray((fact.data as any)?.fields) ? (fact.data as any).fields as Array<Record<string, unknown>> : [];
+  if (fieldList.some((f) => Number(f.size) > 1 && !/char|byte|u?int8|\[/i.test(String(f.type ?? ''))) && (fact.data as any)?.endianness === undefined && !/endian|byte order/i.test(fact.claim)) {
+    citations.push('No byte order: give data.endianness ("little", "big", or "native" for in-memory structs of one platform) so readers know how to decode the multi-byte fields.');
+  }
   // New behavior facts were wrong a third of the time, almost always an option, version or second code path left out.
   if (fact.kind === 'behavior' && fact.confidence === 'high') {
     citations.push('Behavior facts were found wrong a third of the time, nearly always by leaving out an option, a version or a second code path. Keep confidence high only if you read the whole function, its callers and the option defaults; say in the claim when it applies (which option, version, platform).');

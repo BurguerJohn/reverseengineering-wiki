@@ -167,6 +167,10 @@ function bytesContain(outer: string, inner: string, minFixed = 0): boolean {
 function maskedMatch(entry: string, input: string): boolean {
   const [bytes, mask] = entry.split('/');
   if (!bytes || !mask || input.length < mask.length || /\./.test(input.slice(0, mask.length))) return false;
+  // A few fixed bits (LZHAM's 4-bit method nibble) match most inputs by chance: at least 12.
+  let bits = 0;
+  for (let i = 0; i < mask.length; i += 2) for (let m = parseInt(mask.slice(i, i + 2), 16); m; m &= m - 1) bits++;
+  if (bits < 12) return false;
   for (let i = 0; i < mask.length; i += 2) {
     const m = parseInt(mask.slice(i, i + 2), 16);
     if ((parseInt(bytes.slice(i, i + 2), 16) & m) !== (parseInt(input.slice(i, i + 2), 16) & m)) return false;
