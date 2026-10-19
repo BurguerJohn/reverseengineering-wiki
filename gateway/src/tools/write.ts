@@ -234,7 +234,14 @@ export function magicInSource(text: string, bytes: string): boolean {
   // Text with a terminator ("BSA" then 00: Delphi writes 'BSA'#0, C "BSA" with its NUL): the printable part.
   const core = b.slice(0, b.length - [...b].reverse().findIndex((x) => x !== 0));
   if (core.length >= 3 && core.length < b.length && core.every((x) => x >= 0x20 && x < 0x7f) && text.includes(String.fromCharCode(...core))) return true;
-  if (printable && flat.includes(b.map((x) => `'${String.fromCharCode(x).toLowerCase()}'`).join(','))) return true;
+  // A C initializer mixing hex and character literals ({0xFF, 'B', 0xFF, 'a', ...}); whitespace is gone, so ' ' reads ''.
+  const esc = (c: string) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const item = (x: number) => {
+    const forms = [`0x0*${x.toString(16)}`, `${x}`];
+    if (x >= 0x20 && x < 0x7f) forms.push(x === 0x20 ? "''" : `'${esc(String.fromCharCode(x).toLowerCase())}'`);
+    return `(?:${forms.join('|')})`;
+  };
+  if (b.length <= 64 && new RegExp(b.map(item).join(',')).test(flat)) return true;
   const be = hex(b), le = hex([...b].reverse());
   const consts = [be, le, be.replace(/^0+/, ''), le.replace(/^0+/, '')].filter((x) => x.length >= 3);
   if (consts.some((c) => new RegExp(`0x0*${c}(?![0-9a-f])`).test(flat))) return true;

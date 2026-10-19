@@ -5,6 +5,7 @@
  *
  *   node scripts/test-env.mjs setup   (re)create the test wiki: database, accounts, templates
  *   node scripts/test-env.mjs run     start both, run the gateway and client suites, stop
+ *   node scripts/test-env.mjs clean <run id>   delete the pages of a run that was killed before its exit handler
  *
  * Needs: MySQL root access without password (Laragon default), Mailpit, a built client tarball
  * (npm run cli -- pack-client).
@@ -159,10 +160,23 @@ async function run() {
   console.log('\nAll end-to-end suites passed (test wiki; the real wiki was not touched).');
 }
 
+// A run that was killed never reached its exit handler: its pages stay in the test wiki and index.
+async function clean(id) {
+  if (!id) throw new Error('Usage: node scripts/test-env.mjs clean <run id>');
+  const wiki = startWiki();
+  try {
+    await waitFor(`${WIKI_URL}/api.php?action=query&meta=siteinfo&format=json`, 'test wiki');
+    must(process.execPath, ['--disable-warning=ExperimentalWarning', 'src/cli.ts', 'delete-test-pages', id], { cwd: GATEWAY_DIR, env: testEnv });
+  } finally {
+    wiki.kill();
+  }
+}
+
 const command = process.argv[2] ?? 'run';
 if (command === 'setup') await setup();
 else if (command === 'run') await run();
+else if (command === 'clean') await clean(process.argv[3]);
 else {
-  console.error('Usage: node scripts/test-env.mjs setup|run');
+  console.error('Usage: node scripts/test-env.mjs setup|run|clean <run id>');
   process.exit(2);
 }
