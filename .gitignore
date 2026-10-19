@@ -70,3 +70,6 @@ desktop.ini
 .idea/
 *.swp
 *~
+
+# The explorer-loop log summarizes the private send_feedback reports: kept locally, never published.
+/design/explorer-rounds.md
