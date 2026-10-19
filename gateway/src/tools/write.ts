@@ -223,15 +223,42 @@ export async function addNote(s: Services, caller: Caller, args: { subject: stri
  * Cited files that are not in the repository at the cited commit (a commit that does not exist, a path that moved).
  * GitHub only, by the raw file URL (no API quota); at most five lookups, in dry runs.
  */
-async function missingCitations(evidence: Array<{ repo?: string; commit?: string; path?: string }>): Promise<string[]> {
+/** The forms a magic takes in source: its text, a hex constant either way round, a byte list, a 'c','h','a','r' list. */
+export function magicInSource(text: string, bytes: string): boolean {
+  const b = bytes.trim().split(/\s+/).filter((x) => /^[0-9A-Fa-f]{2}$/.test(x)).map((x) => parseInt(x, 16));
+  if (b.length < 2) return true;
+  const flat = text.replace(/\s+/g, '').toLowerCase();
+  const hex = (xs: number[]) => xs.map((x) => x.toString(16).padStart(2, '0')).join('');
+  const printable = b.every((x) => x >= 0x20 && x < 0x7f);
+  if (printable && text.includes(String.fromCharCode(...b))) return true;
+  if (printable && flat.includes(b.map((x) => `'${String.fromCharCode(x).toLowerCase()}'`).join(','))) return true;
+  const be = hex(b), le = hex([...b].reverse());
+  const consts = [be, le, be.replace(/^0+/, ''), le.replace(/^0+/, '')].filter((x) => x.length >= 3);
+  if (consts.some((c) => new RegExp(`0x0*${c}(?![0-9a-f])`).test(flat))) return true;
+  if (flat.includes(b.map((x) => `0x${x.toString(16).padStart(2, '0')}`).join(',')) || flat.includes(b.map((x) => `0x${x.toString(16)}`).join(','))) return true;
+  if (flat.includes(b.map((x) => `\\x${x.toString(16).padStart(2, '0')}`).join(''))) return true;
+  if (flat.includes(b.map((x) => x >= 0x21 && x < 0x7f ? String.fromCharCode(x).toLowerCase() : `\\x${x.toString(16).padStart(2, '0')}`).join(''))) return true;
+  if (flat.includes(b.join(','))) return true;
+  return false;
+}
+
+async function missingCitations(evidence: Array<{ repo?: string; commit?: string; path?: string }>, magic?: string): Promise<string[]> {
   const cited = evidence.filter((e) => e.repo && e.commit && e.path).slice(0, 5);
-  const found = await Promise.all(cited.map(async (e) => {
+  const fetched: string[] = [];
+  const found = await Promise.all(cited.map(async (e, i) => {
     const m = /^(?:https?:\/\/github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(e.repo!.trim());
     if (!m) return null;
     const url = `https://raw.githubusercontent.com/${m[1]}/${m[2]}/${e.commit}/${e.path!.replace(/^\/+/, '')}`;
     try {
-      const r = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(5000) });
-      return r.status === 404 ? `${e.path} is not in ${m[1]}/${m[2]} at ${e.commit!.slice(0, 10)} (the commit does not exist or the file was elsewhere then): check the commit and path.` : null;
+      // For a magic the first cited file is read to see the bytes are in it (a fact cited a file without them).
+      const r = await fetch(url, { method: magic && i === 0 ? 'GET' : 'HEAD', signal: AbortSignal.timeout(5000) });
+      if (r.status === 404) return `${e.path} is not in ${m[1]}/${m[2]} at ${e.commit!.slice(0, 10)} (the commit does not exist or the file was elsewhere then): check the commit and path.`;
+      if (magic && i === 0 && r.ok && Number(r.headers.get('content-length') ?? 0) < 4_000_000) {
+        const text = await r.text();
+        fetched.push(e.path!);
+        if (!magicInSource(text, magic)) return `${e.path} at ${e.commit!.slice(0, 10)} does not contain ${magic} as text, a hex constant or a byte list: cite the file that defines or checks the magic (or give the lines that build it).`;
+      }
+      return null;
     } catch {
       return null;
     }
@@ -364,10 +391,14 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
     title: t, text: JSON.stringify(doc, null, 2), summary: `Fact: ${shortSummary(fact.claim, 150)}`, createonly: true, tags: ['rewiki-fact'],
   });
   await afterWrite(s, op, [t]);
-  const citations = op.dryRun ? await missingCitations(fact.evidence) : [];
+  const citations = op.dryRun ? await missingCitations(fact.evidence, fact.kind === 'magic' ? String((fact.data as any)?.bytes ?? '') || undefined : undefined) : [];
   // New behavior facts were wrong a third of the time, almost always an option, version or second code path left out.
   if (fact.kind === 'behavior' && fact.confidence === 'high') {
     citations.push('Behavior facts were found wrong a third of the time, nearly always by leaving out an option, a version or a second code path. Keep confidence high only if you read the whole function, its callers and the option defaults; say in the claim when it applies (which option, version, platform).');
+  }
+  // Half of sampled identification facts described the recognizer as checking less or more than it does, or an indicator other formats share.
+  if (fact.kind === 'identification') {
+    citations.push('Identification facts were found wrong half the time: the recognizer checks more than described (a size bound, a second test, other accepted tags), the indicator is shared with another format or tool, or it holds only for some versions or builds. Describe the whole recognizer you read, name what else produces the indicator, and say when it is absent.');
   }
   // A third of sampled enum facts listed only some of the source's values without saying so.
   if (fact.kind === 'enum' && fact.data.complete === undefined) {
@@ -457,7 +488,7 @@ export async function editFact(s: Services, caller: Caller, args: {
     summary: `Correct fact (${changed.join(', ')}): ${shortSummary(args.summary, 150)}`,
   });
   await afterWrite(s, op, [t]);
-  const citations = op.dryRun && changed.includes('evidence') ? await missingCitations(doc.evidence ?? []) : [];
+  const citations = op.dryRun && (changed.includes('evidence') || (doc.kind === 'magic' && changed.includes('data'))) ? await missingCitations(doc.evidence ?? [], doc.kind === 'magic' ? String((doc.data as any)?.bytes ?? '') || undefined : undefined) : [];
   const nonStandard = unknownFactFields(doc.kind, doc.data);
   return result(s, t, r.newrevid, {
     changed, status: doc.status,

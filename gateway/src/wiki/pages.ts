@@ -111,7 +111,7 @@ export function structLayoutProblems(data: Record<string, unknown>): string[] {
   }
   if (size !== null) {
     const past = placed.filter((f) => f.offset + f.size > size);
-    if (past.length) out.push(`${past.map((f) => f.name).slice(0, 3).join(', ')} ${past.length > 1 ? 'end' : 'ends'} past the struct size 0x${size.toString(16)}`);
+    if (past.length) out.push(`${past.map((f) => f.name).slice(0, 3).join(', ')} ${past.length > 1 ? 'end' : 'ends'} past the struct size 0x${size.toString(16)} (a trailing array whose length comes from a count field is written with [] in its name or type, "entries[]", and then may run past the fixed size)`);
   }
   return out.slice(0, 5);
 }
