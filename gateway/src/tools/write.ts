@@ -1268,6 +1268,8 @@ export async function linkRepo(s: Services, caller: Caller, args: {
   }
 
   const info = await resolveRepo(args.url, args.commit);
+  // "Public Domain" has no SPDX id; agents wrote it that way and were refused.
+  if (args.license && /^public[\s-]*domain$/i.test(args.license.trim())) args.license = 'LicenseRef-Public-Domain';
   // GitHub's detector misses licenses stated only in a text file or file headers: the contributor may declare it.
   if (args.license && (['none', 'unknown', 'NOASSERTION'].includes(info.license) || info.license.startsWith('unrecognized'))) {
     // An SPDX id or expression: "MIT", "Apache-2.0 WITH LLVM-exception", "(MIT OR Apache-2.0)".
