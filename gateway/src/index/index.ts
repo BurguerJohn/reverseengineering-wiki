@@ -815,15 +815,19 @@ export class SearchIndex {
       + `${filters.before ? ' and title < ?' : ''}`
       + `${filters.uncorrected ? " and type = 'fact' and coalesce(json_array_length(json, '$.revisions'), 0) = 0" : ''}`;
     const params = [...types, ...(subject ? [subject, subject] : []), ...(filters.status ? [filters.status] : []), ...(filters.confidence ? [filters.confidence] : []), ...(filters.kind ? [filters.kind] : []), ...(filters.before ? [filters.before] : [])];
-    const total = (this.db.prepare(`select count(*) as n from pages where ${where}`).get(...params) as { n: number }).n;
+    // The total counts what the listing can reach: past title_from too (it said 300 for a range holding 45).
+    const total = (filters.after !== undefined
+      ? this.db.prepare(`select count(*) as n from pages where ${where} and title > ?`).get(...params, filters.after)
+      : this.db.prepare(`select count(*) as n from pages where ${where}`).get(...params) as { n: number }) as { n: number };
     // After a title, not an offset: a sweep that raises facts out of a confidence filter shrinks the list as it pages.
+    const n = total.n;
     const hits = (filters.after !== undefined
-      ? this.db.prepare(`select title, type, summary, status, revision, (select confidence from facts where facts.title = pages.title) as confidence, case when type = 'fact' then json_array_length(json, '$.verifications') end as verifications, case when type = 'fact' then substr(json_extract(json, '$.verifications[#-1].date'), 1, 10) end as last_verified, case when type = 'fact' then (select json_extract(e.value, '$.repo') || coalesce(' @ ' || substr(json_extract(e.value, '$.commit'), 1, 12), '') || coalesce(' ' || json_extract(e.value, '$.path'), '') from json_each(json, '$.evidence') e where json_extract(e.value, '$.repo') is not null limit 1) end as cited from pages where ${where} and title > ? order by title limit ?`).all(...params, filters.after, limit)
-      : this.db.prepare(`select title, type, summary, status, revision, (select confidence from facts where facts.title = pages.title) as confidence, case when type = 'fact' then json_array_length(json, '$.verifications') end as verifications, case when type = 'fact' then substr(json_extract(json, '$.verifications[#-1].date'), 1, 10) end as last_verified, case when type = 'fact' then (select json_extract(e.value, '$.repo') || coalesce(' @ ' || substr(json_extract(e.value, '$.commit'), 1, 12), '') || coalesce(' ' || json_extract(e.value, '$.path'), '') from json_each(json, '$.evidence') e where json_extract(e.value, '$.repo') is not null limit 1) end as cited from pages where ${where} order by title limit ? offset ?`).all(...params, limit, offset)) as any[];
+      ? this.db.prepare(`select title, type, summary, status, revision, (select confidence from facts where facts.title = pages.title) as confidence, case when type = 'fact' then json_array_length(json, '$.verifications') end as verifications, case when type = 'fact' then substr(json_extract(json, '$.verifications[#-1].date'), 1, 10) end as last_verified, case when type = 'fact' then (select json_extract(e.value, '$.repo') || coalesce(' @ ' || substr(json_extract(e.value, '$.commit'), 1, 12), '') || coalesce(' ' || json_extract(e.value, '$.path'), '') from json_each(pages.json, '$.evidence') e where json_extract(e.value, '$.repo') is not null limit 1) end as cited from pages where ${where} and title > ? order by title limit ?`).all(...params, filters.after, limit)
+      : this.db.prepare(`select title, type, summary, status, revision, (select confidence from facts where facts.title = pages.title) as confidence, case when type = 'fact' then json_array_length(json, '$.verifications') end as verifications, case when type = 'fact' then substr(json_extract(json, '$.verifications[#-1].date'), 1, 10) end as last_verified, case when type = 'fact' then (select json_extract(e.value, '$.repo') || coalesce(' @ ' || substr(json_extract(e.value, '$.commit'), 1, 12), '') || coalesce(' ' || json_extract(e.value, '$.path'), '') from json_each(pages.json, '$.evidence') e where json_extract(e.value, '$.repo') is not null limit 1) end as cited from pages where ${where} order by title limit ? offset ?`).all(...params, limit, offset)) as any[];
     // Facts carry their confidence and checks, so a sweep sees what is already checked without reading each fact.
     return {
       hits: hits.map((h) => ({ ...h, summary: String(h.summary ?? '').slice(0, 200), confidence: h.confidence || undefined, verifications: h.type === 'fact' ? h.verifications ?? 0 : undefined, last_verified: h.last_verified ?? undefined, cited: h.cited ?? undefined })),
-      total,
+      total: n,
     };
   }
 
