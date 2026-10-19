@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.88';
+export const VERSION = '0.8.89';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -54,10 +54,19 @@ function fail(error: unknown): Result {
 /** What the MCP SDK passes to tool callbacks; sendRequest keeps a request on the call's own stream. */
 type Extra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
+// Clients whose schema lacks a newer boolean parameter send it as the string "true" or "false": the schemas accept both
+// (BOOL) and the handlers see a real boolean.
+const BOOL = z.union([z.boolean(), z.enum(['true', 'false'])]);
+const BOOL_KEYS = new Set(['dry_run', 'quiet', 'force', 'unverified_only', 'enabled', 'create_if_missing', 'confirm_new', 'checkable', 'unchecked', 'unverified']);
+function booleans<A>(args: A): A {
+  if (!args || typeof args !== 'object') return args;
+  return Object.fromEntries(Object.entries(args as Record<string, unknown>).map(([k, v]) => [k, BOOL_KEYS.has(k) && (v === 'true' || v === 'false') ? v === 'true' : v])) as A;
+}
+
 function handler<A>(fn: (args: A, extra: Extra) => Promise<Record<string, unknown>> | Record<string, unknown>) {
   return async (args: A, extra: Extra): Promise<Result> => {
     try {
-      return ok(await fn(args, extra));
+      return ok(await fn(booleans(args), extra));
     } catch (error) {
       return fail(error);
     }
@@ -76,8 +85,8 @@ const evidenceItem = z.object({
   lines: z.string().optional().describe('"120-148" or "26-34, 98-101"'),
 });
 
-const QUIET = z.boolean().optional().describe('With dry_run: list the pages that would be written and their sizes, without their contents');
-const DRY_RUN = z.boolean().optional().describe('Check everything and show what would be stored, without publishing or using quota');
+const QUIET = BOOL.optional().describe('With dry_run: list the pages that would be written and their sizes, without their contents');
+const DRY_RUN = BOOL.optional().describe('Check everything and show what would be stored, without publishing or using quota');
 
 const REVIEW_ID = z.string().optional().describe('Review mode, when the server answered REVIEW_REQUIRED: the review_id it gave, repeated with the same arguments after your user approved at review_url')
 
@@ -337,10 +346,10 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       build: z.string().optional().describe('Restrict facts to one Build: page'),
       status: z.enum(['claimed', 'verified', 'disputed', 'rejected', 'deprecated', 'broken', 'open']).optional(),
       confidence: z.enum(['low', 'medium', 'high']).optional().describe('Only facts at this confidence (low and medium ones are worth checking)'),
-      unchecked: z.union([z.boolean(), z.enum(['true', 'false'])]).optional().describe('With query "*": only facts nobody has verified yet'),
+      unchecked: BOOL.optional().describe('With query "*": only facts nobody has verified yet'),
       title_from: z.string().optional().describe('With query "*": start the listing at this title ("Fact:L"); then page with next_cursor'),
-      unverified: z.union([z.boolean(), z.enum(['true', 'false'])]).optional().describe('With query "*": only pages whose text has "Unverified:" sentences (read lists them)'),
-      checkable: z.union([z.boolean(), z.enum(['true', 'false'])]).optional().describe('With query "*": only facts whose evidence names a repository (checkable by reading it)'),
+      unverified: BOOL.optional().describe('With query "*": only pages whose text has "Unverified:" sentences (read lists them)'),
+      checkable: BOOL.optional().describe('With query "*": only facts whose evidence names a repository (checkable by reading it)'),
       limit: z.number().int().min(1).max(50).optional(),
       cursor: z.string().optional().describe('next_cursor from the previous page'),
       match: z.enum(['all', 'any']).optional().describe('all (default): every term must match. any: pages with any of the terms, noisier'),
@@ -396,7 +405,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       section: z.string().optional().describe('Section heading (or "Summary"); omit for the whole page'),
       format: z.enum(['markdown', 'wikitext', 'json', 'files']).optional(),
       max_tokens: z.number().int().min(200).max(20000).optional(),
-      unverified_only: z.boolean().optional().describe('Subject pages: only the "Unverified:" sentences by section (exact text, ready as replace old) and the revision'),
+      unverified_only: BOOL.optional().describe('Subject pages: only the "Unverified:" sentences by section (exact text, ready as replace old) and the revision'),
     },
     annotations: READ,
   }, handler((a: any) => read.read(s, a, caller.operator)));
@@ -595,7 +604,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       base_revision: z.number().int().optional().describe('The revision you read (needed with body; replace may leave it out and applies to the latest revision; inside a batch it may be left out for a page an earlier operation of the batch writes)'),
       summary: z.string().min(3).optional().describe('Edit summary (default: "Edit <section>")'),
       reason: z.string().optional(),
-      create_if_missing: z.boolean().optional(),
+      create_if_missing: BOOL.optional(),
     },
     annotations: WRITE,
   }, (c, a) => write.editSection(s, c, a));
@@ -610,7 +619,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       infobox: z.record(z.string(), z.string()).optional().describe('developer, publisher, vendor, engine, uses ([[Library:X]] links), formats ([[Format:X]] links: the file formats it reads or writes), platforms, versions, release, cpu (Platform pages: processors and clocks), magic, extensions, endianness, license, website'),
       body: z.string().describe('Markdown with ## sections'),
       aliases: z.array(z.string()).optional(),
-      confirm_new: z.boolean().optional(),
+      confirm_new: BOOL.optional(),
       justification: z.string().optional(),
     },
     annotations: WRITE,
@@ -647,7 +656,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
         confidence: z.enum(['low', 'medium', 'high']),
         source: z.enum(SYMBOL_SOURCES).describe('How the name was found'),
       })).min(1).max(MAX_SYMBOLS_PER_CALL),
-      force: z.boolean().optional().describe('Replace conflicting names regardless of confidence (trust "established" or higher)'),
+      force: BOOL.optional().describe('Replace conflicting names regardless of confidence (trust "established" or higher)'),
     },
     annotations: WRITE,
   }, (c, a) => write.addSymbols(s, c, a));
@@ -663,7 +672,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       format: z.enum(SYMBOL_FILE_FORMATS).optional().describe('Default auto: the format that reads the most lines'),
       confidence: z.enum(['low', 'medium', 'high']).optional().describe('Default medium (a matching decompilation is usually high)'),
       license: z.string().optional().describe('SPDX id when GitHub did not recognize the license'),
-      force: z.boolean().optional(),
+      force: BOOL.optional(),
     },
     annotations: WRITE,
   }, (c, a) => importSymbols(s, c, a));
@@ -779,7 +788,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     description: 'Up to 50 writes in one call (a page with its build, facts and code), run in dependency order so later operations can use what earlier ones create (create_page; register_build, add_code; add_fact, add_note, add_symbols, link_repo, ask; edit_section, edit_fact; verify, patrol, flag; revert; your order within each step). dry_run checks all of them and reports every failure at once (one approval in review mode); a real run stops at the first error and says what was published. Refused whole when over the hourly quota. Keep a call under ~20 KB.',
     inputSchema: {
       dry_run: DRY_RUN,
-      quiet: z.boolean().optional().describe('With dry_run: list the pages that would be written without their contents (smaller answers for large batches)'),
+      quiet: BOOL.optional().describe('With dry_run: list the pages that would be written without their contents (smaller answers for large batches)'),
       ...(review ? { review_id: REVIEW_ID } : {}),
       operations: z.array(z.object({
         tool: z.enum([...writeTools.keys()] as [string, ...string[]]),
@@ -798,7 +807,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
     description: 'Publish exactly what a dry run (of any write tool or batch) checked, by its check_id, without resending (two hours, same account). Safe to retry after a lost answer: a used check_id returns what it published. replace changes fields of batch operations; amend fixes small texts. It publishes at once. With replace, amend or append it checks the changed version first and publishes it only if the check passes (nothing is published otherwise); dry_run true only checks and returns a new check_id.',
     inputSchema: { check_id: z.string(), dry_run: DRY_RUN,
       replace: z.record(z.string(), z.union([z.record(z.string(), z.unknown()), z.null()])).optional().describe('Batches only: {"3": {fields to change}} keeps the tool and the other fields (a field set to null is removed), {"3": {tool, arguments}} swaps the whole operation, {"3": null} drops it'),
-      quiet: z.boolean().optional().describe('With dry_run: list the pages without their contents'),
+      quiet: BOOL.optional().describe('With dry_run: list the pages without their contents'),
       append: z.array(z.object({ tool: z.string(), arguments: z.record(z.string(), z.unknown()) })).max(50).optional().describe('More operations to add to what was checked (it becomes a batch)'),
       merge: z.array(z.string()).max(10).optional().describe('Other check_ids of yours to publish together with this one, as one batch'),
       amend: z.record(z.string(), z.array(z.object({ old: z.string().min(1), new: z.string(), all: z.boolean().optional() })).min(1).max(20)).optional()
@@ -970,7 +979,7 @@ async function runBatch(
 ) {
   const op = requireWriter(s, caller);
   const planned = operations.map((o, index) => {
-    const { dry_run: _ignored, review_id: _review, ...args } = o.arguments ?? {};
+    const { dry_run: _ignored, review_id: _review, ...args } = booleans(o.arguments ?? {});
     const topic = o.tool === 'create_page' && typeof args.title === 'string' && args.title.includes('/');
     return { index, tool: o.tool, args, rank: (BATCH_ORDER[o.tool] ?? 5) + (topic ? 1 : 0) };
   }).sort((a, b) => a.rank - b.rank || a.index - b.index);
@@ -1091,7 +1100,7 @@ function registerAccountTools(s: Services, server: McpServer, caller: Caller, ac
   server.registerTool('account_set_feedback', {
     title: 'Help improve the wiki (on or off)',
     description: 'Your operator\'s choice to help improve the wiki: when on, after publishing you send the maintainers a private report with send_feedback, and the server attaches the list of what you published. Turning it on needs your operator\'s confirmation in the client; turning it off never does.',
-    inputSchema: { enabled: z.boolean() },
+    inputSchema: { enabled: BOOL },
   }, handler(async (a: any, extra: Extra) => {
     const op = current();
     if (a.enabled && op.feedback !== 1) {
