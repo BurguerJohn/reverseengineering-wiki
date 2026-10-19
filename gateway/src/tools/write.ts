@@ -269,6 +269,17 @@ async function missingCitations(evidence: Array<{ repo?: string; commit?: string
   return [...pinNote, ...found.filter((x): x is string => !!x)];
 }
 
+/** A claim that says "these 40 bytes" next to a pattern of another length (a table signature was one byte longer than its claim). */
+export function byteCountNote(kind: string, claim: string, data: Record<string, unknown> | undefined): string | undefined {
+  const field = kind === 'signature' ? 'pattern' : kind === 'magic' ? 'bytes' : undefined;
+  const pattern = field ? data?.[field] : undefined;
+  if (typeof pattern !== 'string') return undefined;
+  const length = pattern.trim().split(/\s+/).filter((x) => /^([0-9A-Fa-f]{2}|\?\?)$/.test(x)).length;
+  const said = [...claim.matchAll(/(\d{1,4})[- ]bytes?/gi)].map((m) => Number(m[1]));
+  if (said.length !== 1 || said[0] === length || length === 0) return undefined;
+  return `The claim says ${said[0]} bytes but data.${field} has ${length}: check which is right (or say what the ${said[0]} counts).`;
+}
+
 export async function addFact(s: Services, caller: Caller, input: unknown) {
   const op = requireWriter(s, caller);
   // test_vectors and samples sent next to data belong inside it (the description lists them with data).
@@ -395,6 +406,8 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   });
   await afterWrite(s, op, [t]);
   const citations = op.dryRun ? await missingCitations(fact.evidence, fact.kind === 'magic' ? String((fact.data as any)?.bytes ?? '') || undefined : undefined) : [];
+  const counted = byteCountNote(fact.kind, fact.claim, fact.data as Record<string, unknown>);
+  if (counted) citations.push(counted);
   // New behavior facts were wrong a third of the time, almost always an option, version or second code path left out.
   if (fact.kind === 'behavior' && fact.confidence === 'high') {
     citations.push('Behavior facts were found wrong a third of the time, nearly always by leaving out an option, a version or a second code path. Keep confidence high only if you read the whole function, its callers and the option defaults; say in the claim when it applies (which option, version, platform).');
@@ -492,6 +505,8 @@ export async function editFact(s: Services, caller: Caller, args: {
   });
   await afterWrite(s, op, [t]);
   const citations = op.dryRun && (changed.includes('evidence') || (doc.kind === 'magic' && changed.includes('data'))) ? await missingCitations(doc.evidence ?? [], doc.kind === 'magic' ? String((doc.data as any)?.bytes ?? '') || undefined : undefined) : [];
+  const counted = (changed.includes('claim') || changed.includes('data')) ? byteCountNote(doc.kind, doc.claim, doc.data as Record<string, unknown>) : undefined;
+  if (counted) citations.push(counted);
   const nonStandard = unknownFactFields(doc.kind, doc.data);
   return result(s, t, r.newrevid, {
     changed, status: doc.status,

@@ -54,7 +54,7 @@ function truncate(text: string, maxTokens: number): { text: string; truncated: b
 
 // ---- search / identify / lookup ------------------------------------------------
 
-export function search(s: Services, args: { query: string; types?: string[]; subject?: string; build?: string; status?: string; confidence?: string; checkable?: boolean | string; unchecked?: boolean | string; unverified?: boolean | string; kind?: string; uncorrected?: boolean | string; title_from?: string; title_to?: string; created_after?: string; compact?: boolean | string; limit?: number; cursor?: string; match?: 'all' | 'any' }) {
+export function search(s: Services, args: { query: string; types?: string[]; subject?: string; build?: string; status?: string; confidence?: string; checkable?: boolean | string; unchecked?: boolean | string; unverified?: boolean | string; kind?: string; uncorrected?: boolean | string; title_from?: string; title_to?: string; created_after?: string; created_before?: string; compact?: boolean | string; limit?: number; cursor?: string; match?: 'all' | 'any' }) {
   const offset = args.cursor?.startsWith('after:') ? 0 : offsetOf(args.cursor);
   const limit = args.limit ?? 10;
   if (args.query.trim() === '*') {
@@ -67,7 +67,7 @@ export function search(s: Services, args: { query: string; types?: string[]; sub
     const from = args.title_from?.trim() ? args.title_from.trim() : undefined;
     const after = args.cursor?.startsWith('after:') ? Buffer.from(args.cursor.slice(6), 'base64url').toString('utf8')
       : from ? from.slice(0, -1) + String.fromCodePoint(Math.max(0, from.codePointAt(from.length - 1)! - 1)) + '\uFFFF' : undefined;
-    const listedRaw = s.index.listPages(types, after === undefined ? offset : 0, Math.min(limit, 50), subject, { status: args.status, confidence: args.confidence, checkable: args.checkable === true || args.checkable === 'true', unchecked: args.unchecked === true || args.unchecked === 'true', unverified: args.unverified === true || args.unverified === 'true', kind: args.kind, uncorrected: args.uncorrected === true || args.uncorrected === 'true' ? true : args.uncorrected === false || args.uncorrected === 'false' ? false : undefined, before: args.title_to?.trim() || undefined, createdAfter: args.created_after?.trim() || undefined, after });
+    const listedRaw = s.index.listPages(types, after === undefined ? offset : 0, Math.min(limit, 50), subject, { status: args.status, confidence: args.confidence, checkable: args.checkable === true || args.checkable === 'true', unchecked: args.unchecked === true || args.unchecked === 'true', unverified: args.unverified === true || args.unverified === 'true', kind: args.kind, uncorrected: args.uncorrected === true || args.uncorrected === 'true' ? true : args.uncorrected === false || args.uncorrected === 'false' ? false : undefined, before: args.title_to?.trim() || undefined, createdAfter: args.created_after?.trim() || undefined, createdBefore: args.created_before?.trim() || undefined, after });
     // With unverified: how many open claims each page has, and the first, so a checker picks pages without reading them.
     const wantsOpen = args.unverified === true || args.unverified === 'true';
     const listed = wantsOpen ? { ...listedRaw, hits: listedRaw.hits.map((h) => ({ ...h, ...s.index.unverifiedOf(h.title) })) } : listedRaw;
@@ -76,7 +76,7 @@ export function search(s: Services, args: { query: string; types?: string[]; sub
     const last = listed.hits.at(-1)?.title;
     const full = listed.hits.length === Math.min(limit, 50);
     // With a filter, how many pages of these types there are at all: agents read a filtered total as "the filter did nothing".
-    const filtered = !!(args.status || args.confidence || args.checkable || args.unchecked || args.unverified || args.kind || args.uncorrected !== undefined || args.created_after);
+    const filtered = !!(args.status || args.confidence || args.checkable || args.unchecked || args.unverified || args.kind || args.uncorrected !== undefined || args.created_after || args.created_before);
     const all = filtered ? s.index.listPages(types, 0, 0, subject).total : undefined;
     return { query: '*', types, total: listed.total, of_all: all !== undefined ? `${listed.total} of ${all} pages of these types match the filters` : undefined, hits: listed.hits, next_cursor: last && full ? `after:${Buffer.from(last, 'utf8').toString('base64url')}` : undefined };
   }
