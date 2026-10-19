@@ -365,6 +365,10 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   });
   await afterWrite(s, op, [t]);
   const citations = op.dryRun ? await missingCitations(fact.evidence) : [];
+  // New behavior facts were wrong a third of the time, almost always an option, version or second code path left out.
+  if (fact.kind === 'behavior' && fact.confidence === 'high') {
+    citations.push('Behavior facts were found wrong a third of the time, nearly always by leaving out an option, a version or a second code path. Keep confidence high only if you read the whole function, its callers and the option defaults; say in the claim when it applies (which option, version, platform).');
+  }
   // A third of sampled enum facts listed only some of the source's values without saying so.
   if (fact.kind === 'enum' && fact.data.complete === undefined) {
     citations.push('Say whether this lists every value of the source enum: data.complete true, or false for a selection (then name what is left out in notes). A third of enum facts checked were cut short without saying so.');
