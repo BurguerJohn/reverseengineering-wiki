@@ -55,6 +55,8 @@ Every kind also takes `data.test_vectors` and `data.samples` (below; given at th
 - Enum values: `{"0": "NAME"}`, `{"NAME": "0x10"}`, `[{name, value, notes}]`, negative (`"-0x7000"`), 64-bit (`"0x4000000000000001"`, kept exact), character codes (`"'A'"`), ranges (`"0x80-0x9F"`: exported as the first value, with the range in a comment) and sums (`"0xEFFE0000 + 19970605"`, computed for you). Values written in decimal stay decimal in headers. Keep names C identifiers; explanations go in `notes`.
 - `complete: false` on an enum that lists only some of the source's values (the common ones, a version's subset): a reader then knows a value missing from the fact may still exist. Values the source marks unknown or guessed go in notes, not in values.
 
+- Before publishing a struct, read the code that reads or writes it, not only the declaration: in sweeps of 160 structs no copied offset was wrong, but a third of the newer ones left out a variant: a version gate (fields only before Go 1.18, image_size 0 before Linux 3.17), a flag (an optional block when a header bit is set, a reserved byte that switches the sample encoding), the byte order (fields big-endian when a flag says so, an inverted magic for opposite-endian files), an optional prefix or magic, or a layout valid only for the decrypted or decompressed data. Give each such field its condition, or say in notes which variant the fact describes.
+
 ## Signatures, magics and strings
 
 - Byte patterns: `"48 89 5C 24 ?? 57"` (`??` any byte). On a function or global: `data.signature`; or a `signature` fact with `pattern` and `matches` (and `name` for its label; `target: "function"` or `"data"` says what it names, so scripts create the function).
