@@ -689,7 +689,7 @@ export class SearchIndex {
       if (t.kind === 'symbol') symbolInputs.add(t.input);
     }
 
-    const candidates = new Map<string, { subject: string; score: number; matched: Array<{ input: string; pages: string[] }> }>();
+    const candidates = new Map<string, { subject: string; score: number; matched: Array<{ input: string; pages: string[]; weak?: string }> }>();
     for (const [input, bySubject] of perInput) {
       const specificity = 1 / Math.sqrt(bySubject.size); // an input matching many subjects says little
       for (const [subject, titles] of bySubject) {
@@ -700,8 +700,10 @@ export class SearchIndex {
         // A name found in a build's symbol map or a fact is evidence; the same name in prose is a mention.
         const onMap = [...titles].some((t) => t.startsWith('Build:') && t.includes('/symbols/'));
         const proseOnly = symbolInputs.has(input) && !onFact && !onMap;
-        c.score += (weights.get(input) ?? 1) * specificity * (onMagicFact ? 2 : onMap ? 2 : onFact ? 1.5 : proseOnly ? 0.6 : 1);
-        c.matched.push({ input, pages: [...titles].slice(0, 5) });
+        // One or two bytes match by chance in many files ("E9" is an x86 jump and ESP32's image magic): little weight.
+        const weak = magicInputs.has(input) && input.replace(/[^0-9A-Fa-f]/g, '').length < 6;
+        c.score += (weights.get(input) ?? 1) * specificity * (weak ? 0.25 : onMagicFact ? 2 : onMap ? 2 : onFact ? 1.5 : proseOnly ? 0.6 : 1);
+        c.matched.push({ input, pages: [...titles].slice(0, 5), ...(weak ? { weak: 'fewer than 3 bytes: matches by chance in many files, check more of the header' } : {}) });
         candidates.set(subject, c);
       }
     }
