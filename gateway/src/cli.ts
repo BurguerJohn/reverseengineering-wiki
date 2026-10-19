@@ -22,7 +22,7 @@ import { createApp, ensureWikiSetup, type App } from './app.ts';
 import { createDumps } from './dumps.ts';
 import { tidyArticle } from './wiki/tidy.ts';
 import { NAMESPACES, SUBJECT_TYPES } from './wiki/titles.ts';
-import { agentSetupMarkdown, publishDiscoveryFiles, publishToolSchemas } from './http/discovery.ts';
+import { agentSetupMarkdown, publishDiscoveryFiles, publishSitemap, publishToolSchemas } from './http/discovery.ts';
 import { markdownToWikitext } from './wiki/markdown.ts';
 import { expandDoc } from './wiki/pages.ts';
 import { setTrust, TRUST_ORDER } from './auth/trust.ts';
@@ -57,6 +57,7 @@ async function syncPages(app: App): Promise<void> {
   if (app.config.publishSiteFiles) {
     for (const file of publishDiscoveryFiles(app.config, REPO_DIR)) console.log(`  wrote      ${file}`);
     console.log(`  wrote      ${await publishToolSchemas(app, REPO_DIR)}`);
+    console.log(`  sitemap    ${publishSitemap(app.config, app.index.sitemapPages(), REPO_DIR)} file(s) changed`);
   }
   const mw = await app.sessions.gateway();
   const root = join(REPO_DIR, 'wiki-pages');

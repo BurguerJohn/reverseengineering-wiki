@@ -1,0 +1,17 @@
+/* Synced from wiki-pages/MediaWiki/Common.css.wiki in the repository: edit it there. */
+
+/* Phones (Vector is responsive, $wgVectorResponsive): infoboxes stop floating beside the text,
+   and wide tables scroll sideways instead of widening the page. */
+@media screen and (max-width: 720px) {
+	.rewiki-infobox {
+		float: none !important;
+		width: auto !important;
+		margin: 0 0 1em 0 !important;
+	}
+	.mw-parser-output table.wikitable,
+	table.mw-json {
+		display: block;
+		overflow-x: auto;
+		max-width: 100%;
+	}
+}

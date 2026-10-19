@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { createApp, ensureWikiSetup } from './app.ts';
 import { createHttpServer } from './http/server.ts';
 import { createDumps, dumpDue } from './dumps.ts';
-import { publishDiscoveryFiles, publishToolSchemas } from './http/discovery.ts';
+import { publishDiscoveryFiles, publishSitemap, publishToolSchemas } from './http/discovery.ts';
 import { REPO_DIR } from './config.ts';
 import { publishOverview } from './wiki/overview.ts';
 
@@ -61,6 +61,18 @@ const overview = () => publishOverview(app.index, app.sessions)
   .catch((error) => log(`wiki overview failed: ${(error as Error).message}`));
 setTimeout(overview, 20_000);
 setInterval(overview, 10 * 60_000);
+// /sitemap.xml lists new pages within the hour.
+if (app.config.publishSiteFiles) {
+  const sitemap = () => {
+    try {
+      if (publishSitemap(app.config, app.index.sitemapPages(), REPO_DIR)) log('sitemap updated');
+    } catch (error) {
+      log(`sitemap failed: ${(error as Error).message}`);
+    }
+  };
+  setTimeout(sitemap, 30_000);
+  setInterval(sitemap, 3_600_000);
+}
 app.mailer.startWorker();
 setInterval(() => app.db.pruneRateEvents(), 3_600_000);
 

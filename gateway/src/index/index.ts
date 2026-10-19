@@ -1035,6 +1035,11 @@ export class SearchIndex {
       and type in ('software', 'library', 'format', 'platform', 'technique', 'tool') order by touched desc limit ?`).all(limit) as any[];
   }
 
+  /** Every page except aliases, with its last change: the sitemap. */
+  sitemapPages(): Array<{ title: string; touched: string }> {
+    return this.db.prepare('select title, touched from pages where redirect_to is null order by title').all() as any[];
+  }
+
   stats(): Record<string, number> {
     // Aliases (redirects) are not pages of their own.
     const rows = this.db.prepare('select type, count(*) as n from pages where redirect_to is null group by type').all() as Array<{ type: string; n: number }>;

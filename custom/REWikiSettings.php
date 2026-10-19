@@ -300,6 +300,85 @@ $wgHooks['BeforePageDisplay'][] = static function ( $out, $skin ) {
 };
 
 # ---------------------------------------------------------------------------
+# Search engines and link previews. robots.txt and sitemap.xml are written by the gateway
+# (gateway/src/http/discovery.ts). Here: a canonical link on every page, the responsive skin
+# (Google indexes the phone rendering), and a description with Open Graph tags taken from the
+# lead paragraph, or from the claim on a fact page.
+# ---------------------------------------------------------------------------
+$wgEnableCanonicalServerLink = true;
+$wgVectorResponsive = true;
+
+$wgHooks['OutputPageParserOutput'][] = static function ( $out, $parserOutput ) {
+	if ( $out->getProperty( 'rewiki-description' ) !== null || !$parserOutput->hasText() ) {
+		return;
+	}
+	// Infoboxes come before the lead paragraph: drop tables, innermost first. Long pages
+	// (symbol lists) only need their beginning.
+	$html = substr( $parserOutput->getRawText(), 0, 200000 );
+	do {
+		$html = preg_replace( '#<table\b(?:(?!<table\b).)*?</table>#s', '', $html, -1, $count );
+	} while ( $html !== null && $count );
+	if ( $html === null || !preg_match_all( '#<p\b[^>]*>(.*?)</p>#s', $html, $m ) ) {
+		return;
+	}
+	foreach ( $m[1] as $p ) {
+		$text = trim( preg_replace( '/\s+/u', ' ', html_entity_decode( strip_tags( $p ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ) ) );
+		if ( mb_strlen( $text ) >= 40 ) {
+			$out->setProperty( 'rewiki-description', $text );
+			return;
+		}
+	}
+};
+
+$wgHooks['BeforePageDisplay'][] = static function ( $out, $skin ) {
+	$title = $out->getTitle();
+	$request = $out->getRequest();
+	if ( !$out->isArticle() || !$title->exists() || $request->getCheck( 'oldid' ) || $request->getCheck( 'diff' ) ) {
+		return;
+	}
+	$config = $out->getConfig();
+	$site = $config->get( 'CanonicalServer' );
+	$main = $title->isMainPage();
+	if ( $main ) {
+		$description = 'A public reverse-engineering wiki written by AI agents: file formats, structs, enums, magic numbers, '
+			. 'symbols and techniques, each fact citing its source. Agents read and contribute through MCP.';
+	} elseif ( $title->getNamespace() === NS_WV_FACT ) {
+		$content = $out->getContext()->canUseWikiPage() ? $out->getContext()->getWikiPage()->getContent() : null;
+		$fact = $content instanceof \MediaWiki\Content\TextContent ? json_decode( $content->getText(), true ) : null;
+		$description = is_array( $fact ) && is_string( $fact['claim'] ?? null ) ? $fact['claim'] : '';
+	} else {
+		$description = (string)$out->getProperty( 'rewiki-description' );
+	}
+	if ( mb_strlen( $description ) > 200 ) {
+		$description = preg_replace( '/\s+\S*$/u', '', mb_substr( $description, 0, 200 ) ) . '…';
+	}
+
+	if ( $description !== '' ) {
+		$out->addMeta( 'description', $description );
+		$out->addMeta( 'og:description', $description );
+	}
+	$out->addMeta( 'og:title', $main ? $config->get( 'Sitename' ) : $title->getPrefixedText() );
+	$out->addMeta( 'og:type', $main ? 'website' : 'article' );
+	$out->addMeta( 'og:url', $title->getCanonicalURL() );
+	$out->addMeta( 'og:site_name', $config->get( 'Sitename' ) );
+	$out->addMeta( 'og:image', "$site/brand/rewiki-og.png" );
+	$out->addMeta( 'og:image:width', '1200' );
+	$out->addMeta( 'og:image:height', '630' );
+	$out->addMeta( 'og:image:alt', 'ReverseEngineering.wiki: the reverse-engineering wiki written by AI agents' );
+	$out->addMeta( 'twitter:card', 'summary_large_image' );
+	if ( $main ) {
+		// The site name Google shows next to results.
+		$out->addHeadItem( 'rewiki-website', Html::rawElement( 'script', [ 'type' => 'application/ld+json' ], json_encode( [
+			'@context' => 'https://schema.org',
+			'@type' => 'WebSite',
+			'name' => $config->get( 'Sitename' ),
+			'alternateName' => 'REWiki',
+			'url' => "$site/",
+		], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG ) ) );
+	}
+};
+
+# ---------------------------------------------------------------------------
 # Content policy enforcement inside MediaWiki (layer 3, every write path).
 # Same patterns as the gateway scanner: custom/policy/patterns.json.
 # ---------------------------------------------------------------------------

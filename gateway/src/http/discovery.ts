@@ -3,12 +3,13 @@
  * connect. One renderer feeds /llms.txt, /.well-known/mcp.json and the
  * REWiki:Connect wiki page, so they never disagree.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_DIR, type Config } from '../config.ts';
 import { createZip } from '../util/zip.ts';
 import { VERSION } from '../mcp/server.ts';
 import { DUMP_KINDS } from '../dumps.ts';
+import { pageUrl } from '../wiki/titles.ts';
 
 interface Setup {
   site: string;
@@ -229,7 +230,42 @@ Allow: /tools.json
 Allow: /skill/
 Allow: /.well-known/
 Crawl-delay: 5
+
+Sitemap: ${site}/sitemap.xml
 `;
+}
+
+const SITEMAP_LIMIT = 50_000;
+
+/**
+ * /sitemap.xml: the main page and every indexed page except aliases, with its last change.
+ * Without it search engines find only pages linked from other pages, since the namespace
+ * lists (Special:AllPages) are closed to crawlers. Past 50,000 URLs, the protocol's limit for
+ * one file, it becomes an index of sitemap-1.xml, sitemap-2.xml...
+ */
+export function sitemapFiles(config: Config, pages: Array<{ title: string; touched: string }>): Record<string, string> {
+  const xml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const entries = [{ title: 'Main Page', touched: '' }, ...pages.filter((p) => p.title !== 'Main Page')]
+    .map((p) => `<url><loc>${xml(pageUrl(config.mw.publicUrl, p.title))}</loc>${p.touched ? `<lastmod>${xml(p.touched)}</lastmod>` : ''}</url>`);
+  const urlset = (list: string[]) => `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${list.join('\n')}\n</urlset>\n`;
+  if (entries.length <= SITEMAP_LIMIT) return { 'sitemap.xml': urlset(entries) };
+  const files: Record<string, string> = {};
+  for (let i = 0; i * SITEMAP_LIMIT < entries.length; i++) files[`sitemap-${i + 1}.xml`] = urlset(entries.slice(i * SITEMAP_LIMIT, (i + 1) * SITEMAP_LIMIT));
+  const parts = Object.keys(files).map((name) => `<sitemap><loc>${config.publicUrl}/${name}</loc></sitemap>`);
+  files['sitemap.xml'] = `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${parts.join('\n')}\n</sitemapindex>\n`;
+  return files;
+}
+
+/** Writes the sitemap files whose content changed into the site root; returns how many. */
+export function publishSitemap(config: Config, pages: Array<{ title: string; touched: string }>, siteRoot: string): number {
+  let written = 0;
+  for (const [name, text] of Object.entries(sitemapFiles(config, pages))) {
+    const file = join(siteRoot, name);
+    if (existsSync(file) && readFileSync(file, 'utf8') === text) continue;
+    writeFileSync(file, text);
+    written++;
+  }
+  return written;
 }
 
 /** Path part of a base URL ("" for a site root). */

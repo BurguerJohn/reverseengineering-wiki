@@ -121,8 +121,10 @@ export function titleSegment(text: string, max = 80): string {
   return text.replace(/[#<>[\]|{}\u0000-\u001f\u007f/]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trim();
 }
 
+/** A page's URL spelled as MediaWiki spells it (wfUrlencode), so it matches the canonical links of its pages. */
 export function pageUrl(publicUrl: string, title: string): string {
-  return `${publicUrl}/index.php/${encodeURIComponent(title.replace(/ /g, '_')).replace(/%3A/g, ':').replace(/%2F/g, '/')}`;
+  const path = encodeURIComponent(title.replace(/ /g, '_')).replace(/'/g, '%27').replace(/%(3A|2F|3B|40|24|2C)/g, (m) => decodeURIComponent(m));
+  return `${publicUrl}/index.php/${path}`;
 }
 
 /** "Software:Earth Defense Force 5/Weapons" → "Software:Earth Defense Force 5" (subject pages only). */

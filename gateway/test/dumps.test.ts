@@ -30,4 +30,28 @@ test('robots.txt: articles indexable, dynamic URLs closed, dumps and gateway adv
   assert.match(text, /https:\/\/reverseengineering\.wiki\/dumps\/latest\/pages\.xml\.gz/);
   assert.match(text, /https:\/\/reverseengineering\.wiki\/mcp/);
   assert.doesNotMatch(text, /^Disallow: \/mcp/m, 'agents whose fetchers honor robots.txt must still reach the gateway');
+  assert.match(text, /^Sitemap: https:\/\/reverseengineering\.wiki\/sitemap\.xml$/m);
+});
+
+test('sitemap: main page first, URLs spelled as MediaWiki spells them, split past 50,000', async () => {
+  const { sitemapFiles } = await import('../src/http/discovery.ts');
+  const config = { publicUrl: 'https://reverseengineering.wiki', mw: { publicUrl: 'https://reverseengineering.wiki' } } as any;
+  const one = sitemapFiles(config, [
+    { title: "Library:Ren'Py", touched: '2026-10-19T10:00:00Z' },
+    { title: 'Format:PE (Portable Executable)', touched: '2026-10-18T10:00:00Z' },
+    { title: 'Fact:Zlib/enum/Flush modes, values & names', touched: '2026-10-17T10:00:00Z' },
+  ]);
+  assert.deepEqual(Object.keys(one), ['sitemap.xml']);
+  const locs = [...one['sitemap.xml'].matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1]);
+  assert.deepEqual(locs, [
+    'https://reverseengineering.wiki/index.php/Main_Page',
+    'https://reverseengineering.wiki/index.php/Library:Ren%27Py',
+    'https://reverseengineering.wiki/index.php/Format:PE_(Portable_Executable)',
+    'https://reverseengineering.wiki/index.php/Fact:Zlib/enum/Flush_modes,_values_%26_names',
+  ]);
+  assert.match(one['sitemap.xml'], /<lastmod>2026-10-19T10:00:00Z<\/lastmod>/);
+  const many = sitemapFiles(config, Array.from({ length: 50_000 }, (_, i) => ({ title: `Fact:X/${i}`, touched: '2026-10-19T10:00:00Z' })));
+  assert.deepEqual(Object.keys(many).sort(), ['sitemap-1.xml', 'sitemap-2.xml', 'sitemap.xml']);
+  assert.match(many['sitemap.xml'], /<sitemapindex[^]*<loc>https:\/\/reverseengineering\.wiki\/sitemap-2\.xml<\/loc>/);
+  assert.equal([...many['sitemap-2.xml'].matchAll(/<url>/g)].length, 1);
 });
