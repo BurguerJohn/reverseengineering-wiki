@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.9.11';
+export const VERSION = '0.9.12';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -57,7 +57,7 @@ type Extra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 // Clients whose schema lacks a newer boolean parameter send it as the string "true" or "false": the schemas accept both
 // (BOOL) and the handlers see a real boolean.
 const BOOL = z.union([z.boolean(), z.enum(['true', 'false'])]);
-const BOOL_KEYS = new Set(['dry_run', 'quiet', 'force', 'unverified_only', 'enabled', 'create_if_missing', 'confirm_new', 'checkable', 'unchecked', 'unverified', 'uncorrected']);
+const BOOL_KEYS = new Set(['dry_run', 'quiet', 'force', 'unverified_only', 'enabled', 'create_if_missing', 'confirm_new', 'checkable', 'unchecked', 'unverified', 'uncorrected', 'compact']);
 function booleans<A>(args: A): A {
   if (!args || typeof args !== 'object') return args;
   return Object.fromEntries(Object.entries(args as Record<string, unknown>).map(([k, v]) => [k, BOOL_KEYS.has(k) && (v === 'true' || v === 'false') ? v === 'true' : v])) as A;
@@ -354,6 +354,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       uncorrected: BOOL.optional().describe('With query "*": true: only facts never corrected with edit_fact; false: only corrected ones (a correction clears the checks of a fact, so corrected facts come back as unchecked)'),
       unverified: BOOL.optional().describe('With query "*": only pages whose text has "Unverified:" sentences (read lists them)'),
       checkable: BOOL.optional().describe('With query "*": only facts whose evidence names a repository (checkable by reading it)'),
+      compact: BOOL.optional().describe('With query "*": hits without summaries (title, citation, checks, corrections, dates; enum value counts), about a third of the tokens'),
       limit: z.number().int().min(1).max(50).optional(),
       cursor: z.string().optional().describe('next_cursor from the previous page'),
       match: z.enum(['all', 'any']).optional().describe('all (default): every term must match. any: pages with any of the terms, noisier'),
@@ -1003,7 +1004,9 @@ async function runBatch(
     if (shape) ignoredArgs.set(p.index, Object.keys(p.args).filter((k) => !(k in shape)));
     // As for a single write: a real batch does not run an operation without an argument the agent meant.
     const unknown = ignoredArgs.get(p.index) ?? [];
-    if (unknown.length) problems.push(`operation ${p.index + 1} (${p.tool}): ${unknown.join(', ')} ${unknown.length > 1 ? 'are not parameters' : 'is not a parameter'} of ${p.tool}`);
+    // Name the parameters that contain the unknown one ("evidence" -> add_evidence, replace_evidence).
+    const near = unknown.flatMap((u) => Object.keys(shape ?? {}).filter((k) => k !== u && (k.includes(u) || u.includes(k)) && k.length > 2));
+    if (unknown.length) problems.push(`operation ${p.index + 1} (${p.tool}): ${unknown.join(', ')} ${unknown.length > 1 ? 'are not parameters' : 'is not a parameter'} of ${p.tool}${near.length ? ` (did you mean ${[...new Set(near)].join(' or ')}?)` : ''}`);
     if (!parsed.success) problems.push(`operation ${p.index + 1} (${p.tool}): ${parsed.error.issues.map((i) => `${i.path.join('.') || 'arguments'}: ${i.message}`).join('; ')}`);
     else p.args = parsed.data as Record<string, unknown>;
   }
