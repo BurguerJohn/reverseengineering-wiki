@@ -67,7 +67,10 @@ export function search(s: Services, args: { query: string; types?: string[]; sub
     const from = args.title_from?.trim() ? args.title_from.trim() : undefined;
     const after = args.cursor?.startsWith('after:') ? Buffer.from(args.cursor.slice(6), 'base64url').toString('utf8')
       : from ? from.slice(0, -1) + String.fromCodePoint(Math.max(0, from.codePointAt(from.length - 1)! - 1)) + '\uFFFF' : undefined;
-    const listed = s.index.listPages(types, after === undefined ? offset : 0, Math.min(limit, 50), subject, { status: args.status, confidence: args.confidence, checkable: args.checkable === true || args.checkable === 'true', unchecked: args.unchecked === true || args.unchecked === 'true', unverified: args.unverified === true || args.unverified === 'true', after });
+    const listedRaw = s.index.listPages(types, after === undefined ? offset : 0, Math.min(limit, 50), subject, { status: args.status, confidence: args.confidence, checkable: args.checkable === true || args.checkable === 'true', unchecked: args.unchecked === true || args.unchecked === 'true', unverified: args.unverified === true || args.unverified === 'true', after });
+    // With unverified: how many open claims each page has, and the first, so a checker picks pages without reading them.
+    const wantsOpen = args.unverified === true || args.unverified === 'true';
+    const listed = wantsOpen ? { ...listedRaw, hits: listedRaw.hits.map((h) => ({ ...h, ...s.index.unverifiedOf(h.title) })) } : listedRaw;
     const last = listed.hits.at(-1)?.title;
     const full = listed.hits.length === Math.min(limit, 50);
     // With a filter, how many pages of these types there are at all: agents read a filtered total as "the filter did nothing".
@@ -340,7 +343,7 @@ async function authorship(s: Services, title: string, viewer: Operator | null | 
   return out;
 }
 
-export async function read(s: Services, args: { title: string; section?: string; format?: 'markdown' | 'wikitext' | 'json' | 'files'; max_tokens?: number }, viewer?: Operator | null) {
+export async function read(s: Services, args: { title: string; section?: string; format?: 'markdown' | 'wikitext' | 'json' | 'files'; max_tokens?: number; unverified_only?: boolean }, viewer?: Operator | null) {
   let title = cleanTitle(args.title, s);
   const mw = s.sessions.reader;
   let page = await mw.getPage(title);
@@ -476,6 +479,8 @@ export async function read(s: Services, args: { title: string; section?: string;
   // The page's open claims, by section: what a checker can settle against a source (edit them with replace).
   const unverified = isSubject ? sections.flatMap((x) => [...wikitextToMarkdown(x.level === 0 ? splitInfobox(x.text).rest : x.body)
     .matchAll(/Unverified:[^\n]*?(?:[.!?](?=\s|$)|\n|$)/g)].map((m) => ({ section: x.level === 0 ? 'Summary' : x.heading, text: m[0].trim().slice(0, 240) }))) : [];
+  // Only the open claims (a full read costs thousands of tokens): each text is exact Markdown of its section, ready as replace old.
+  if (args.unverified_only) return { title, revision: page.revid, unverified, count: unverified.length };
   return {
     ...base,
     section: sectionName,

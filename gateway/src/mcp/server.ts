@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.87';
+export const VERSION = '0.8.88';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -396,6 +396,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       section: z.string().optional().describe('Section heading (or "Summary"); omit for the whole page'),
       format: z.enum(['markdown', 'wikitext', 'json', 'files']).optional(),
       max_tokens: z.number().int().min(200).max(20000).optional(),
+      unverified_only: z.boolean().optional().describe('Subject pages: only the "Unverified:" sentences by section (exact text, ready as replace old) and the revision'),
     },
     annotations: READ,
   }, handler((a: any) => read.read(s, a, caller.operator)));

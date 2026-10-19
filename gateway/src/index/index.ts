@@ -245,6 +245,13 @@ export class SearchIndex {
     return this.db.prepare('select * from pages where title = ?').get(title) as any;
   }
 
+  /** The "Unverified:" sentences of a page's indexed text: their number and the first one. */
+  unverifiedOf(title: string): { unverified: number; first_unverified?: string } {
+    const bodies = (this.db.prepare('select body from docs where title = ?').all(title) as Array<{ body: string }>).map((x) => x.body).join('\n');
+    const found = [...bodies.matchAll(/Unverified:[^\n]*?(?:[.!?](?=\s|$)|\n|$)/g)].map((m) => m[0].trim());
+    return { unverified: found.length, first_unverified: found[0]?.slice(0, 200) };
+  }
+
   /** Facts of one subject page with this name under any kind ("Fact:X/string/Banner" for a link to "Fact:X/identification/Banner"). */
   factsNamed(subjectPrefix: string, name: string): string[] {
     const likeEscape = (x: string) => x.replace(/[!%_]/g, (c) => `!${c}`);
