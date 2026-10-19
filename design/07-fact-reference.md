@@ -70,6 +70,8 @@ Every kind also takes `data.test_vectors` and `data.samples` (below; given at th
 
 Identification facts were wrong in a third to a half of sampled cases (rounds 51-53), always in one of these ways: check each before publishing. (1) The indicator must be what a default build contains: a version macro the code never references, a header-only #define, a JSDoc comment or a section name the linker merges away (NativeAOT's /MERGE) is not in the binary. (2) Text assembled at compile time or run time is stored as the binary holds it, with * for the variable part, not as the format string. (3) Say when the indicator disappears: stripped binaries (symbol names), static builds, release builds, other C runtimes. (4) A detection rule from another tool (Detect It Easy, YARA) is quoted with all its conditions, not summarized wider. (5) A version table is read at every release tag it lists. (6) Name what shares the indicator: forks, bundled copies, the stock runtime (every node binary holds NODE_SEA_BLOB).
 
+When correcting one, the corrections themselves were wrong about one time in eight (round 56): they said "every version", "only" or "always" after reading a few tags or lines, gave one branch of a multi-branch rule the effect of another, or read the branch they were shown and missed the code around it. Say how far you read ("at tags 2.6.0, 2.9.0, 2.12.0"), not more.
+
 ## Test vectors and samples
 
 - `test_vectors: [{input, expected}]` (hashes, checksums, ciphers, encodings): others rerun them.
