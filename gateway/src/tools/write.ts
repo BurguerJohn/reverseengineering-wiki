@@ -246,6 +246,9 @@ async function missingCitations(evidence: Array<{ repo?: string; commit?: string
   // Evidence naming a repository without a commit cannot be re-read as it was: checkers found such citations no longer held.
   const unpinned = evidence.filter((e) => e.repo && !e.commit).map((e) => e.repo!);
   const pinNote = unpinned.length ? [`${[...new Set(unpinned)].slice(0, 3).join(', ')}: evidence without a commit; give the commit you read (a full hash from git ls-remote or the listing) so others can check the same text.`] : [];
+  // Short hashes stop resolving on raw.githubusercontent and become ambiguous as a repository grows.
+  const short = evidence.filter((e) => e.commit && /^[0-9a-f]{6,39}$/i.test(e.commit)).map((e) => e.commit!);
+  if (short.length) pinNote.push(`${[...new Set(short)].slice(0, 3).join(', ')}: short commit hash; give the full 40-character hash (git ls-remote or the listing shows it) so the file can be fetched at that commit.`);
   const cited = evidence.filter((e) => e.repo && e.commit && e.path).slice(0, 5);
   const fetched: string[] = [];
   const found = await Promise.all(cited.map(async (e, i) => {
