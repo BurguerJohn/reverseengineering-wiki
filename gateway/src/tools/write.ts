@@ -468,7 +468,8 @@ export async function verify(s: Services, caller: Caller, args: { target: string
     // A confirmation against the source may raise the confidence with it (an edit_fact for that made the fact "claimed" again).
     const rank = { low: 0, medium: 1, high: 2 } as Record<string, number>;
     const raised = args.confidence && res === 'confirmed' && (rank[args.confidence] ?? 0) > (rank[String(doc.confidence)] ?? 0) ? `${doc.confidence} → ${args.confidence}` : undefined;
-    if (args.confidence && res !== 'confirmed') throw new ToolError('BAD_REQUEST', 'confidence can only be raised with result confirmed.');
+    // Only a confirmation raises it; with partial or refuted it is left alone and said so (a batch failed on it).
+    const confidenceIgnored = args.confidence && res !== 'confirmed' ? 'confidence was not changed: only a confirmed result raises it.' : undefined;
     if (raised) doc.confidence = args.confidence!;
     if (res === 'confirmed' && independent && doc.status === 'claimed') doc.status = 'verified';
     if (res === 'refuted' && (doc.status === 'claimed' || doc.status === 'verified')) doc.status = 'disputed';
@@ -482,6 +483,7 @@ export async function verify(s: Services, caller: Caller, args: { target: string
       status: doc.status,
       counted_as_independent: res === 'confirmed' ? independent : undefined,
       confidence: raised ? doc.confidence : undefined,
+      confidence_note: confidenceIgnored,
       note: !independent && res === 'confirmed' ? 'Recorded, but confirmations by the fact\'s own operator do not change its status.' : undefined,
     });
   }
