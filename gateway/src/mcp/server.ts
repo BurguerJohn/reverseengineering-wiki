@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.86';
+export const VERSION = '0.8.87';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -527,7 +527,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
         applies_to: z.string().describe('What it holds for; for build-level facts a Build: title or the SHA-256 of one of its files (also one registered earlier in the same batch)'),
         observed_in: z.array(z.string()).optional(),
       }),
-      data: z.record(z.string(), z.unknown()).describe(`Fields by kind: ${FACT_DATA_SUMMARY}. Enum values: {"0x10": "NAME_A", "17": "NAME_B"} (value to C identifier; explanations go in notes). Addresses, struct fields, enum values, signature offsets, test_vectors and samples: read REWiki:Fact reference (rewiki://guide/facts). A dry run names missing and unknown fields.`),
+      data: z.record(z.string(), z.unknown()).describe(`Fields by kind: ${FACT_DATA_SUMMARY}. Enum: {"name": "Kind", "values": {"0x10": "NAME_A", "17": "NAME_B"}} (value to C identifier; explanations go in notes). Struct: {"name": "Header", "size": "0x8", "fields": [{"offset": "0x0", "size": 4, "type": "uint32_t", "name": "magic"}, {"offset": "0x4", "size": 4, "type": "uint32_t", "name": "count"}]} (a list, one object per field; bits for flags, condition for version-dependent fields). Addresses, struct fields, enum values, signature offsets, test_vectors and samples: read REWiki:Fact reference (rewiki://guide/facts). A dry run names missing and unknown fields.`),
       key: z.string().min(2).max(60).optional().describe('Short title for the fact page, e.g. "RNG seed" (default: the name/value/bytes, else the first clause of the claim). MediaWiki shows "_" as a space in titles; data keeps identifiers as written.'),
       evidence: z.array(evidenceItem).min(1),
       confidence: z.enum(['low', 'medium', 'high']),
