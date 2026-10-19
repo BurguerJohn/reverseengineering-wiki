@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.94';
+export const VERSION = '0.8.95';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -969,6 +969,11 @@ function batchArgumentList(tools: Map<string, { schema: z.ZodTypeAny }>): string
   }).join('; ');
 }
 
+// What each operation's answer keeps in a batch answer: the checks too (broken links, removed paragraphs, missing
+// general pages and notes were dropped here, so agents writing in batches never saw them).
+const BATCH_RESULT_KEYS = new Set(['title', 'revision', 'topic', 'status', 'added', 'updated', 'conflicts_total', 'url', 'flag', 'warnings', 'merged',
+  'broken_links', 'broken_links_hint', 'missing_pages', 'missing_pages_hint', 'removed_paragraphs', 'note', 'aliases_renamed', 'aliases_skipped', 'not_found']);
+
 const BATCH_ORDER: Record<string, number> = {
   create_page: 0, register_build: 2, add_code: 2, add_fact: 3, add_note: 3, add_symbols: 3, link_repo: 3, ask: 3,
   edit_section: 4, split_section: 4, edit_fact: 4, verify: 5, patrol: 5, flag: 5, revert: 6,
@@ -1016,7 +1021,7 @@ async function runBatch(
         const ignored = ignoredArgs.get(p.index) ?? [];
         done.push({
           operation: p.index + 1, tool: p.tool,
-          ...Object.fromEntries(Object.entries(r).filter(([k]) => ['title', 'revision', 'topic', 'status', 'added', 'updated', 'conflicts_total', 'url', 'flag', 'warnings', 'merged'].includes(k))),
+          ...Object.fromEntries(Object.entries(r).filter(([k]) => BATCH_RESULT_KEYS.has(k))),
           ...(ignored.length ? { ignored_arguments: `${ignored.join(', ')}: not parameters of ${p.tool}, ignored (a typo, or a field that belongs inside data?).` } : {}),
         });
       } catch (error) {
