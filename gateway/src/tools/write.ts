@@ -385,7 +385,7 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
  */
 export async function editFact(s: Services, caller: Caller, args: {
   target: string; base_revision: number; summary: string;
-  claim?: string; data?: Record<string, unknown>; scope?: { level: string; applies_to: string; observed_in?: string[] };
+  claim?: string; data?: Record<string, unknown>; data_patch?: Record<string, unknown>; scope?: { level: string; applies_to: string; observed_in?: string[] };
   add_evidence?: Array<{ type: string; detail: string }>; replace_evidence?: Array<{ type: string; detail: string }>; confidence?: 'low' | 'medium' | 'high'; related?: string[]; topic?: string;
 }) {
   const op = requireWriter(s, caller);
@@ -398,7 +398,11 @@ export async function editFact(s: Services, caller: Caller, args: {
   const doc = JSON.parse(page.content) as FactDoc;
   const changed: string[] = [];
   if (args.claim !== undefined && args.claim !== doc.claim) { doc.claim = args.claim; changed.push('claim'); }
-  if (args.data !== undefined && JSON.stringify(args.data) !== JSON.stringify(doc.data)) { doc.data = args.data; changed.push('data'); }
+  // data_patch changes some fields and keeps the rest (null removes one): agents resent whole objects to fix one field.
+  if (args.data !== undefined && args.data_patch !== undefined) throw new ToolError('BAD_REQUEST', 'Pass data (the whole new object) or data_patch (some fields), not both.');
+  const patched = args.data_patch ? Object.fromEntries(Object.entries({ ...(doc.data ?? {}), ...args.data_patch }).filter(([, v]) => v !== null)) : undefined;
+  const nextData = args.data ?? patched;
+  if (nextData !== undefined && JSON.stringify(nextData) !== JSON.stringify(doc.data)) { doc.data = nextData; changed.push('data'); }
   if (args.scope !== undefined) {
     const scope = { ...args.scope, observed_in: args.scope.observed_in ?? doc.scope.observed_in ?? [] };
     if (scope.level === 'build' || SHA256_REF.test(scope.applies_to.trim())) scope.applies_to = await buildRef(s, scope.applies_to);
