@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.89';
+export const VERSION = '0.8.90';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -1141,7 +1141,9 @@ function registerAccountTools(s: Services, server: McpServer, caller: Caller, ac
     const last = s.db.lastFeedbackAt(op.id);
     // Named pages: six hours back (one session's work; older edits of the same pages were other agents' work).
     const since = named.size ? new Date(Date.now() - 6 * 3600_000).toISOString() : last && last > threeHours ? last : threeHours;
-    const ownsTitle = (t: string) => named.has(t) || [...named].some((n) => t.startsWith(`${n}/`));
+    // A named subject page owns its subpages and its facts, notes and code ("Format:NIF (…)" owns "Fact:NIF (…)/struct/…").
+    const owned = [...named].flatMap((n) => { const bare = n.replace(/^[^:]+:/, ''); return [`${n}/`, `Fact:${bare}/`, `Notes:${bare}/`, `Code:${bare}/`]; });
+    const ownsTitle = (t: string) => named.has(t) || owned.some((prefix) => t.startsWith(prefix));
     let revisions: Array<Record<string, unknown>> = [];
     let unmatched: string[] = [];
     try {
@@ -1151,7 +1153,7 @@ function registerAccountTools(s: Services, server: McpServer, caller: Caller, ac
         .filter((c) => c.timestamp >= since).reverse();
       const mine = named.size ? changes.filter((c) => ownsTitle(c.title)) : changes;
       revisions = mine.filter((c) => c.revid).map((c) => ({ title: c.title, revid: c.revid, timestamp: c.timestamp, comment: (c.comment ?? '').slice(0, 200), diff: `${s.config.mw.publicUrl}/index.php?diff=${c.revid}` }));
-      unmatched = [...named].filter((t) => !mine.some((c) => c.title === t || c.title.startsWith(`${t}/`)));
+      unmatched = [...named].filter((t) => { const bare = t.replace(/^[^:]+:/, ''); return !mine.some((c) => c.title === t || [`${t}/`, `Fact:${bare}/`, `Notes:${bare}/`, `Code:${bare}/`].some((p) => c.title.startsWith(p))); });
     } catch {
       // History is best effort: the report is kept without it.
     }
