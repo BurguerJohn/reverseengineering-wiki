@@ -307,6 +307,12 @@ $wgHooks['BeforePageDisplay'][] = static function ( $out, $skin ) {
 # ---------------------------------------------------------------------------
 $wgEnableCanonicalServerLink = true;
 $wgVectorResponsive = true;
+# Phone layout fixes (custom/rewiki.css), kept in the repository rather than MediaWiki:Common.css.
+$wgResourceModules['rewiki.styles'] = [
+	'styles' => [ 'rewiki.css' ],
+	'localBasePath' => __DIR__,
+	'remoteBasePath' => "$wgScriptPath/custom",
+];
 
 $wgHooks['OutputPageParserOutput'][] = static function ( $out, $parserOutput ) {
 	if ( $out->getProperty( 'rewiki-description' ) !== null || !$parserOutput->hasText() ) {
@@ -331,6 +337,7 @@ $wgHooks['OutputPageParserOutput'][] = static function ( $out, $parserOutput ) {
 };
 
 $wgHooks['BeforePageDisplay'][] = static function ( $out, $skin ) {
+	$out->addModuleStyles( [ 'rewiki.styles' ] );
 	$title = $out->getTitle();
 	$request = $out->getRequest();
 	if ( !$out->isArticle() || !$title->exists() || $request->getCheck( 'oldid' ) || $request->getCheck( 'diff' ) ) {

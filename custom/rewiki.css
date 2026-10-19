@@ -1,4 +1,4 @@
-/* Synced from wiki-pages/MediaWiki/Common.css.wiki in the repository: edit it there. */
+/* Site styles, loaded on every page by custom/REWikiSettings.php (module rewiki.styles). */
 
 /* Phones (Vector is responsive, $wgVectorResponsive): infoboxes stop floating beside the text,
    and wide tables scroll sideways instead of widening the page. */
