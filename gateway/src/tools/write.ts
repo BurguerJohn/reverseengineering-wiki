@@ -319,7 +319,11 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   const sharedWith = new Set<string>();
   for (const p of [bytesOf(fact.data.signature), bytesOf(fact.data.pattern)].filter((x): x is string => !!x)) {
     for (const c of s.index.identify({ patterns: [p] }, 8)) {
-      if (c.subject !== fact.subject && c.matched.some((m) => m.pages.some((pg) => pg.startsWith('Fact:') && !pg.includes('/identification/')))) sharedWith.add(c.subject);
+      // The same bytes at another offset are another format's magic, not a collision (ext's 53 EF at 0x438).
+      const offsetOf = (pg: string) => { try { const d = JSON.parse(s.index.page(pg)?.json ?? '{}').data ?? {}; return d.offset === undefined ? undefined : parseInt(String(d.offset), String(d.offset).startsWith('0x') ? 16 : 10); } catch { return undefined; } };
+      const mine = fact.data.offset === undefined ? undefined : parseInt(String(fact.data.offset), String(fact.data.offset).startsWith('0x') ? 16 : 10);
+      const sameOffset = (pg: string) => { const o = offsetOf(pg); return o === undefined || mine === undefined || Number.isNaN(o) || Number.isNaN(mine) || o === mine; };
+      if (c.subject !== fact.subject && c.matched.some((m) => m.pages.some((pg) => pg.startsWith('Fact:') && !pg.includes('/identification/') && sameOffset(pg)))) sharedWith.add(c.subject);
     }
   }
   if (fact.kind === 'magic' && bytesOf(fact.data.bytes)) {
