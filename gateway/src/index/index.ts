@@ -813,7 +813,7 @@ export class SearchIndex {
       + `${filters.unverified ? " and title in (select title from docs where body like '%Unverified:%')" : ''}`
       + `${filters.kind ? ' and title in (select title from facts where kind = ?)' : ''}`
       + `${filters.before ? ' and title < ?' : ''}`
-      + `${filters.uncorrected ? " and type = 'fact' and coalesce(json_array_length(json, '$.revisions'), 0) = 0" : ''}`;
+      + `${filters.uncorrected === true ? " and type = 'fact' and coalesce(json_array_length(json, '$.revisions'), 0) = 0" : filters.uncorrected === false ? " and type = 'fact' and coalesce(json_array_length(json, '$.revisions'), 0) > 0" : ''}`;
     const params = [...types, ...(subject ? [subject, subject] : []), ...(filters.status ? [filters.status] : []), ...(filters.confidence ? [filters.confidence] : []), ...(filters.kind ? [filters.kind] : []), ...(filters.before ? [filters.before] : [])];
     // The total counts what the listing can reach: past title_from too (it said 300 for a range holding 45).
     const total = (filters.after !== undefined

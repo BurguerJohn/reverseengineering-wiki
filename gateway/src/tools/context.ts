@@ -169,7 +169,9 @@ export function assertClean(findings: Finding[]): void {
   const hint = first.category === 'privacy'
     ? 'Remove or generalize it (e.g. <game dir>\\file.exe instead of a user path) and resend. Do not repeat the value anywhere.'
     : first.category === 'injection'
-      ? 'Write plain documentation; never address the reader or include hidden text.'
+      ? first.rule === 'html-comment'
+        ? 'An HTML comment is hidden text on the wiki. If you are quoting a format that contains one (a file header such as Mork\'s), put it in backticks: `<!-- ... -->` in code is shown as text and passes.'
+        : 'Write plain documentation; never address the reader or include hidden text.'
       : 'See REWiki:Content policy.';
   throw new ToolError(CATEGORY_CODE[first.category] ?? 'POLICY_BLOCKED', `Blocked by the content policy: ${describe(findings)}. ${hint}`, {
     findings: findings.map(({ rule, category, label, line, file }) => ({ rule, category, label, line, file })),

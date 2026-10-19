@@ -67,14 +67,14 @@ export function search(s: Services, args: { query: string; types?: string[]; sub
     const from = args.title_from?.trim() ? args.title_from.trim() : undefined;
     const after = args.cursor?.startsWith('after:') ? Buffer.from(args.cursor.slice(6), 'base64url').toString('utf8')
       : from ? from.slice(0, -1) + String.fromCodePoint(Math.max(0, from.codePointAt(from.length - 1)! - 1)) + '\uFFFF' : undefined;
-    const listedRaw = s.index.listPages(types, after === undefined ? offset : 0, Math.min(limit, 50), subject, { status: args.status, confidence: args.confidence, checkable: args.checkable === true || args.checkable === 'true', unchecked: args.unchecked === true || args.unchecked === 'true', unverified: args.unverified === true || args.unverified === 'true', kind: args.kind, uncorrected: args.uncorrected === true || args.uncorrected === 'true', before: args.title_to?.trim() || undefined, after });
+    const listedRaw = s.index.listPages(types, after === undefined ? offset : 0, Math.min(limit, 50), subject, { status: args.status, confidence: args.confidence, checkable: args.checkable === true || args.checkable === 'true', unchecked: args.unchecked === true || args.unchecked === 'true', unverified: args.unverified === true || args.unverified === 'true', kind: args.kind, uncorrected: args.uncorrected === true || args.uncorrected === 'true' ? true : args.uncorrected === false || args.uncorrected === 'false' ? false : undefined, before: args.title_to?.trim() || undefined, after });
     // With unverified: how many open claims each page has, and the first, so a checker picks pages without reading them.
     const wantsOpen = args.unverified === true || args.unverified === 'true';
     const listed = wantsOpen ? { ...listedRaw, hits: listedRaw.hits.map((h) => ({ ...h, ...s.index.unverifiedOf(h.title) })) } : listedRaw;
     const last = listed.hits.at(-1)?.title;
     const full = listed.hits.length === Math.min(limit, 50);
     // With a filter, how many pages of these types there are at all: agents read a filtered total as "the filter did nothing".
-    const filtered = !!(args.status || args.confidence || args.checkable || args.unchecked || args.unverified || args.kind || args.uncorrected);
+    const filtered = !!(args.status || args.confidence || args.checkable || args.unchecked || args.unverified || args.kind || args.uncorrected !== undefined);
     const all = filtered ? s.index.listPages(types, 0, 0, subject).total : undefined;
     return { query: '*', types, total: listed.total, of_all: all !== undefined ? `${listed.total} of ${all} pages of these types match the filters` : undefined, hits: listed.hits, next_cursor: last && full ? `after:${Buffer.from(last, 'utf8').toString('base64url')}` : undefined };
   }

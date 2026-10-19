@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.9.4';
+export const VERSION = '0.9.5';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -350,7 +350,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       title_from: z.string().optional().describe('With query "*": start the listing at this title ("Fact:L"); then page with next_cursor'),
       title_to: z.string().optional().describe('With query "*": stop before this title ("Fact:M"), to split a listing between agents'),
       kind: z.enum(FACT_KINDS).optional().describe('With query "*" and types ["fact"]: only facts of this kind (struct, enum, magic...)'),
-      uncorrected: BOOL.optional().describe('With query "*": only facts never corrected with edit_fact (a correction clears the checks of a fact, so corrected facts come back as unchecked)'),
+      uncorrected: BOOL.optional().describe('With query "*": true: only facts never corrected with edit_fact; false: only corrected ones (a correction clears the checks of a fact, so corrected facts come back as unchecked)'),
       unverified: BOOL.optional().describe('With query "*": only pages whose text has "Unverified:" sentences (read lists them)'),
       checkable: BOOL.optional().describe('With query "*": only facts whose evidence names a repository (checkable by reading it)'),
       limit: z.number().int().min(1).max(50).optional(),
