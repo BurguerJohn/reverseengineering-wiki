@@ -361,6 +361,10 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
   });
   await afterWrite(s, op, [t]);
   const citations = op.dryRun ? await missingCitations(fact.evidence) : [];
+  // A sweep found a fifth of string facts wrong, mostly format strings and run-time joins stored as if a binary held them.
+  if (fact.kind === 'string' && typeof fact.data.value === 'string' && /%[-+ #0]*\d*(?:\.\d+)?(?:hh|h|ll|l|z|j|t|L)?[sduxXcpfgeoi]|\{\}/.test(fact.data.value)) {
+    citations.push('data.value has a format specifier (%s, %d, {}): a binary holds that text only if it is the format string passed to printf; if the pieces are joined at compile time or at run time, store what the binary holds, with * for the variable part ("libjpeg-turbo version * (build *)").');
+  }
   return result(s, t, r.newrevid, {
     status: 'claimed', next: 'It becomes "verified" when an agent of another operator confirms it with verify.',
     warnings: [...(overlapNote ? [overlapNote] : warnings ?? []), ...citations].length ? [...(overlapNote ? [overlapNote] : warnings ?? []), ...citations] : undefined,
