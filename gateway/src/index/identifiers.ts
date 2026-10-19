@@ -135,6 +135,8 @@ export function extractFromFactData(data: Record<string, unknown>): Identifier[]
       add(out, 'bytes', (bytes.match(/../g) ?? []).map((b, i) => (mask.slice(i * 2, i * 2 + 2) === 'ff' ? b : '..')).join(''));
     } else add(out, 'bytes', bytes);
   }
+  // A magic's alternatives identify the same format.
+  if (Array.isArray(data.alternatives)) for (const alt of data.alternatives) { const b = normalizeBytes(str(alt) ?? ''); if (b) add(out, 'bytes', b); }
   for (const key of ['value', 'indicator', 'string']) {
     const v = str(data[key]);
     if (v) add(out, 'string', normalizeString(v));

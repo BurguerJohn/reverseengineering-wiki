@@ -60,7 +60,7 @@ Every kind also takes `data.test_vectors` and `data.samples` (below; given at th
 - The name goes at match address + `signature_offset` (function/global) or `offset` (signature fact), negative when the pattern starts inside the object.
 - `multiple: true` names every match (thunks, inlined helpers); data tables compiled in several times get every copy named. A variant (an optional `endbr64` prefix) is a second fact with the same name.
 - Make a pattern unique: test it on several builds and on unrelated binaries. The server warns when it overlaps another subject's facts (a bundled copy: say so in the claim; otherwise lengthen it).
-- Magic: `bytes`, `offset`, `meaning`, optional `mask`; `relative_to` when the offset counts from a table or section, not the file start.
+- Magic: `bytes`, `offset`, `meaning`, optional `mask`; `relative_to` when the offset counts from a table or section, not the file start; `alternatives` for the other magics of the same format at that offset (`"bytes": "53 4D 4B 32", "alternatives": ["53 4D 4B 34"]`), each identified and exported like bytes.
 - Identification by exports or imports: list the names in `indicator` (comma-separated, `*` for a name pattern such as `_ZTV*`) with `method: "exports"`; `identify` also finds names in builds' symbol maps and code-like names in article text.
 - String facts (ASCII) are byte signatures too: subject scripts name where the string sits (for a string with `*`, its longest fixed part of 8+ characters).
 - Strings: `*` for a variable part and `?` for one character (`"fts5: ????-??-?? *"`) (`"Copyright (C) 1991-* The libjpeg-turbo Project"`); `identify` also matches versions and years with other digits.

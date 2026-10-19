@@ -551,3 +551,9 @@ Areas: GoldSrc and Source data (Format:BSP (GoldSrc), Format:WAD3 (GoldSrc), For
 ### Round 41 (0.8.83 → 0.8.84)
 Areas: id Software engines (Format:QVM (Quake III), Format:WAL (Quake II), Format:PK3 (Quake III), Software:Quake II, Software:Quake III Arena; Q3 BSP lumps and visibility settled; Quake II PAK limits; 7 facts from the GPL releases); Unverified prose on Library pages (22 on 18 pages: 15 settled, 5 corrected: MurmurHash64A's 0xc6a4a7935bd1e995/47, stb_image_write's HDR comment string, LevelDB's split property name, Box2D 2.x b2_version, LibreSSL exports; ~50 Library pages still open); fonts and documents (Format:PDF, Format:BMFont, Format:PSF console font, Format:Windows FNT, Format:OOXML (mostly Unverified); CFB settled from MS-CFB; WOFF2 transforms; 18 facts). Reports 122-124.
 - "Quake II" needed confirm_new against "Software:Quake": a name that is another name plus a number or roman numeral (a sequel) is no longer a suspected duplicate.
+
+### Round 42 (0.8.84 → 0.8.85)
+Areas: Nintendo DS and 3DS (Format:3DSX, Format:SMDH, Format:CIA, Format:CLIM and FLIM (BCLIM, BFLIM), Format:BTX0 and BMD0 (Nitro 3D); NDS header and logo CRC16, FNT entries, ARM9 trailing records, SDAT FAT padding settled, NCCH flag bits; 15 facts; no keys); Unverified prose on Library pages from M on; video containers (Format:MPEG transport stream, Format:FLV, Format:Smacker, Format:RoQ; AVI JUNK settled; MP4 pssh layout with DRM system ids as identifiers; 11 facts). Reports 125-127.
+- Two reports could not give a format two magics ("SMK2" / "SMK4"): magic facts take alternatives, identified and exported like bytes.
+- edit_fact refused null for fields left alone ("expected array, received null"): null means not given.
+- A link [[Fact:Format:SDAT …]] is reported as broken with the title without the namespace (fact titles leave it out).

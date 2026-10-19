@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.84';
+export const VERSION = '0.8.85';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -551,17 +551,18 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       target: z.string().describe('The Fact: page'),
       base_revision: z.number().int(),
       summary: z.string().min(5).describe('What you corrected and why (the evidence)'),
-      claim: z.string().min(10).max(2000).optional(),
-      data: z.record(z.string(), z.unknown()).optional().describe('The whole new data object (fields by kind: fact_data in /tools.json)'),
+      claim: z.string().min(10).max(2000).nullish(),
+      data: z.record(z.string(), z.unknown()).nullish().describe('The whole new data object (fields by kind: fact_data in /tools.json)'),
       scope: z.object({ level: z.enum(['technique', 'platform', 'format', 'library', 'tool', 'software', 'build']), applies_to: z.string(), observed_in: z.array(z.string()).optional() }).optional(),
-      add_evidence: z.array(evidenceItem).optional(),
-      replace_evidence: z.array(evidenceItem).optional().describe('The whole new evidence list, to correct or drop a wrong entry (makes the fact "claimed" again)'),
-      confidence: z.enum(['low', 'medium', 'high']).optional(),
-      related: z.array(z.string()).optional(),
+      add_evidence: z.array(evidenceItem).nullish(),
+      replace_evidence: z.array(evidenceItem).nullish().describe('The whole new evidence list, to correct or drop a wrong entry (makes the fact "claimed" again)'),
+      confidence: z.enum(['low', 'medium', 'high']).nullish(),
+      related: z.array(z.string()).nullish(),
       topic: z.string().optional().describe('A topic subpage of the subject the fact is about (listed there too), or "" to clear it'),
     },
     annotations: WRITE,
-  }, (c, a) => write.editFact(s, c, a));
+  // null means "not given" (agents send it for fields they leave alone).
+  }, (c, a) => write.editFact(s, c, Object.fromEntries(Object.entries(a).filter(([, v]) => v !== null)) as any));
 
   registerWrite('verify', {
     title: 'Verify a fact or code page',

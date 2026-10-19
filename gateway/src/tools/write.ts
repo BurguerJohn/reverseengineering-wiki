@@ -142,6 +142,13 @@ function missingGeneralPages(s: Services, wikitext: string): { missing_pages?: s
       continue;
     }
     if (s.index.page(t) || created?.has(t) || broken.some((b) => b.startsWith(`${t} `) || b === t)) continue;
+    // "Fact:Format:SDAT/..." for "Fact:SDAT/...": fact titles name the subject without its namespace.
+    const bare = /^Fact:(?:Format|Platform|Library|Technique|Tool|Software):(.+)$/i.exec(t);
+    if (bare) {
+      const fixed = normalizeTitle(`Fact:${bare[1]}`);
+      broken.push(`${t} (fact titles leave out the subject's namespace: ${s.index.page(fixed) || created?.has(fixed) ? fixed : `Fact:${bare[1]}`})`);
+      continue;
+    }
     const fact = /^Fact:(.+?)\/[^/]+\/([^/]+)$/.exec(t);
     const near = fact ? s.index.factsNamed(fact[1], fact[2]).concat([...(created?.keys() ?? [])].filter((c) => c.startsWith(`Fact:${fact[1]}/`) && c.endsWith(`/${fact[2]}`))) : [];
     broken.push(near.length ? `${t} (did you mean ${near[0]}?)` : t);

@@ -186,7 +186,7 @@ export const FACT_DATA: Record<FactKind, { required: string[]; one_of?: string[]
   vtable: { required: ['class', 'slots'], one_of: ['rva', 'address', 'rtti', 'iid', 'api'], optional: ['base'], example: { class: 'Weapon', rtti: '.?AVWeapon@@', rva: '0x1D3E00', slots: [{ index: 0, name: '~Weapon' }] } },
   enum: { required: ['name', 'values'], optional: ['underlying_type'], example: { name: 'WeaponClass', values: { 0: 'AssaultRifle', 1: 'Shotgun' } } },
   typedef: { required: ['name', 'type'], optional: ['abi'], example: { name: 'FT_Long', type: 'int32_t', abi: 'win64' } },
-  magic: { required: ['bytes', 'offset', 'meaning'], optional: ['mask', 'relative_to'], example: { bytes: '52 41 42 00', offset: '0x0', meaning: 'RAB archive header' } },
+  magic: { required: ['bytes', 'offset', 'meaning'], optional: ['mask', 'relative_to', 'alternatives'], example: { bytes: '52 41 42 00', offset: '0x0', meaning: 'RAB archive header' } },
   string: { required: ['value', 'meaning'], optional: ['encoding', 'rva', 'address'], example: { value: 'EDF5_SAVE', meaning: 'Save file tag', encoding: 'ascii' } },
   signature: { required: ['pattern', 'matches'], optional: ['name', 'offset', 'multiple', 'target'], example: { pattern: '48 8B 05 ?? ?? ?? ?? 48 85 C0', matches: 'load of g_GameState' } },
   identification: { required: ['method', 'indicator'], optional: ['table'], example: { method: 'string', indicator: 'CRI Middleware' } },
@@ -228,7 +228,7 @@ export function checkFactData(kind: FactKind, data: Record<string, unknown>): st
   };
   const str = (field: string, schema: z.ZodType) => {
     if (data[field] !== undefined && !schema.safeParse(data[field]).success) {
-      problems.push(`data.${field} is malformed: ${JSON.stringify(data[field]).slice(0, 60)} (${field === 'signature' || field === 'pattern' || field === 'bytes' ? 'bytes as uppercase hex pairs with ?? wildcards; a C prototype goes in data.prototype' : '0x-prefixed hex'})`);
+      problems.push(`data.${field} is malformed: ${JSON.stringify(data[field]).slice(0, 60)} (${field === 'signature' || field === 'pattern' || field === 'bytes' ? `bytes as uppercase hex pairs with ?? wildcards; a C prototype goes in data.prototype${field === 'bytes' ? '; a second magic of the same format goes in data.alternatives ["53 4D 4B 34"]' : ''}` : '0x-prefixed hex'})`);
     }
   };
   str('rva', hex);
@@ -240,6 +240,10 @@ export function checkFactData(kind: FactKind, data: Record<string, unknown>): st
   str('signature', bytePattern);
   str('pattern', bytePattern);
   str('bytes', bytePattern);
+  // Other magics of the same format at the same offset ("SMK2" and "SMK4"): each a byte string like bytes.
+  if (data.alternatives !== undefined && (!Array.isArray(data.alternatives) || !data.alternatives.length || data.alternatives.some((x) => !bytePattern.safeParse(x).success))) {
+    problems.push('data.alternatives must be a list of byte strings like bytes: ["53 4D 4B 34"]');
+  }
   switch (kind) {
     case 'function':
       need('name');

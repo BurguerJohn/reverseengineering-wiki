@@ -494,8 +494,11 @@ function exportSignatureScan(s: Services, args: { subject: string; tool: SymbolT
     .map((n) => ({ subject: n.title, signatures: signaturesOf(s, n.title).length })).filter((n) => n.signatures > 0);
   const magics = [subject, ...also].flatMap((x) => s.index.factsForSubject(x, ['magic']).filter((f) => f.status !== 'rejected').flatMap((f) => {
     const d = JSON.parse(f.data);
-    const bytes = typeof d.bytes === 'string' && /^(?:[0-9A-Fa-f]{2}|\?\??)(?:\s+(?:[0-9A-Fa-f]{2}|\?\??))+$/.test(d.bytes.trim()) ? d.bytes.trim().toUpperCase().replace(/\?\??/g, '??') : null;
-    return bytes ? [{ meaning: String(d.meaning ?? f.title.split('/').pop()), pattern: bytes, where: String(d.offset ?? '?') + (d.relative_to ? ` of ${d.relative_to}` : ''), fact: f.title }] : [];
+    const clean = (v: unknown) => typeof v === 'string' && /^(?:[0-9A-Fa-f]{2}|\?\??)(?:\s+(?:[0-9A-Fa-f]{2}|\?\??))+$/.test(v.trim()) ? v.trim().toUpperCase().replace(/\?\??/g, '??') : null;
+    const where = String(d.offset ?? '?') + (d.relative_to ? ` of ${d.relative_to}` : '');
+    const meaning = String(d.meaning ?? f.title.split('/').pop());
+    return [d.bytes, ...(Array.isArray(d.alternatives) ? d.alternatives : [])].map(clean).filter((b): b is string => !!b)
+      .map((pattern) => ({ meaning, pattern, where, fact: f.title }));
   }));
   return signatureScript(s, { subject, also, sigs, connected, tool: args.tool, magics });
 }
