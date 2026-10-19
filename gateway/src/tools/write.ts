@@ -510,6 +510,10 @@ export async function editFact(s: Services, caller: Caller, args: {
   const citations = op.dryRun && (changed.includes('evidence') || (doc.kind === 'magic' && changed.includes('data'))) ? await missingCitations(doc.evidence ?? [], doc.kind === 'magic' ? String((doc.data as any)?.bytes ?? '') || undefined : undefined) : [];
   const counted = (changed.includes('claim') || changed.includes('data')) ? byteCountNote(doc.kind, doc.claim, doc.data as Record<string, unknown>) : undefined;
   if (counted) citations.push(counted);
+  // Re-checks found a fifth to a half of corrected behavior and identification facts still missing a branch.
+  if ((doc.kind === 'behavior' || doc.kind === 'identification') && changed.includes('claim')) {
+    citations.push('Corrections of behavior and identification facts were themselves found incomplete a fifth to half of the time: a correction is a new claim. Before publishing, read the rest of the function (other branches, the option defaults, the callers) and say in the claim what the fact does not cover.');
+  }
   const nonStandard = unknownFactFields(doc.kind, doc.data);
   return result(s, t, r.newrevid, {
     changed, status: doc.status,
