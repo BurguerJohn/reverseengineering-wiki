@@ -71,8 +71,8 @@ export function search(s: Services, args: { query: string; types?: string[]; sub
     // With unverified: how many open claims each page has, and the first, so a checker picks pages without reading them.
     const wantsOpen = args.unverified === true || args.unverified === 'true';
     const listed = wantsOpen ? { ...listedRaw, hits: listedRaw.hits.map((h) => ({ ...h, ...s.index.unverifiedOf(h.title) })) } : listedRaw;
-    // compact: a sweep reads 50 hits a page; summaries were two thirds of the tokens.
-    if (args.compact === true || args.compact === 'true') listed.hits = listed.hits.map(({ summary: _s, revision: _r, type: _t, ...h }) => h) as typeof listed.hits;
+    // compact: a sweep reads 50 hits a page; summaries were two thirds of the tokens. The revision stays (base_revision for edits).
+    if (args.compact === true || args.compact === 'true') listed.hits = listed.hits.map(({ summary: _s, type: _t, ...h }) => h) as typeof listed.hits;
     const last = listed.hits.at(-1)?.title;
     const full = listed.hits.length === Math.min(limit, 50);
     // With a filter, how many pages of these types there are at all: agents read a filtered total as "the filter did nothing".

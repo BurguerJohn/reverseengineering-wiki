@@ -467,6 +467,8 @@ export async function editFact(s: Services, caller: Caller, args: {
   if (args.claim !== undefined && args.claim !== doc.claim) { doc.claim = args.claim; changed.push('claim'); }
   // data_patch changes some fields and keeps the rest (null removes one): agents resent whole objects to fix one field.
   if (args.data !== undefined && args.data_patch !== undefined) throw new ToolError('BAD_REQUEST', 'Pass data (the whole new object) or data_patch (some fields), not both.');
+  // In a whole data object a null field means "leave it out", as in data_patch (a batch failed on alternatives: null).
+  if (args.data && typeof args.data === 'object') args.data = Object.fromEntries(Object.entries(args.data).filter(([, v]) => v !== null));
   // An exact size and a size range exclude each other: a patch that sets one drops the other (a batch failed on it).
   const sizePatch = args.data_patch && ('size' in args.data_patch && args.data_patch.size !== null ? { size_min: null, size_max: null }
     : ('size_min' in args.data_patch || 'size_max' in args.data_patch) && !('size' in args.data_patch) ? { size: null } : {});
