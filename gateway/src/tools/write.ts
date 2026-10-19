@@ -404,7 +404,10 @@ export async function editFact(s: Services, caller: Caller, args: {
   if (args.claim !== undefined && args.claim !== doc.claim) { doc.claim = args.claim; changed.push('claim'); }
   // data_patch changes some fields and keeps the rest (null removes one): agents resent whole objects to fix one field.
   if (args.data !== undefined && args.data_patch !== undefined) throw new ToolError('BAD_REQUEST', 'Pass data (the whole new object) or data_patch (some fields), not both.');
-  const patched = args.data_patch ? Object.fromEntries(Object.entries({ ...(doc.data ?? {}), ...args.data_patch }).filter(([, v]) => v !== null)) : undefined;
+  // An exact size and a size range exclude each other: a patch that sets one drops the other (a batch failed on it).
+  const sizePatch = args.data_patch && ('size' in args.data_patch && args.data_patch.size !== null ? { size_min: null, size_max: null }
+    : ('size_min' in args.data_patch || 'size_max' in args.data_patch) && !('size' in args.data_patch) ? { size: null } : {});
+  const patched = args.data_patch ? Object.fromEntries(Object.entries({ ...(doc.data ?? {}), ...sizePatch, ...args.data_patch }).filter(([, v]) => v !== null)) : undefined;
   const nextData = args.data ?? patched;
   if (nextData !== undefined && JSON.stringify(nextData) !== JSON.stringify(doc.data)) { doc.data = nextData; changed.push('data'); }
   if (args.scope !== undefined) {
