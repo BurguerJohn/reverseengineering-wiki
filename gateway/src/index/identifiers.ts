@@ -143,9 +143,9 @@ export function extractFromFactData(data: Record<string, unknown>): Identifier[]
   }
   // A list of accepted values ("AC1009, AC1012, AC1032 at offset 0"): each token too, so identify finds one of them.
   if (typeof data.indicator === 'string' && /[,;]/.test(data.indicator)) {
-    for (const piece of data.indicator.split(/[,;()]|\s+(?:or|and|plus)\s+/)) {
-      const token = piece.trim().split(/\s+/)[0] ?? '';
-      if (/^[\w.\-]{4,}$/.test(token) && !/^\d+$/.test(token) && !/^(?:offset|bytes?|header|file|with|from|then)$/i.test(token)) add(out, 'string', normalizeString(token));
+    // Value-like tokens only: with a digit or in capitals (AC1032, AVIX), not the words around them.
+    for (const token of data.indicator.split(/[\s,;()]+/)) {
+      if (/^[\w.\-]{4,}$/.test(token) && !/^[\d.]+$/.test(token) && (/\d/.test(token) || /^[A-Z0-9_.\-]+$/.test(token))) add(out, 'string', normalizeString(token));
     }
   }
   if (typeof data.indicator === 'string' && /export|import|symbol|name/i.test(String(data.method ?? ''))) {

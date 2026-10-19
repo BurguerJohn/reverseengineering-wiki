@@ -243,6 +243,9 @@ export function magicInSource(text: string, bytes: string): boolean {
 }
 
 async function missingCitations(evidence: Array<{ repo?: string; commit?: string; path?: string }>, magic?: string): Promise<string[]> {
+  // Evidence naming a repository without a commit cannot be re-read as it was: checkers found such citations no longer held.
+  const unpinned = evidence.filter((e) => e.repo && !e.commit).map((e) => e.repo!);
+  const pinNote = unpinned.length ? [`${[...new Set(unpinned)].slice(0, 3).join(', ')}: evidence without a commit; give the commit you read (a full hash from git ls-remote or the listing) so others can check the same text.`] : [];
   const cited = evidence.filter((e) => e.repo && e.commit && e.path).slice(0, 5);
   const fetched: string[] = [];
   const found = await Promise.all(cited.map(async (e, i) => {
@@ -263,7 +266,7 @@ async function missingCitations(evidence: Array<{ repo?: string; commit?: string
       return null;
     }
   }));
-  return found.filter((x): x is string => !!x);
+  return [...pinNote, ...found.filter((x): x is string => !!x)];
 }
 
 export async function addFact(s: Services, caller: Caller, input: unknown) {
