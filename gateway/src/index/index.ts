@@ -821,7 +821,7 @@ export class SearchIndex {
   }
 
   /** Every page of some types, by title (search with query "*"). */
-  listPages(types: string[], offset: number, limit: number, subject?: string, filters: { status?: string; confidence?: string; checkable?: boolean; unchecked?: boolean; unverified?: boolean; kind?: string; uncorrected?: boolean; before?: string; createdAfter?: string; createdBefore?: string; noEndianness?: boolean; after?: string } = {}): { hits: Array<{ title: string; type: string; summary: string; status: string | null; revision: number; confidence?: string; verifications?: number; last_verified?: string; cited?: string; corrections?: number; last_corrected?: string; created?: string; enum_values?: number; enum_complete?: boolean; alternatives?: number }>; total: number } {
+  listPages(types: string[], offset: number, limit: number, subject?: string, filters: { status?: string; confidence?: string; checkable?: boolean; unchecked?: boolean; unverified?: boolean; kind?: string; uncorrected?: boolean; before?: string; createdAfter?: string; createdBefore?: string; noEndianness?: boolean; noComplete?: boolean; after?: string } = {}): { hits: Array<{ title: string; type: string; summary: string; status: string | null; revision: number; confidence?: string; verifications?: number; last_verified?: string; cited?: string; corrections?: number; last_corrected?: string; created?: string; enum_values?: number; enum_complete?: boolean; alternatives?: number }>; total: number } {
     const placeholders = types.map(() => '?').join(', ');
     // With a subject: its own pages (facts, notes, code, builds of it). status and confidence narrow the listing too
     // (the "*" listing ignored them, so "facts at low confidence" listed every fact).
@@ -835,7 +835,8 @@ export class SearchIndex {
       + `${filters.createdAfter ? " and type = 'fact' and json_extract(json, '$.created_at') >= ?" : ''}`
       + `${filters.createdBefore ? " and type = 'fact' and json_extract(json, '$.created_at') < ?" : ''}`
       + `${filters.uncorrected === true ? " and type = 'fact' and coalesce(json_array_length(json, '$.revisions'), 0) = 0" : filters.uncorrected === false ? " and type = 'fact' and coalesce(json_array_length(json, '$.revisions'), 0) > 0" : ''}`
-      + `${filters.noEndianness ? " and type = 'fact' and json_extract(json, '$.kind') = 'struct' and json_extract(json, '$.data.endianness') is null" : ''}`;
+      + `${filters.noEndianness ? " and type = 'fact' and json_extract(json, '$.kind') = 'struct' and json_extract(json, '$.data.endianness') is null" : ''}`
+      + `${filters.noComplete ? " and type = 'fact' and json_extract(json, '$.kind') = 'enum' and json_extract(json, '$.data.complete') is null" : ''}`;
     const params = [...types, ...(subject ? [subject, subject] : []), ...(filters.status ? [filters.status] : []), ...(filters.confidence ? [filters.confidence] : []), ...(filters.kind ? [filters.kind] : []), ...(filters.before ? [filters.before] : []), ...(filters.createdAfter ? [filters.createdAfter] : []), ...(filters.createdBefore ? [filters.createdBefore] : [])];
     // The total counts what the listing can reach: past title_from too (it said 300 for a range holding 45).
     const total = (filters.after !== undefined

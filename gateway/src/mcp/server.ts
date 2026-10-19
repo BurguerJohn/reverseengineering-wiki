@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.9.25';
+export const VERSION = '0.9.26';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -57,7 +57,7 @@ type Extra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 // Clients whose schema lacks a newer boolean parameter send it as the string "true" or "false": the schemas accept both
 // (BOOL) and the handlers see a real boolean.
 const BOOL = z.union([z.boolean(), z.enum(['true', 'false'])]);
-const BOOL_KEYS = new Set(['dry_run', 'quiet', 'force', 'unverified_only', 'enabled', 'create_if_missing', 'confirm_new', 'checkable', 'unchecked', 'unverified', 'uncorrected', 'compact', 'no_endianness']);
+const BOOL_KEYS = new Set(['dry_run', 'quiet', 'force', 'unverified_only', 'enabled', 'create_if_missing', 'confirm_new', 'checkable', 'unchecked', 'unverified', 'uncorrected', 'compact', 'no_endianness', 'no_complete']);
 function booleans<A>(args: A): A {
   if (!args || typeof args !== 'object') return args;
   return Object.fromEntries(Object.entries(args as Record<string, unknown>).map(([k, v]) => [k, BOOL_KEYS.has(k) && (v === 'true' || v === 'false') ? v === 'true' : v])) as A;
@@ -352,6 +352,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       created_after: z.string().optional().describe('With query "*" and types ["fact"]: only facts created on or after this date (YYYY-MM-DD)'),
       created_before: z.string().optional().describe('With query "*" and types ["fact"]: only facts created before this date (YYYY-MM-DD)'),
       no_endianness: BOOL.optional().describe('With query "*": only struct facts without data.endianness (byte order missing was the commonest struct error)'),
+      no_complete: BOOL.optional().describe('With query "*": only enum facts that never say whether their list is complete (a quarter of those were cut short)'),
       kind: z.enum(FACT_KINDS).optional().describe('With query "*" and types ["fact"]: only facts of this kind (struct, enum, magic...)'),
       uncorrected: BOOL.optional().describe('With query "*": true: only facts never corrected with edit_fact; false: only corrected ones (a correction clears the checks of a fact, so corrected facts come back as unchecked)'),
       unverified: BOOL.optional().describe('With query "*": only pages whose text has "Unverified:" sentences (read lists them)'),
