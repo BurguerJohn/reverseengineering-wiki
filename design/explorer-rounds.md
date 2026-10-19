@@ -557,3 +557,8 @@ Areas: Nintendo DS and 3DS (Format:3DSX, Format:SMDH, Format:CIA, Format:CLIM an
 - Two reports could not give a format two magics ("SMK2" / "SMK4"): magic facts take alternatives, identified and exported like bytes.
 - edit_fact refused null for fields left alone ("expected array, received null"): null means not given.
 - A link [[Fact:Format:SDAT …]] is reported as broken with the title without the namespace (fact titles leave it out).
+
+### Round 43 (0.8.85 → 0.8.86)
+Areas: Sega formats (Format:Sega CD disc image, Format:GDI, Format:Dreamcast VMS; Mega Drive checksum settled (Genesis Plus GX sums 0x200 to the loaded size), the RA SRAM header, region parsing, SMD deinterleave, 32X markers, Dreamcast IP.BIN struct, 1ST_READ.BIN scrambling and the MR logo; 14 facts); Unverified prose on Platform pages (16 pages: 15 confirmed, 2 corrected: Neo Geo Pocket 0xA000-0xBFFF is tile RAM, CPS-B layouts are in cps1_v.cpp; 3 partly); Windows installers (Format:Inno Setup installer, Format:WiX Burn bundle, Format:InstallShield cabinet; MSI and MSIX Unverified sections settled from Wine and msix-packaging; Squirrel's Setup.exe payload; 15 facts). Reports 128-130.
+- link_repo on a repository already linked on the page replaced the earlier description (KallistiOS on Format:Dreamcast IP.BIN lost "builds IP.BIN, with the header field table and CRC"): the new description is added after the old one.
+- Two agents read a filtered total as "the filter did nothing": filtered listings say "N of M pages of these types match the filters".

@@ -1207,12 +1207,18 @@ export async function linkRepo(s: Services, caller: Caller, args: {
     const lines = (section?.body ?? '').split('\n').filter((l) => !l.replace(/^\*\s*/, '').startsWith(`{{Repo|url=${info.url}|`));
     const previous = parseRepos(section?.body ?? '').find((x) => x.url === info.url);
     const replaced = !!previous;
-    if (previous?.description && previous.description !== args.description) descriptionsReplaced.push(`${target}: "${previous.description.slice(0, 120)}"`);
+    // A new description for a repository already linked here keeps the old one too (agents re-linking for another
+    // file replaced what an earlier agent wrote about the same repository).
+    const old = previous?.description?.trim() ?? '';
+    const given = args.description.trim();
+    const description = !old || old.includes(given) ? (old || given) : given.includes(old) ? given : `${old} ${given}`.slice(0, 600);
+    if (old && description !== old) descriptionsReplaced.push(target);
+    const pageEntry = description === args.description ? entry : renderRepo({ url: info.url, commit: info.commit, license: info.license, description, tested_on: testedOn, checked });
     const kept = lines.filter((l) => !/Nothing documented yet/.test(l));
     while (kept.length && !kept[0].trim()) kept.shift();
     while (kept.length && !kept[kept.length - 1].trim()) kept.pop();
     const lead = section ? (/^\n*/.exec(section.body)?.[0] ?? '') : '';
-    const body = lead + [...kept, `* ${entry}`].map((l) => (l.startsWith('{{Repo|') ? `* ${l}` : l)).join('\n');
+    const body = lead + [...kept, `* ${pageEntry}`].map((l) => (l.startsWith('{{Repo|') ? `* ${l}` : l)).join('\n');
     sections = section ? replaceSectionBody(sections, 'Code & repositories', body) : insertSection(sections, 'Code & repositories', body, ['Pitfalls', 'Open questions', 'Evidence & references', 'See also']);
     const edit = await mwEdit(s, op, {
       title: target, text: joinSections(sections), baserevid: page.revid, nocreate: true, tags: ['rewiki-code'],
@@ -1231,7 +1237,7 @@ export async function linkRepo(s: Services, caller: Caller, args: {
       info.license === 'none' ? 'GitHub detected no license. If the repository has a license file or license headers, run link_repo again with license (its SPDX id, e.g. "Zlib"): the entry is replaced. Without a license, agents cannot legally reuse it.' : null,
       info.binaryReleaseAssets ? 'The latest release has binary downloads: the wiki links the source repository only, never the release files.' : null,
       info.limited ? `Linked; GitHub's API was busy, so the commit came from git and the license is recorded as "${info.license}". Nothing to do unless that is wrong (then pass license).` : null,
-      descriptionsReplaced.length ? `This repository was already linked there; its description was replaced (was ${descriptionsReplaced.join('; ')}). If the old one said more, link again with a description that keeps both.` : null,
+      descriptionsReplaced.length ? `This repository was already linked on ${descriptionsReplaced.join(', ')}: your description was added after the one already there (edit the section to shorten them).` : null,
       info.archived ? `The repository is archived (read-only${info.lastCommit ? `, last activity ${info.lastCommit.slice(0, 10)}` : ''}): its successor, if any, may be worth linking too.` : null].filter(Boolean),
   });
 }

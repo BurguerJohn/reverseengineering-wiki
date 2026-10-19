@@ -70,7 +70,10 @@ export function search(s: Services, args: { query: string; types?: string[]; sub
     const listed = s.index.listPages(types, after === undefined ? offset : 0, Math.min(limit, 50), subject, { status: args.status, confidence: args.confidence, checkable: args.checkable === true || args.checkable === 'true', unchecked: args.unchecked === true || args.unchecked === 'true', unverified: args.unverified === true || args.unverified === 'true', after });
     const last = listed.hits.at(-1)?.title;
     const full = listed.hits.length === Math.min(limit, 50);
-    return { query: '*', types, total: listed.total, hits: listed.hits, next_cursor: last && full ? `after:${Buffer.from(last, 'utf8').toString('base64url')}` : undefined };
+    // With a filter, how many pages of these types there are at all: agents read a filtered total as "the filter did nothing".
+    const filtered = !!(args.status || args.confidence || args.checkable || args.unchecked || args.unverified);
+    const all = filtered ? s.index.listPages(types, 0, 0, subject).total : undefined;
+    return { query: '*', types, total: listed.total, of_all: all !== undefined ? `${listed.total} of ${all} pages of these types match the filters` : undefined, hits: listed.hits, next_cursor: last && full ? `after:${Buffer.from(last, 'utf8').toString('base64url')}` : undefined };
   }
   const { hits, total } = s.index.search({
     ...args,
