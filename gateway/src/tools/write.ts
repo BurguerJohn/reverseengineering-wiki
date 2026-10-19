@@ -407,7 +407,11 @@ export async function editFact(s: Services, caller: Caller, args: {
   // An exact size and a size range exclude each other: a patch that sets one drops the other (a batch failed on it).
   const sizePatch = args.data_patch && ('size' in args.data_patch && args.data_patch.size !== null ? { size_min: null, size_max: null }
     : ('size_min' in args.data_patch || 'size_max' in args.data_patch) && !('size' in args.data_patch) ? { size: null } : {});
-  const patched = args.data_patch ? Object.fromEntries(Object.entries({ ...(doc.data ?? {}), ...sizePatch, ...args.data_patch }).filter(([, v]) => v !== null)) : undefined;
+  // Objects merge one level down ({"values": {"0x2001": "X"}} adds one enum value; null removes one); arrays and scalars replace.
+  const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+  const merged = args.data_patch ? Object.fromEntries(Object.entries({ ...sizePatch, ...args.data_patch }).map(([k, v]) => [k,
+    isMap(v) && isMap((doc.data ?? {})[k]) ? Object.fromEntries(Object.entries({ ...((doc.data ?? {})[k] as Record<string, unknown>), ...v }).filter(([, x]) => x !== null)) : v])) : undefined;
+  const patched = merged ? Object.fromEntries(Object.entries({ ...(doc.data ?? {}), ...merged }).filter(([, v]) => v !== null)) : undefined;
   const nextData = args.data ?? patched;
   if (nextData !== undefined && JSON.stringify(nextData) !== JSON.stringify(doc.data)) { doc.data = nextData; changed.push('data'); }
   if (args.scope !== undefined) {

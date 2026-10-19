@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.9.8';
+export const VERSION = '0.9.9';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -567,7 +567,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       summary: z.string().min(5).describe('What you corrected and why (the evidence)'),
       claim: z.string().min(10).max(2000).nullish(),
       data: z.record(z.string(), z.unknown()).nullish().describe('The whole new data object (fields by kind: fact_data in /tools.json)'),
-      data_patch: z.record(z.string(), z.unknown()).nullish().describe('Instead of data: only the fields to change (null removes a field), e.g. {"alternatives": ["A1 B2 3C 4D"]}'),
+      data_patch: z.record(z.string(), z.unknown()).nullish().describe('Instead of data: only the fields to change (null removes a field). Objects merge one level down: {"values": {"0x2001": "NEW_NAME"}} adds one enum value, {"values": {"0x10": null}} removes one; arrays (fields, alternatives) are replaced whole.'),
       scope: z.object({ level: z.enum(['technique', 'platform', 'format', 'library', 'tool', 'software', 'build']), applies_to: z.string(), observed_in: z.array(z.string()).optional() }).optional(),
       add_evidence: z.array(evidenceItem).nullish(),
       replace_evidence: z.array(evidenceItem).nullish().describe('The whole new evidence list, to correct or drop a wrong entry (makes the fact "claimed" again)'),
