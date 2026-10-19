@@ -802,7 +802,7 @@ export class SearchIndex {
   }
 
   /** Every page of some types, by title (search with query "*"). */
-  listPages(types: string[], offset: number, limit: number, subject?: string, filters: { status?: string; confidence?: string; checkable?: boolean; unchecked?: boolean; unverified?: boolean; kind?: string; uncorrected?: boolean; after?: string } = {}): { hits: Array<{ title: string; type: string; summary: string; status: string | null; revision: number; confidence?: string; verifications?: number; last_verified?: string }>; total: number } {
+  listPages(types: string[], offset: number, limit: number, subject?: string, filters: { status?: string; confidence?: string; checkable?: boolean; unchecked?: boolean; unverified?: boolean; kind?: string; uncorrected?: boolean; before?: string; after?: string } = {}): { hits: Array<{ title: string; type: string; summary: string; status: string | null; revision: number; confidence?: string; verifications?: number; last_verified?: string; cited?: string }>; total: number } {
     const placeholders = types.map(() => '?').join(', ');
     // With a subject: its own pages (facts, notes, code, builds of it). status and confidence narrow the listing too
     // (the "*" listing ignored them, so "facts at low confidence" listed every fact).
@@ -812,16 +812,17 @@ export class SearchIndex {
       + `${filters.unchecked ? " and type = 'fact' and coalesce(json_array_length(json, '$.verifications'), 0) = 0" : ''}`
       + `${filters.unverified ? " and title in (select title from docs where body like '%Unverified:%')" : ''}`
       + `${filters.kind ? ' and title in (select title from facts where kind = ?)' : ''}`
+      + `${filters.before ? ' and title < ?' : ''}`
       + `${filters.uncorrected ? " and type = 'fact' and coalesce(json_array_length(json, '$.revisions'), 0) = 0" : ''}`;
-    const params = [...types, ...(subject ? [subject, subject] : []), ...(filters.status ? [filters.status] : []), ...(filters.confidence ? [filters.confidence] : []), ...(filters.kind ? [filters.kind] : [])];
+    const params = [...types, ...(subject ? [subject, subject] : []), ...(filters.status ? [filters.status] : []), ...(filters.confidence ? [filters.confidence] : []), ...(filters.kind ? [filters.kind] : []), ...(filters.before ? [filters.before] : [])];
     const total = (this.db.prepare(`select count(*) as n from pages where ${where}`).get(...params) as { n: number }).n;
     // After a title, not an offset: a sweep that raises facts out of a confidence filter shrinks the list as it pages.
     const hits = (filters.after !== undefined
-      ? this.db.prepare(`select title, type, summary, status, revision, (select confidence from facts where facts.title = pages.title) as confidence, case when type = 'fact' then json_array_length(json, '$.verifications') end as verifications, case when type = 'fact' then substr(json_extract(json, '$.verifications[#-1].date'), 1, 10) end as last_verified from pages where ${where} and title > ? order by title limit ?`).all(...params, filters.after, limit)
-      : this.db.prepare(`select title, type, summary, status, revision, (select confidence from facts where facts.title = pages.title) as confidence, case when type = 'fact' then json_array_length(json, '$.verifications') end as verifications, case when type = 'fact' then substr(json_extract(json, '$.verifications[#-1].date'), 1, 10) end as last_verified from pages where ${where} order by title limit ? offset ?`).all(...params, limit, offset)) as any[];
+      ? this.db.prepare(`select title, type, summary, status, revision, (select confidence from facts where facts.title = pages.title) as confidence, case when type = 'fact' then json_array_length(json, '$.verifications') end as verifications, case when type = 'fact' then substr(json_extract(json, '$.verifications[#-1].date'), 1, 10) end as last_verified, case when type = 'fact' then (select json_extract(e.value, '$.repo') || coalesce(' @ ' || substr(json_extract(e.value, '$.commit'), 1, 12), '') || coalesce(' ' || json_extract(e.value, '$.path'), '') from json_each(json, '$.evidence') e where json_extract(e.value, '$.repo') is not null limit 1) end as cited from pages where ${where} and title > ? order by title limit ?`).all(...params, filters.after, limit)
+      : this.db.prepare(`select title, type, summary, status, revision, (select confidence from facts where facts.title = pages.title) as confidence, case when type = 'fact' then json_array_length(json, '$.verifications') end as verifications, case when type = 'fact' then substr(json_extract(json, '$.verifications[#-1].date'), 1, 10) end as last_verified, case when type = 'fact' then (select json_extract(e.value, '$.repo') || coalesce(' @ ' || substr(json_extract(e.value, '$.commit'), 1, 12), '') || coalesce(' ' || json_extract(e.value, '$.path'), '') from json_each(json, '$.evidence') e where json_extract(e.value, '$.repo') is not null limit 1) end as cited from pages where ${where} order by title limit ? offset ?`).all(...params, limit, offset)) as any[];
     // Facts carry their confidence and checks, so a sweep sees what is already checked without reading each fact.
     return {
-      hits: hits.map((h) => ({ ...h, summary: String(h.summary ?? '').slice(0, 200), confidence: h.confidence || undefined, verifications: h.type === 'fact' ? h.verifications ?? 0 : undefined, last_verified: h.last_verified ?? undefined })),
+      hits: hits.map((h) => ({ ...h, summary: String(h.summary ?? '').slice(0, 200), confidence: h.confidence || undefined, verifications: h.type === 'fact' ? h.verifications ?? 0 : undefined, last_verified: h.last_verified ?? undefined, cited: h.cited ?? undefined })),
       total,
     };
   }
