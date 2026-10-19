@@ -420,8 +420,9 @@ export async function addFact(s: Services, caller: Caller, input: unknown) {
     citations.push('No byte order: give data.endianness ("little", "big", or "native" for in-memory structs of one platform) so readers know how to decode the multi-byte fields.');
   }
   // New behavior facts were wrong a third of the time, almost always an option, version or second code path left out.
-  if (fact.kind === 'behavior' && fact.confidence === 'high') {
-    citations.push('Behavior facts were found wrong a third of the time, nearly always by leaving out an option, a version or a second code path. Keep confidence high only if you read the whole function, its callers and the option defaults; say in the claim when it applies (which option, version, platform).');
+  // Only facts read from source: one observed in a debugger has no function to read.
+  if (fact.kind === 'behavior' && fact.evidence.some((e) => e.repo)) {
+    citations.push('New behavior facts were found wrong a third to two thirds of the time, nearly always by leaving out a check, an option, a build or a second code path (never the core value). Before publishing: read the whole function, its callers and the option defaults; list every check it makes; say in the claim when it applies (which option, version, platform) and what you did not read. Keep confidence high only if you did all that.');
   }
   // Half of sampled identification facts described the recognizer as checking less or more than it does, or an indicator other formats share.
   if (fact.kind === 'identification') {
