@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.90';
+export const VERSION = '0.8.91';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -348,6 +348,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       confidence: z.enum(['low', 'medium', 'high']).optional().describe('Only facts at this confidence (low and medium ones are worth checking)'),
       unchecked: BOOL.optional().describe('With query "*": only facts nobody has verified yet'),
       title_from: z.string().optional().describe('With query "*": start the listing at this title ("Fact:L"); then page with next_cursor'),
+      kind: z.enum(FACT_KINDS).optional().describe('With query "*" and types ["fact"]: only facts of this kind (struct, enum, magic...)'),
       unverified: BOOL.optional().describe('With query "*": only pages whose text has "Unverified:" sentences (read lists them)'),
       checkable: BOOL.optional().describe('With query "*": only facts whose evidence names a repository (checkable by reading it)'),
       limit: z.number().int().min(1).max(50).optional(),

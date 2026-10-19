@@ -187,7 +187,7 @@ export const FACT_DATA: Record<FactKind, { required: string[]; one_of?: string[]
   enum: { required: ['name', 'values'], optional: ['underlying_type'], example: { name: 'WeaponClass', values: { 0: 'AssaultRifle', 1: 'Shotgun' } } },
   typedef: { required: ['name', 'type'], optional: ['abi'], example: { name: 'FT_Long', type: 'int32_t', abi: 'win64' } },
   magic: { required: ['bytes', 'offset', 'meaning'], optional: ['mask', 'relative_to', 'alternatives'], example: { bytes: '52 41 42 00', offset: '0x0', meaning: 'RAB archive header' } },
-  string: { required: ['value', 'meaning'], optional: ['encoding', 'rva', 'address'], example: { value: 'EDF5_SAVE', meaning: 'Save file tag', encoding: 'ascii' } },
+  string: { required: ['value', 'meaning'], optional: ['encoding', 'rva', 'address', 'offset', 'relative_to'], example: { value: 'EDF5_SAVE', meaning: 'Save file tag', encoding: 'ascii' } },
   signature: { required: ['pattern', 'matches'], optional: ['name', 'offset', 'multiple', 'target'], example: { pattern: '48 8B 05 ?? ?? ?? ?? 48 85 C0', matches: 'load of g_GameState' } },
   identification: { required: ['method', 'indicator'], optional: ['table'], example: { method: 'string', indicator: 'CRI Middleware' } },
   behavior: { required: [], optional: ['trigger', 'effect', 'condition', 'rva', 'rva_end', 'address', 'signature', 'function', 'setting'], example: { trigger: 'the Witch is shot by another survivor', effect: 'she switches target after a 5 s timer', function: 'Witch::OnTakeDamage', rva: '0x2A41C0', rva_end: '0x2A4230', setting: { name: 'z_witch_retarget_time', default: '5' } } },

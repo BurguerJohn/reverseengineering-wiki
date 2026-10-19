@@ -800,7 +800,7 @@ export class SearchIndex {
   }
 
   /** Every page of some types, by title (search with query "*"). */
-  listPages(types: string[], offset: number, limit: number, subject?: string, filters: { status?: string; confidence?: string; checkable?: boolean; unchecked?: boolean; unverified?: boolean; after?: string } = {}): { hits: Array<{ title: string; type: string; summary: string; status: string | null; revision: number; confidence?: string; verifications?: number; last_verified?: string }>; total: number } {
+  listPages(types: string[], offset: number, limit: number, subject?: string, filters: { status?: string; confidence?: string; checkable?: boolean; unchecked?: boolean; unverified?: boolean; kind?: string; after?: string } = {}): { hits: Array<{ title: string; type: string; summary: string; status: string | null; revision: number; confidence?: string; verifications?: number; last_verified?: string }>; total: number } {
     const placeholders = types.map(() => '?').join(', ');
     // With a subject: its own pages (facts, notes, code, builds of it). status and confidence narrow the listing too
     // (the "*" listing ignored them, so "facts at low confidence" listed every fact).
@@ -808,8 +808,9 @@ export class SearchIndex {
       + `${filters.status ? ' and status = ?' : ''}${filters.confidence ? ' and title in (select title from facts where confidence = ?)' : ''}`
       + `${filters.checkable ? ' and title in (select title from facts where repo_evidence = 1)' : ''}`
       + `${filters.unchecked ? " and type = 'fact' and coalesce(json_array_length(json, '$.verifications'), 0) = 0" : ''}`
-      + `${filters.unverified ? " and title in (select title from docs where body like '%Unverified:%')" : ''}`;
-    const params = [...types, ...(subject ? [subject, subject] : []), ...(filters.status ? [filters.status] : []), ...(filters.confidence ? [filters.confidence] : [])];
+      + `${filters.unverified ? " and title in (select title from docs where body like '%Unverified:%')" : ''}`
+      + `${filters.kind ? ' and title in (select title from facts where kind = ?)' : ''}`;
+    const params = [...types, ...(subject ? [subject, subject] : []), ...(filters.status ? [filters.status] : []), ...(filters.confidence ? [filters.confidence] : []), ...(filters.kind ? [filters.kind] : [])];
     const total = (this.db.prepare(`select count(*) as n from pages where ${where}`).get(...params) as { n: number }).n;
     // After a title, not an offset: a sweep that raises facts out of a confidence filter shrinks the list as it pages.
     const hits = (filters.after !== undefined
