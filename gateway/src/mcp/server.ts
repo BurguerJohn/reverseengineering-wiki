@@ -30,7 +30,7 @@ import { SERVER_INSTRUCTIONS, READ_ONLY_NOTE, oauthNote } from './instructions.t
 import type { Operator } from '../db/accounts.ts';
 import { createReview, reviewUrl } from '../http/review.ts';
 
-export const VERSION = '0.8.99';
+export const VERSION = '0.9.0';
 
 type Result = { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -57,7 +57,7 @@ type Extra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 // Clients whose schema lacks a newer boolean parameter send it as the string "true" or "false": the schemas accept both
 // (BOOL) and the handlers see a real boolean.
 const BOOL = z.union([z.boolean(), z.enum(['true', 'false'])]);
-const BOOL_KEYS = new Set(['dry_run', 'quiet', 'force', 'unverified_only', 'enabled', 'create_if_missing', 'confirm_new', 'checkable', 'unchecked', 'unverified']);
+const BOOL_KEYS = new Set(['dry_run', 'quiet', 'force', 'unverified_only', 'enabled', 'create_if_missing', 'confirm_new', 'checkable', 'unchecked', 'unverified', 'uncorrected']);
 function booleans<A>(args: A): A {
   if (!args || typeof args !== 'object') return args;
   return Object.fromEntries(Object.entries(args as Record<string, unknown>).map(([k, v]) => [k, BOOL_KEYS.has(k) && (v === 'true' || v === 'false') ? v === 'true' : v])) as A;
@@ -349,6 +349,7 @@ export function createMcpServer(s: Services, caller: Caller, opts: { includeWrit
       unchecked: BOOL.optional().describe('With query "*": only facts with no verification at all (a verify by any account, the author included, takes a fact off this list; its status stays claimed until another operator confirms it)'),
       title_from: z.string().optional().describe('With query "*": start the listing at this title ("Fact:L"); then page with next_cursor'),
       kind: z.enum(FACT_KINDS).optional().describe('With query "*" and types ["fact"]: only facts of this kind (struct, enum, magic...)'),
+      uncorrected: BOOL.optional().describe('With query "*": only facts never corrected with edit_fact (a correction clears the checks of a fact, so corrected facts come back as unchecked)'),
       unverified: BOOL.optional().describe('With query "*": only pages whose text has "Unverified:" sentences (read lists them)'),
       checkable: BOOL.optional().describe('With query "*": only facts whose evidence names a repository (checkable by reading it)'),
       limit: z.number().int().min(1).max(50).optional(),

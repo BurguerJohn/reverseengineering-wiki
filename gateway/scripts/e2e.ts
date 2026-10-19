@@ -238,6 +238,12 @@ ok('create_page (with infobox, aliases)');
   const redLink = await call(a, 'create_page', { ...draft, body: `${draft.body}\n\nSee [[Fact:E2E Nowhere ${run}/magic/Header]].`, dry_run: true });
   assert.ok(redLink.broken_links?.[0]?.startsWith(`Fact:E2E Nowhere ${run}/magic/Header`), JSON.stringify(redLink).slice(0, 400));
   // In a batch too: each operation's answer keeps its checks.
+  // A repository linked on a page the same dry-run batch creates (two reports said the dry run refused it).
+  const linkInBatch = await call(a, 'batch', { dry_run: true, operations: [
+    { tool: 'create_page', arguments: { ...draft, title: `E2E Linked ${run}` } },
+    { tool: 'link_repo', arguments: { url: 'https://github.com/madler/zlib', subjects: [`Software:E2E Linked ${run}`], description: 'Fictional link for the test.', tested_on: 'source read, not run', license: 'Zlib' } },
+  ] });
+  assert.ok(!linkInBatch.error && !JSON.stringify(linkInBatch).includes('does not exist'), JSON.stringify(linkInBatch).slice(0, 600));
   const redInBatch = await call(a, 'batch', { dry_run: true, operations: [{ tool: 'create_page', arguments: { ...draft, body: `${draft.body}\n\nSee [[Fact:E2E Nowhere ${run}/magic/Header]].` } }] });
   assert.ok(JSON.stringify(redInBatch).includes('broken_links'), JSON.stringify(redInBatch).slice(0, 400));
   const retro = await call(a, 'create_page', draft);
